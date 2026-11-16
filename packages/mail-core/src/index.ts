@@ -1,3 +1,6 @@
 export * from './types'
 export { parseUnsubscribe } from './unsubscribe'
-export { groupBySender } from './senders'
+export { groupBySender, isAutomated, isBulk } from './senders'
+export { categorise } from './rules'
+export { analyseSenders, type CategorisedSender } from './analyse'
+export { parseHeaderBlock, toMessageHeader, SCAN_HEADER_FIELDS, type RawFetchedMessage } from './headers'
