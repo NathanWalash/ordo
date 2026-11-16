@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-tooling:
+        patterns:
+          [
+            'eslint*',
+            '@eslint/*',
+            'typescript-eslint',
+            'prettier',
+            'vitest',
+            '@playwright/*',
+            'typescript',
+            '@types/*',
+          ]
+      react:
+        patterns: ['react', 'react-dom', '@types/react*']
+      build:
+        patterns: ['vite', '@vitejs/*', 'electron-vite', 'electron-builder', 'tailwindcss', '@tailwindcss/*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
