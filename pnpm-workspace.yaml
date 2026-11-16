@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+nodeLinker: hoisted
+# Electron downloads its binary lazily on first run, so no install scripts are needed.
+allowBuilds:
+  electron: false
+  electron-winstaller: false
