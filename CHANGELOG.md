@@ -8,6 +8,10 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Connect an iCloud account with an app-specific password. It's checked before saving and stored encrypted with the system keychain (Electron `safeStorage`).
+- Scan your inbox: headers only, cached in a local SQLite database so later scans only fetch new mail. You can stop a scan and resume it.
+- Unclutter shows your real senders, sorted by rules into Promotions, Newsletters, Notifications, Receipts, People and Other. Anyone you've written to counts as a person and can't be selected for clean-up.
+- IMAP integration tests and an end-to-end connect-and-scan test against a local GreenMail server, in CI.
 - App shell with a native-feeling window: frosted sidebar on macOS, Mica on Windows 11.
 - Home screen with links to Mail, Unclutter and Finance.
 - Unclutter preview using sample data: inbox makeup, category filters and a sender list where people can never be selected.

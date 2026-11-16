@@ -19,8 +19,8 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** The app shell and an Unclutter preview with sample data work today.
-> Connecting a real iCloud account is next. See the [roadmap](#roadmap).
+> **Early days.** You can connect iCloud, scan your inbox and see who's filling it.
+> Unsubscribing and clearing mail is next. See the [roadmap](#roadmap).
 
 ## Why Ordo
 
@@ -41,7 +41,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Connect iCloud (app-specific password in the Keychain)                 | Next    |
 | Scan inbox headers and group by sender                                 | Planned |
 | Sort senders with rules, then a local or cloud model                   | Planned |
-| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Planned |
+| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Next    |
 | Full mail client: read, search, compose                                | Planned |
 | Finance module                                                         | Later   |
 
@@ -62,6 +62,8 @@ pnpm install
 pnpm dev          # run the app with hot reload
 pnpm check        # format check, lint, typecheck, unit tests
 pnpm test:e2e     # build and run Playwright tests against the real app
+pnpm imap:start   # local IMAP test server (Docker), then:
+IMAP_TEST_PORT=3143 pnpm test:integration
 pnpm package      # build an installer for your OS into apps/desktop/release
 ```
 
