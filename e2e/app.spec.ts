@@ -1,11 +1,12 @@
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
+import { launchApp } from './launch'
 
 let app: ElectronApplication
 let page: Page
 
 test.beforeAll(async () => {
   // Launches the built app (run `pnpm build` first; `pnpm test:e2e` does this).
-  app = await electron.launch({ args: ['apps/desktop'] })
+  app = await launchApp()
   page = await app.firstWindow()
 })
 
