@@ -1,0 +1,32 @@
+appId: dev.nathanwalsh.ordo
+productName: Ordo
+copyright: Copyright © 2026 Nathan Walsh
+directories:
+  output: release/${version}
+  buildResources: build
+files:
+  - out/**
+  - package.json
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+publish:
+  provider: github
+  owner: NathanWalash
+  repo: ordo
+  releaseType: draft
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # Unsigned until there's an Apple Developer account.
+  identity: null
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target: [AppImage]
+  category: Office
