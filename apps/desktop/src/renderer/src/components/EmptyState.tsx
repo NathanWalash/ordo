@@ -10,15 +10,3 @@ export function EmptyState(props: { icon: ReactNode; title: string; body: string
     </div>
   )
 }
-
-export function PrimaryButton(props: { children: ReactNode; onClick?: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className="no-drag h-7 rounded-md bg-accent px-3 text-[13px] font-medium text-white hover:brightness-110 active:brightness-95"
-    >
-      {props.children}
-    </button>
-  )
-}
