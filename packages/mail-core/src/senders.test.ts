@@ -40,4 +40,20 @@ describe('groupBySender', () => {
       unsubscribe: { kind: 'one-click' },
     })
   })
+
+  it('flags bulk and automated senders', () => {
+    const [list] = groupBySender([h({ from: { address: 'news@x.example' }, listId: '<news.x.example>' })])
+    const [bot] = groupBySender([h({ from: { address: 'no-reply@bank.example' } })])
+    const [person] = groupBySender([h({ from: { address: 'sam@icloud.com' } })])
+    expect(list).toMatchObject({ bulk: true, automated: false })
+    expect(bot).toMatchObject({ bulk: false, automated: true })
+    expect(person).toMatchObject({ bulk: false, automated: false })
+  })
+
+  it('treats Precedence: bulk as bulk and Auto-Submitted: no as human', () => {
+    const [s] = groupBySender([
+      h({ from: { address: 'a@x.example' }, precedence: 'bulk', autoSubmitted: 'no' }),
+    ])
+    expect(s).toMatchObject({ bulk: true, automated: false })
+  })
 })

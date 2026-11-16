@@ -1,6 +1,15 @@
 export type Category =
   'promotions' | 'newsletters' | 'notifications' | 'receipts' | 'people' | 'uncategorised'
 
+export const CATEGORIES: readonly Category[] = [
+  'promotions',
+  'newsletters',
+  'notifications',
+  'receipts',
+  'people',
+  'uncategorised',
+]
+
 /** Header-only view of a message, as fetched during a scan. */
 export interface MessageHeader {
   uid: number
@@ -33,12 +42,42 @@ export interface SenderSummary {
   lastSeen: Date
   sampleSubjects: string[]
   unsubscribe: UnsubscribeMethod
+  /** Sent through a mailing list (List-Id, List-Unsubscribe or Precedence: bulk/list). */
+  bulk: boolean
+  /** Machine-sent: an Auto-Submitted header or a no-reply style address. */
+  automated: boolean
 }
+
+export interface MailboxStatus {
+  messages: number
+  uidNext: number
+  /** Changes when the server renumbers the mailbox; cached UIDs are then invalid. */
+  uidValidity: string
+}
+
+export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk'
 
 /** Anything that can serve mail: iCloud IMAP first, Gmail later. */
 export interface MailProvider {
-  listMailboxes(): Promise<{ path: string; specialUse?: string }[]>
-  fetchHeaders(mailbox: string, sinceUid?: number): AsyncIterable<MessageHeader>
+  connect(): Promise<void>
+  status(mailbox: string): Promise<MailboxStatus>
+  /** Headers for every message with a UID of at least `fromUid`, oldest first. */
+  fetchHeaders(mailbox: string, fromUid: number): AsyncIterable<MessageHeader>
+  findMailbox(use: SpecialMailbox): Promise<string | null>
+  /** Addresses this account has sent mail to, from the most recent `limit` messages. */
+  fetchRecipients(mailbox: string, limit: number): Promise<string[]>
   moveToTrash(mailbox: string, uids: number[]): Promise<void>
   close(): Promise<void>
+}
+
+export interface ScanProgress {
+  phase: 'inbox' | 'sent' | 'done'
+  checked: number
+  total: number
+}
+
+export interface ScanResult {
+  added: number
+  total: number
+  stopped: boolean
 }
