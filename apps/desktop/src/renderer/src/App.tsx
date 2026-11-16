@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
+import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancePage } from './pages/FinancePage'
 import { routeFromHash, TITLES, type Route } from './routes'
 
@@ -37,6 +38,7 @@ export function App() {
         <div className="min-h-0 flex-1 overflow-auto">
           {route === 'home' && <HomePage onNavigate={setRoute} />}
           {route === 'mail/inbox' && <InboxPage onNavigate={setRoute} />}
+          {route === 'mail/unclutter' && <UnclutterPage />}
           {route === 'finance' && <FinancePage />}
         </div>
       </main>
