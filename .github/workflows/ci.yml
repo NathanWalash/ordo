@@ -30,6 +30,13 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: IMAP integration tests (GreenMail)
+        run: |
+          pnpm imap:start
+          node scripts/wait-for-port.mjs 3143
+          pnpm test:integration
+        env:
+          IMAP_TEST_PORT: '3143'
 
   e2e:
     name: Build and end-to-end (${{ matrix.os }})
@@ -49,9 +56,14 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: End-to-end tests (Linux, virtual display)
+      - name: End-to-end tests (Linux, virtual display, with a local IMAP server)
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm test:e2e
+        run: |
+          pnpm imap:start
+          node scripts/wait-for-port.mjs 3143
+          xvfb-run -a pnpm test:e2e
+        env:
+          IMAP_TEST_PORT: '3143'
       - name: End-to-end tests
         if: runner.os != 'Linux'
         run: pnpm test:e2e
