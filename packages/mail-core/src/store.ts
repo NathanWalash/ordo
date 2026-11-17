@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { MessageHeader } from './types'
+import type { AiCategoryCache, AiCategoryRecord } from './ai-sort'
+import type { Category, MessageHeader } from './types'
 
 export interface MailboxState {
   uidValidity: string
@@ -44,13 +45,22 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_from ON messages (from_address);
 CREATE TABLE IF NOT EXISTS replied_to (address TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS ai_categories (
+  address TEXT NOT NULL,
+  model TEXT NOT NULL,
+  category TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  fingerprint TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (address, model)
+);
 `
 
 /**
  * Local cache of scanned message headers (never bodies), so re-scans only fetch
  * new mail. Backed by Node's built-in SQLite.
  */
-export class MailStore {
+export class MailStore implements AiCategoryCache {
   private db: DatabaseSync
 
   constructor(path: string) {
@@ -148,7 +158,35 @@ export class MailStore {
 
   /** Delete every cached header and state, e.g. when the account is disconnected. */
   clear(): void {
-    this.db.exec('DELETE FROM messages; DELETE FROM mailbox_state; DELETE FROM replied_to;')
+    this.db.exec(
+      'DELETE FROM messages; DELETE FROM mailbox_state; DELETE FROM replied_to; DELETE FROM ai_categories;',
+    )
+  }
+
+  /** Cached model answers for these senders, from `aiCategorise`. */
+  getAiCategories(model: string, addresses: string[]): Map<string, AiCategoryRecord> {
+    const get = this.db.prepare(
+      'SELECT category, confidence, fingerprint FROM ai_categories WHERE model = ? AND address = ?',
+    )
+    const out = new Map<string, AiCategoryRecord>()
+    for (const address of addresses) {
+      const row = get.get(model, address) as
+        { category: Category; confidence: number; fingerprint: string } | undefined
+      if (row) out.set(address, { ...row })
+    }
+    return out
+  }
+
+  saveAiCategories(model: string, records: Map<string, AiCategoryRecord>): void {
+    const insert = this.db.prepare(
+      'INSERT OR REPLACE INTO ai_categories (address, model, category, confidence, fingerprint, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    const now = Date.now()
+    this.transaction(() => {
+      for (const [address, r] of records)
+        insert.run(address, model, r.category, r.confidence, r.fingerprint, now)
+    })
   }
 
   close(): void {

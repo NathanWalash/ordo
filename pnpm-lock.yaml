@@ -96,9 +96,15 @@ importers:
 
   packages/mail-core:
     dependencies:
+      '@ordo/ai':
+        specifier: workspace:*
+        version: link:../ai
       imapflow:
         specifier: ^2.12.1
         version: 2.12.1
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/shared:
     dependencies:

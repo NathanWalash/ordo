@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "imapflow": "^2.12.1"
+    "@ordo/ai": "workspace:*",
+    "imapflow": "^2.12.1",
+    "zod": "^4.6.7"
   }
 }
