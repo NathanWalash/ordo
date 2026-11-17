@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 
@@ -89,6 +89,9 @@ ipcMain.handle(IPC.sendersList, () => mail.senders())
 app.on('before-quit', () => mail.closeMail())
 
 app.whenReady().then(() => {
+  // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
+  if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
+    safeStorage.setUsePlainTextEncryption(true)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
