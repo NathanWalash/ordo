@@ -4,6 +4,7 @@ import { analyseSenders, type CategorisedSender } from '@ordo/mail-core'
 import type { AccountStatus, ScanProgress } from '@ordo/shared'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
+import { ReviewSheet } from '../components/ReviewSheet'
 import { SenderTable } from '../components/SenderTable'
 import { SAMPLE_CATEGORY, sampleHeaders } from './sampleData'
 
@@ -52,6 +53,9 @@ function LiveUnclutter({
   const [senders, setSenders] = useState<CategorisedSender[] | null>(null)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<CategorisedSender[] | null>(null)
+  // Bumped after a clean-up so the table starts with nothing selected.
+  const [generation, setGeneration] = useState(0)
 
   const load = useCallback(async () => setSenders(await window.ordo.senders.list()), [])
   useEffect(() => {
@@ -77,10 +81,22 @@ function LiveUnclutter({
     }
   }
 
-  if (progress) return <Scanning progress={progress} />
-  if (senders === null) return null
-  if (senders.length === 0)
-    return (
+  const sheet = reviewing && (
+    <ReviewSheet
+      senders={reviewing}
+      onClose={() => setReviewing(null)}
+      onChanged={() => {
+        setGeneration((g) => g + 1)
+        void load()
+      }}
+    />
+  )
+
+  let content
+  if (progress) content = <Scanning progress={progress} />
+  else if (senders === null) content = null
+  else if (senders.length === 0)
+    content = (
       <EmptyState
         icon={<ScanSearch size={40} strokeWidth={1.5} />}
         title="Scan your inbox"
@@ -95,20 +111,29 @@ function LiveUnclutter({
         }
       />
     )
+  else
+    content = (
+      <SenderTable
+        key={generation}
+        senders={senders}
+        onReview={setReviewing}
+        banner={error && <div className="mb-3 rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
+        actions={
+          <Button
+            icon={<RefreshCw size={13} />}
+            onClick={() => void scan()}
+            title={lastScanned(account.lastScan)}
+          >
+            Scan again
+          </Button>
+        }
+      />
+    )
   return (
-    <SenderTable
-      senders={senders}
-      banner={error && <div className="mb-3 rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
-      actions={
-        <Button
-          icon={<RefreshCw size={13} />}
-          onClick={() => void scan()}
-          title={lastScanned(account.lastScan)}
-        >
-          Scan again
-        </Button>
-      }
-    />
+    <>
+      {content}
+      {sheet}
+    </>
   )
 }
 
