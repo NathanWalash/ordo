@@ -6,3 +6,6 @@ nodeLinker: hoisted
 allowBuilds:
   electron: false
   electron-winstaller: false
+# tldts 7.4.19 would otherwise pull a days-old tldts-core; keep them in step.
+overrides:
+  tldts-core: 7.4.19

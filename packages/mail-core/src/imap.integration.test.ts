@@ -11,7 +11,7 @@ import { ImapMailProvider, MailAuthError, testImapLogin } from './imap'
 import { scanMailbox } from './scan'
 import { createMailtoSender } from './smtp'
 import { MailStore } from './store'
-import { parseMailto } from './unsubscribe'
+import { planMailto } from './unsubscribe'
 
 const port = Number(process.env['IMAP_TEST_PORT'])
 const cfg = {
@@ -150,7 +150,11 @@ describe.skipIf(!port)('IMAP integration (GreenMail)', () => {
       cfg.user,
     )
     try {
-      await sender.send(parseMailto(`mailto:${cfg.user}?subject=unsubscribe%20${run}&body=list%3Dweekly`)!)
+      const plan = planMailto(`mailto:${cfg.user}?subject=unsubscribe%20${run}&body=list%3Dweekly`, {
+        domain: 'ordo.test',
+      })!
+      expect(plan.offDomain).toBe(false)
+      await sender.send(plan.message)
     } finally {
       sender.close()
     }

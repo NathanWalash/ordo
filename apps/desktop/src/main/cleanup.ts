@@ -85,7 +85,7 @@ async function run(sender: WebContents, input: unknown): Promise<CleanupOutcome>
                   account.email,
                 )).send(msg),
             },
-            { insecureLinkConfirmed: s.insecureLinkConfirmed },
+            { insecureLinkConfirmed: s.insecureLinkConfirmed, mailto: s.mailto ?? undefined },
           ),
       })
       return { ok: true, cleanup: summary(record), rejected: plan.rejected }

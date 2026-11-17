@@ -1,5 +1,5 @@
 import type { UnsubscribeMethod } from './types'
-import { isSecureUrl, parseMailto, type MailtoMessage } from './unsubscribe'
+import { isSecureUrl, type MailtoMessage } from './unsubscribe'
 import { hostRefusal } from './url-guard'
 
 export type UnsubscribeStatus = 'done' | 'opened' | 'failed' | 'skipped'
@@ -44,6 +44,11 @@ export interface UnsubscribeDeps {
 export interface UnsubscribeRequestOptions {
   /** The user has seen this plain http link in the review sheet and chose to open it. */
   insecureLinkConfirmed?: boolean
+  /**
+   * For mailto: the exact message the review sheet showed, from planMailto (and,
+   * for another domain, ticked by the user). Without it nothing is sent.
+   */
+  mailto?: MailtoMessage
 }
 
 export const ONE_CLICK_BODY = 'List-Unsubscribe=One-Click'
@@ -65,7 +70,7 @@ export async function executeUnsubscribe(
       case 'link':
         return await openLink(method.url, deps, opts)
       case 'mailto':
-        return await mailto(method.url, deps)
+        return await mailto(opts.mailto, deps)
       default:
         return { status: 'skipped', method: 'none', detail: 'No unsubscribe option' }
     }
@@ -136,11 +141,15 @@ async function openLink(
   return { status: 'opened', method: 'link', detail: 'Opened in your browser. Finish there.' }
 }
 
-async function mailto(url: string, deps: UnsubscribeDeps): Promise<UnsubscribeOutcome> {
-  const msg = parseMailto(url)
-  if (!msg) return { status: 'failed', method: 'mailto', detail: 'The unsubscribe address isn’t valid' }
+async function mailto(msg: MailtoMessage | undefined, deps: UnsubscribeDeps): Promise<UnsubscribeOutcome> {
+  if (!msg)
+    return {
+      status: 'failed',
+      method: 'mailto',
+      detail: 'The unsubscribe email wasn’t reviewed, so it wasn’t sent',
+    }
   await deps.sendMail(msg)
-  return { status: 'done', method: 'mailto', detail: `Sent an unsubscribe email to ${msg.to.join(', ')}` }
+  return { status: 'done', method: 'mailto', detail: `Sent “${msg.subject}” to ${msg.to}` }
 }
 
 /** Error code the guarded fetch uses when a name resolves to a private or local address. */

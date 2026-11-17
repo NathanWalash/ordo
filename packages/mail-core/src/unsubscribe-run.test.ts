@@ -142,18 +142,20 @@ describe('executeUnsubscribe: link and mailto', () => {
     expect(d.openExternal).not.toHaveBeenCalled()
   })
 
-  it('sends a mailto unsubscribe with its subject and body', async () => {
+  const mailto = { kind: 'mailto', address: 'leave@x.example', url: 'mailto:leave@x.example' } as const
+  const message = { to: 'leave@x.example', subject: 'Remove me', body: 'unsubscribe' }
+
+  it('sends exactly the reviewed mailto message', async () => {
     const d = deps()
-    const out = await executeUnsubscribe(
-      { kind: 'mailto', address: 'leave@x.example', url: 'mailto:leave@x.example?subject=Remove%20me' },
-      d,
-    )
-    expect(out.status).toBe('done')
-    expect(d.sendMail).toHaveBeenCalledWith({
-      to: ['leave@x.example'],
-      subject: 'Remove me',
-      body: 'unsubscribe',
-    })
+    const out = await executeUnsubscribe(mailto, d, { mailto: message })
+    expect(out).toMatchObject({ status: 'done', detail: 'Sent “Remove me” to leave@x.example' })
+    expect(d.sendMail).toHaveBeenCalledWith(message)
+  })
+
+  it('sends nothing without a reviewed message', async () => {
+    const d = deps()
+    expect((await executeUnsubscribe(mailto, d)).status).toBe('failed')
+    expect(d.sendMail).not.toHaveBeenCalled()
   })
 
   it('turns a sending error into a failure', async () => {
@@ -162,10 +164,7 @@ describe('executeUnsubscribe: link and mailto', () => {
         throw new Error('535 Authentication failed')
       },
     })
-    const out = await executeUnsubscribe(
-      { kind: 'mailto', address: 'leave@x.example', url: 'mailto:leave@x.example' },
-      d,
-    )
+    const out = await executeUnsubscribe(mailto, d, { mailto: message })
     expect(out).toEqual({ status: 'failed', method: 'mailto', detail: '535 Authentication failed' })
   })
 

@@ -73,6 +73,7 @@ const planned = (address: string, o: Partial<PlannedSender> = {}): PlannedSender
   count: 0,
   unsubscribe: { kind: 'one-click', url: 'https://x.example/u' },
   insecureLinkConfirmed: false,
+  mailto: null,
   trash: true,
   ...o,
 })

@@ -11,6 +11,8 @@ export const CleanupRequestSchema = z.object({
         trash: z.boolean(),
         /** For a plain http unsubscribe link: the URL the sheet showed the user. */
         confirmedUrl: z.string().max(4096).optional(),
+        /** For an unsubscribe email to another domain: the recipient the sheet showed, ticked by the user. */
+        confirmedRecipient: z.string().max(320).optional(),
       }),
     )
     .min(1)

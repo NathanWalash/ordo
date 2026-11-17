@@ -1,5 +1,5 @@
 import { createTransport } from 'nodemailer'
-import type { MailtoMessage } from './unsubscribe'
+import { hasControlChars, MAILTO_PER_CLEANUP_MAX, type MailtoMessage } from './unsubscribe'
 
 export interface SmtpConfig {
   host: string
@@ -16,10 +16,14 @@ export interface SmtpConfig {
 export const ICLOUD_SMTP = { host: 'smtp.mail.me.com', port: 587, secure: false, requireTLS: true } as const
 
 /**
- * A sender for mailto: unsubscribes. One SMTP connection is reused for every
- * message until close(). Only the parsed to/subject/body are used.
+ * A sender for mailto: unsubscribes, checked by planMailto first. One SMTP
+ * connection is reused until close(). Each message has one recipient, a plain
+ * text body, no attachments and no headers beyond From, To, Subject, Date and
+ * Message-ID (plus the MIME headers a text body needs). Refuses to send more
+ * than `limit` messages.
  */
-export function createMailtoSender(cfg: SmtpConfig, from: string) {
+export function createMailtoSender(cfg: SmtpConfig, from: string, limit = MAILTO_PER_CLEANUP_MAX) {
+  let sent = 0
   const transport = createTransport({
     host: cfg.host,
     port: cfg.port,
@@ -34,7 +38,18 @@ export function createMailtoSender(cfg: SmtpConfig, from: string) {
   })
   return {
     async send(msg: MailtoMessage): Promise<void> {
-      await transport.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.body })
+      if (sent >= limit) throw new Error(`Ordo sends at most ${limit} unsubscribe emails at a time`)
+      if (hasControlChars(msg.to) || hasControlChars(msg.subject) || msg.to.includes(','))
+        throw new Error('Refused an unsafe unsubscribe email')
+      sent++
+      await transport.sendMail({
+        from,
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.body,
+        disableFileAccess: true,
+        disableUrlAccess: true,
+      })
     },
     close(): void {
       transport.close()
