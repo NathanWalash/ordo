@@ -48,7 +48,7 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
         />
       </Section>
 
-      <div className="no-drag mt-auto">
+      <div className="no-drag mt-auto flex flex-col">
         <Item
           icon={<Settings size={15} />}
           label="Settings"

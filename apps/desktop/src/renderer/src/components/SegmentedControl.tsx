@@ -45,7 +45,9 @@ export function SegmentedControl<T extends string>({ label, options, value, onCh
             onClick={() => onChange(o.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={`flex h-6 min-w-[76px] items-center justify-center gap-1.5 rounded-md px-3 text-[12px] font-medium ${
-              on ? 'bg-field text-ink shadow-[0_1px_2px_rgb(0_0_0/0.15)]' : 'text-ink-2 hover:text-ink'
+              on
+                ? 'bg-field text-ink shadow-[0_1px_2px_rgb(0_0_0/0.15)] dark:bg-white/20'
+                : 'text-ink-2 hover:text-ink'
             }`}
           >
             {o.icon}
