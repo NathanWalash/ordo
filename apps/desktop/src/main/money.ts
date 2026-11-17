@@ -41,10 +41,12 @@ import {
   type MoneyOverview,
   type MoneyResult,
   type StatementFile,
+  type StatementInput,
   type StatementPreview,
   type TransactionPage,
 } from '@ordo/shared'
 import { cachedInboxHeaders } from './mail'
+import { Locked, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
 const moneyStore = () => (store ??= new MoneyStore(join(app.getPath('userData'), 'money.sqlite')))
@@ -100,10 +102,15 @@ export function previewStatement(raw: unknown): StatementPreview {
   }
 }
 
-export function importStatement(raw: unknown): ImportOutcome {
+/** Save a statement's transactions. Re-imported transactions are skipped. */
+export async function importStatement(raw: unknown): Promise<ImportOutcome> {
   const parsed = StatementInputSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
-  const input = parsed.data
+  const result = await withWriteLock('importing a statement', async () => saveStatement(parsed.data))
+  return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
+}
+
+function saveStatement(input: StatementInput): ImportOutcome {
   const detected = parseStatement(input.text, { accountName: 'preview', mapping: input.mapping })
   const accountName =
     input.accountName || accountNameFor(detected.ok ? detected.layout : null, input.fileName)

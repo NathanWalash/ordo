@@ -18,7 +18,7 @@ import {
 } from '@ordo/shared'
 import { mailStore, senders } from './mail'
 import { readSettings } from './settings'
-import { toRenderer } from './writes'
+import { Locked, toRenderer, withWriteLock } from './writes'
 
 const settingsFile = () => join(app.getPath('userData'), 'settings.json')
 
@@ -141,20 +141,23 @@ export async function categoriseSenders(
     return { ok: false, message: 'Confirm that Ordo may use this provider first.' }
   if (running) return { ok: false, message: 'Sorting is already running.' }
 
-  running = new AbortController()
+  const ctrl = (running = new AbortController())
   const provider = providers[ai.provider]
   try {
-    const model = await resolveModel(ai)
-    const result = await aiCategorise(senders(), provider, {
-      model,
-      scope: parsed.data.scope,
-      cache: mailStore(),
-      // A local model answers one request at a time anyway.
-      concurrency: provider.kind === 'local' ? 1 : 2,
-      timeoutMs: 180_000,
-      signal: running.signal,
-      onProgress,
+    const result = await withWriteLock('sorting senders with AI', async () => {
+      const model = await resolveModel(ai)
+      return aiCategorise(senders(), provider, {
+        model,
+        scope: parsed.data.scope,
+        cache: mailStore(),
+        // A local model answers one request at a time anyway.
+        concurrency: provider.kind === 'local' ? 1 : 2,
+        timeoutMs: 180_000,
+        signal: ctrl.signal,
+        onProgress,
+      })
     })
+    if (result instanceof Locked) return { ok: false, error: 'locked', message: result.message }
     return { ok: true, ...result }
   } catch (err) {
     return { ok: false, message: message(err) }

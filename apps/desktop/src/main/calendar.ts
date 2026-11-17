@@ -21,7 +21,7 @@ import {
   type CalendarSyncOutcome,
 } from '@ordo/shared'
 import { loadAccount } from './account'
-import { toRenderer } from './writes'
+import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: CalendarStore | null = null
 let running: AbortController | null = null
@@ -84,12 +84,28 @@ export async function sync(
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
   if (running) return { ok: false, error: 'busy', message: 'Your calendars are already syncing.' }
   const ctrl = (running = new AbortController())
+  try {
+    const result = await withWriteLock('syncing calendars', () =>
+      fetchCalendars(a, ctrl.signal, options, onProgress),
+    )
+    return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
+  } finally {
+    if (running === ctrl) running = null
+  }
+}
+
+async function fetchCalendars(
+  a: { email: string; password: string },
+  signal: AbortSignal,
+  options?: { force?: boolean },
+  onProgress?: (p: CalendarSyncProgress) => void,
+): Promise<CalendarSyncOutcome> {
   const provider = new CalDavProvider({ serverUrl: caldavUrl(), username: a.email, password: a.password })
   try {
     await provider.connect()
     const result = await syncCalendars(provider, openStore(), {
       window: syncWindow(),
-      signal: ctrl.signal,
+      signal,
       force: options?.force === true,
       onProgress,
     })
@@ -98,7 +114,6 @@ export async function sync(
   } catch (err) {
     return { ok: false, ...explain(err) }
   } finally {
-    if (running === ctrl) running = null
     await provider.close().catch(() => {})
   }
 }

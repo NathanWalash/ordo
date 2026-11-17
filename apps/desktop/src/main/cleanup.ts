@@ -28,7 +28,7 @@ import {
 } from '@ordo/shared'
 import { loadAccount } from './account'
 import { allowLoopbackHttp, exclusively, explain, imapConfig, INBOX, mailStore } from './mail'
-import { toRenderer } from './writes'
+import { Locked, toRenderer, withWriteLock } from './writes'
 
 /** iCloud SMTP by default. Tests can point an unpackaged build at a local server, like ORDO_IMAP_*. */
 function smtpConfig(user: string, pass: string): SmtpConfig {
@@ -51,6 +51,13 @@ function summary({ uidMap: _uidMap, trashUidValidity: _v, ...rest }: CleanupReco
 }
 
 const BUSY = { ok: false, error: 'busy', message: 'Wait for the scan or clean-up to finish.' } as const
+
+/** The result, or why it didn't run: busy in this process (null) or in another one (Locked). */
+function settled<T>(result: T | Locked | null) {
+  if (result === null) return BUSY
+  if (result instanceof Locked) return { ok: false, error: 'locked', message: result.message } as const
+  return result
+}
 
 const INVALID = { ok: false, error: 'invalid', message: 'That clean-up request isn’t valid.' } as const
 const NO_ACCOUNT = { ok: false, error: 'auth', message: 'Connect your iCloud account first.' } as const
@@ -87,51 +94,53 @@ export async function run(
   const account = loadAccount()
   if (!account) return NO_ACCOUNT
 
-  const result = await exclusively(async (): Promise<CleanupOutcome> => {
-    const store = mailStore()
-    const loopback = allowLoopbackHttp()
-    const plan = planFor(parsed.data)
-    if (!plan.senders.length)
-      return {
-        ok: false,
-        error: 'invalid',
-        message: plan.rejected[0]?.reason ?? 'Choose at least one sender to clear.',
-      }
+  const result = await exclusively(() =>
+    withWriteLock('clearing senders', async (): Promise<CleanupOutcome> => {
+      const store = mailStore()
+      const loopback = allowLoopbackHttp()
+      const plan = planFor(parsed.data)
+      if (!plan.senders.length)
+        return {
+          ok: false,
+          error: 'invalid',
+          message: plan.rejected[0]?.reason ?? 'Choose at least one sender to clear.',
+        }
 
-    const provider = new ImapMailProvider(imapConfig(account.email, account.password))
-    // Opened on the first mailto unsubscribe only.
-    const smtp: { sender?: ReturnType<typeof createMailtoSender> } = {}
-    const fetch = createGuardedFetch({ allowLoopback: loopback })
-    try {
-      await provider.connect()
-      const record = await runCleanup(provider, store, plan.senders, {
-        mailbox: INBOX,
-        onProgress,
-        unsubscribe: (method, s) =>
-          executeUnsubscribe(
-            method,
-            {
-              fetch,
-              allowLoopbackHttp: loopback,
-              openExternal: (url) => shell.openExternal(url),
-              sendMail: (msg) =>
-                (smtp.sender ??= createMailtoSender(
-                  smtpConfig(account.email, account.password),
-                  account.email,
-                )).send(msg),
-            },
-            { insecureLinkConfirmed: s.insecureLinkConfirmed, mailto: s.mailto ?? undefined },
-          ),
-      })
-      return { ok: true, cleanup: summary(record), rejected: plan.rejected }
-    } catch (err) {
-      return { ok: false, ...explain(err) }
-    } finally {
-      smtp.sender?.close()
-      await provider.close().catch(() => {})
-    }
-  })
-  return result ?? BUSY
+      const provider = new ImapMailProvider(imapConfig(account.email, account.password))
+      // Opened on the first mailto unsubscribe only.
+      const smtp: { sender?: ReturnType<typeof createMailtoSender> } = {}
+      const fetch = createGuardedFetch({ allowLoopback: loopback })
+      try {
+        await provider.connect()
+        const record = await runCleanup(provider, store, plan.senders, {
+          mailbox: INBOX,
+          onProgress,
+          unsubscribe: (method, s) =>
+            executeUnsubscribe(
+              method,
+              {
+                fetch,
+                allowLoopbackHttp: loopback,
+                openExternal: (url) => shell.openExternal(url),
+                sendMail: (msg) =>
+                  (smtp.sender ??= createMailtoSender(
+                    smtpConfig(account.email, account.password),
+                    account.email,
+                  )).send(msg),
+              },
+              { insecureLinkConfirmed: s.insecureLinkConfirmed, mailto: s.mailto ?? undefined },
+            ),
+        })
+        return { ok: true, cleanup: summary(record), rejected: plan.rejected }
+      } catch (err) {
+        return { ok: false, ...explain(err) }
+      } finally {
+        smtp.sender?.close()
+        await provider.close().catch(() => {})
+      }
+    }),
+  )
+  return settled(result)
 }
 
 /** Past clean-ups, newest first, without the UID maps. */
@@ -148,21 +157,23 @@ export async function undo(input: unknown): Promise<UndoOutcome> {
   const store = mailStore()
   if (!store.cleanup(id.data)) return { ok: false, error: 'invalid', message: 'Unknown clean-up.' }
 
-  const result = await exclusively(async (): Promise<UndoOutcome> => {
-    const provider = new ImapMailProvider(imapConfig(account.email, account.password))
-    try {
-      await provider.connect()
-      const res = await undoCleanup(provider, store, id.data)
-      // Restored emails have new UIDs in the inbox; a quick incremental scan caches them again.
-      if (res.restored) await scanMailbox(provider, store, { mailbox: INBOX }).catch(() => {})
-      return { ok: true, ...res }
-    } catch (err) {
-      return { ok: false, ...explain(err) }
-    } finally {
-      await provider.close().catch(() => {})
-    }
-  })
-  return result ?? BUSY
+  const result = await exclusively(() =>
+    withWriteLock('undoing a clean-up', async (): Promise<UndoOutcome> => {
+      const provider = new ImapMailProvider(imapConfig(account.email, account.password))
+      try {
+        await provider.connect()
+        const res = await undoCleanup(provider, store, id.data)
+        // Restored emails have new UIDs in the inbox; a quick incremental scan caches them again.
+        if (res.restored) await scanMailbox(provider, store, { mailbox: INBOX }).catch(() => {})
+        return { ok: true, ...res }
+      } catch (err) {
+        return { ok: false, ...explain(err) }
+      } finally {
+        await provider.close().catch(() => {})
+      }
+    }),
+  )
+  return settled(result)
 }
 
 export function registerCleanupIpc(): void {

@@ -7,7 +7,7 @@ import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
-import { toRenderer } from './writes'
+import { releaseWriteLock, toRenderer } from './writes'
 
 app.setName('Ordo')
 
@@ -98,6 +98,8 @@ registerMoneyIpc()
 app.on('before-quit', () => mail.closeMail())
 app.on('before-quit', () => closeCalendar())
 app.on('before-quit', () => closeMoney())
+// A write cut short by quitting must not leave the lock behind for the next run.
+process.on('exit', releaseWriteLock)
 
 app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.

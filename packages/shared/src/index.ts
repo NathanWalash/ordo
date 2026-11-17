@@ -47,7 +47,9 @@ export type ConnectResult = { ok: true; email: string } | { ok: false; error: Co
 export type AccountStatus =
   { connected: false } | { connected: true; email: string; lastScan: string | null; messageCount: number }
 
-export type ScanOutcome = ({ ok: true } & ScanResult) | { ok: false; error: ConnectError; message: string }
+/** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
+export type ScanOutcome =
+  ({ ok: true } & ScanResult) | { ok: false; error: ConnectError | 'locked'; message: string }
 
 export type { CategorisedSender, ScanProgress }
 export * from './settings'

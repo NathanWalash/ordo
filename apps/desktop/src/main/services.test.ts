@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -25,6 +25,8 @@ const { saveAccount, deleteAccount } = await import('./account')
 const mail = await import('./mail')
 const cleanup = await import('./cleanup')
 const ai = await import('./ai')
+const money = await import('./money')
+const calendar = await import('./calendar')
 
 const SAM = 'sam@friend.example'
 const DIGEST = 'digest@news.example'
@@ -120,6 +122,55 @@ describe('with a cached inbox', () => {
 
   it('history is empty and never carries UID maps', () => {
     expect(cleanup.history()).toEqual([])
+  })
+})
+
+describe('the write lock', () => {
+  const lockFile = () => join(dir.path, 'ordo-write.lock')
+  beforeAll(() => saveAccount('me@icloud.example', 'abcd-efgh-ijkl-mnop'))
+  afterAll(() => {
+    rmSync(lockFile(), { force: true })
+    deleteAccount()
+  })
+
+  it('every write refuses while another live Ordo process holds it, and leaves its lock alone', async () => {
+    // Our parent process is alive and isn't us: it stands in for the app or an agent.
+    writeFileSync(
+      lockFile(),
+      JSON.stringify({
+        pid: process.ppid,
+        owner: 'mcp',
+        task: 'clearing senders',
+        since: new Date().toISOString(),
+      }),
+    )
+    const locked = {
+      ok: false,
+      error: 'locked',
+      message: 'Ordo is busy in an AI agent using Ordo (clearing senders). Try again when it finishes.',
+    }
+    expect(await mail.scan()).toEqual(locked)
+    expect(await cleanup.run(request(DIGEST))).toEqual(locked)
+    expect(await cleanup.undo(1)).toMatchObject({ ok: false }) // unknown id is checked first
+    expect(await calendar.sync()).toEqual(locked)
+    expect(await money.importStatement({ fileName: 'a.csv', text: 'Date,Description,Amount\n' })).toEqual(
+      locked,
+    )
+    expect(existsSync(lockFile())).toBe(true)
+    // Reads don't need the lock.
+    expect(cleanup.plan(request(DIGEST))).toMatchObject({ ok: true })
+  })
+
+  it('a lock left by a process that has gone is taken over', async () => {
+    writeFileSync(
+      lockFile(),
+      JSON.stringify({ pid: 2 ** 22 + 12345, owner: 'headless', task: 'x', since: new Date().toISOString() }),
+    )
+    const out = await money.importStatement({ fileName: 'a.csv', text: 'nothing useful' })
+    expect(out).toMatchObject({ ok: false })
+    expect(out).not.toHaveProperty('error', 'locked')
+    // Released afterwards.
+    expect(existsSync(lockFile())).toBe(false)
   })
 })
 
