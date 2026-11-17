@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
+import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 
 app.setName('Ordo')
 
@@ -81,12 +82,14 @@ ipcMain.handle(IPC.appInfo, (): AppInfo => {
 ipcMain.handle(IPC.accountStatus, () => mail.status())
 ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
 ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect())
+ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
 ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
+registerCalendarIpc()
 
 app.on('before-quit', () => mail.closeMail())
+app.on('before-quit', () => closeCalendar())
 
 app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.

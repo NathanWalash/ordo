@@ -16,6 +16,7 @@
     "release": "electron-vite build && electron-builder --publish always"
   },
   "devDependencies": {
+    "@ordo/calendar-core": "workspace:*",
     "@ordo/mail-core": "workspace:*",
     "@ordo/shared": "workspace:*",
     "@tailwindcss/vite": "^4.3.5",

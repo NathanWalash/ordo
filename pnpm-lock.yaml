@@ -45,6 +45,9 @@ importers:
         specifier: ^2.12.1
         version: 2.12.1
     devDependencies:
+      '@ordo/calendar-core':
+        specifier: workspace:*
+        version: link:../../packages/calendar-core
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../../packages/mail-core
