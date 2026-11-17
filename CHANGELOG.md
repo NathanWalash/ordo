@@ -8,6 +8,7 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- New logo and app icon: four stacked cards, black at the front and lighter greys behind, on a white tile.
 - Headless mode: `Ordo --headless <command>` runs without a window, for scripts, tests and AI agents. Commands for status, scan, senders, clean-up plan and run, history, undo, calendar sync and events, bills, transactions, balances, statement import and AI sorting. Human-readable by default, `--json` for one JSON document, meaningful exit codes. It calls the same main-process functions as the window, so People are never cleared and every network, mailto and cloud-AI check still applies. Read-only unless started with `--allow-changes`, and each change needs `--confirm`. Connecting an account stays in the app. See [docs/headless.md](docs/headless.md).
 - MCP server: `Ordo --headless --mcp` serves Ordo's read tools to Claude Code, Claude Desktop and other MCP clients over stdio (no network port). Change tools only appear with `--allow-changes` and each needs `confirm: true`. Tool descriptions mark text from emails, statements and calendars as untrusted.
 - `pnpm ordo -- <command>` runs the built app headless from a checkout.
