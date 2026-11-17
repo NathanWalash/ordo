@@ -8,6 +8,11 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Sort with AI for Money: with **Use AI for Money** on in Settings → AI (off by default), Finances gets a Sort with AI button that asks your chosen model to categorise the merchants left in Other, one item per merchant with a cleaned name, a description with every number removed, in or out, and a rough amount band. Never balances, account details, dates or exact amounts. Rows a model categorised show a sparkle with its confidence; answers are cached per merchant and model, and applied without asking again. Same cloud consent and write lock as sorting senders. See [docs/ai.md](docs/ai.md#money).
+- AI bill matching: the same run asks the model whether recurring bank payments the rules couldn't link (like `AMZN MKTP`) belong to an email sender (`Amazon`). A match only adds the emails to a detected bill marked **Matched by AI** in Bills; the model never confirms a bill.
+- Change a transaction's category from the menu on its row on Finances. Your choice wins over the bank, the rules and AI; **Automatic** undoes it.
+- Headless: `money sort --allow-changes --confirm` and the `ordo_money_sort` MCP tool (only with `--allow-changes`, needs `confirm: true`). `money transactions` shows who chose each category.
+
 - New logo and app icon: four stacked cards, black at the front and lighter greys behind, on a white tile.
 - Headless mode: `Ordo --headless <command>` runs without a window, for scripts, tests and AI agents. Commands for status, scan, senders, clean-up plan and run, history, undo, calendar sync and events, bills, transactions, balances, statement import and AI sorting. Human-readable by default, `--json` for one JSON document, meaningful exit codes. It calls the same main-process functions as the window, so People are never cleared and every network, mailto and cloud-AI check still applies. Read-only unless started with `--allow-changes`, and each change needs `--confirm`. Connecting an account stays in the app. See [docs/headless.md](docs/headless.md).
 - MCP server: `Ordo --headless --mcp` serves Ordo's read tools to Claude Code, Claude Desktop and other MCP clients over stdio (no network port). Change tools only appear with `--allow-changes` and each needs `confirm: true`. Tool descriptions mark text from emails, statements and calendars as untrusted.

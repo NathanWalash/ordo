@@ -36,9 +36,66 @@ OpenAI under your own account and their terms, so Ordo asks you to confirm first
 Answers are cached in Ordo's local mail database by sender and model, so running again only asks
 about new or changed senders. Disconnecting your account clears the cache.
 
+## Money
+
+With **Use AI for Money (categories and bill matching)** turned on in Settings → AI (off by
+default), **Sort with AI** on Finances does two things with the same provider and model. It uses the
+same cloud consent as sorting senders, and the same write lock.
+
+**Categories.** Only transactions the bank and the rules left in Other (or blank) are sent, and only
+once per merchant however many payments there are. For each merchant, exactly this:
+
+```json
+{
+  "merchant": "Zorblax Studio",
+  "description": "CARD PAYMENT TO ZORBLAX STUDIO ON",
+  "direction": "out",
+  "typicalAmount": "£10–£20"
+}
+```
+
+- `merchant`: Ordo's cleaned-up merchant name.
+- `description`: the most common statement description for it, with every number removed (dates,
+  times, card numbers, references, phone numbers) and cut to 80 characters.
+- `direction`: whether the money went `in` or `out`.
+- `typicalAmount`: the median payment rounded into a band (under £5, £5–£10, £10–£20, £20–£50,
+  £50–£100, £100–£250, £250–£500, £500–£1,000, £1,000–£2,500, over £2,500).
+
+Never balances, account names or numbers, dates, exact amounts or the list of transactions. The
+model must answer one of the existing categories (Groceries, Eating out, Transport, Bills,
+Subscriptions, Shopping, Entertainment, Health, Cash, Transfers, Income, Other) with a confidence
+from 0 to 1; below 0.5, or "Other", nothing changes. A category a model chose shows a sparkle with
+its confidence. Choosing a category yourself from the menu on a transaction always wins over the
+bank, the rules and the model, and is never sent; **Automatic** undoes it.
+
+**Bill matching.** When Mail is connected, Ordo also asks about recurring bank payments the rules
+couldn't link to a subscription email, paired with email senders whose names look close (same first
+letter, and a shared start or an abbreviation, like `AMZN MKTP` and `Amazon`). For each pair:
+
+```json
+{
+  "pair": "p1",
+  "bankMerchant": "Amzn Mktp",
+  "bankAmount": "£20–£50",
+  "cadence": "monthly",
+  "emailSender": "Amazon",
+  "emailDomain": "amazon.co.uk",
+  "emailKinds": ["renewal"]
+}
+```
+
+No subject lines, dates or exact amounts. The model answers yes or no with a confidence per pair id;
+only pairs that were sent count. A match only adds the emails to a bill in Bills → Detected, marked
+**Matched by AI**. The model never confirms a bill: you do.
+
+Answers are cached in `money.sqlite` per merchant (or pair), model and a fingerprint of what was
+sent, so running again only asks about new or changed merchants. Listing transactions and bills
+applies cached answers without calling the model; with AI for Money off, they aren't applied.
+
 ## Safety
 
-Subject lines and sender names come from strangers, so Ordo treats them as untrusted:
+Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as
+untrusted:
 
 - They're sent inside a delimited data block, and the instructions tell the model it's data.
 - Replies must match a strict schema: an address Ordo asked about, one of the five categories (never
@@ -86,6 +143,8 @@ while Ordo is open, press **Check again**.
 - `packages/ai` has the `ModelProvider` interface (`.`) and the adapters (`./node`).
 - `aiCategorise` in `packages/mail-core` does the sorting; `window.ordo.ai` exposes status, test and
   sorting to the renderer.
+- `aiCategoriseTransactions` and `aiMatchBills` in `packages/money-core` do Money's;
+  `window.ordo.money.aiSort()` runs both, and `money sort` / `ordo_money_sort` in headless mode.
 - Unpackaged builds take `ORDO_LMSTUDIO_URL`, `ORDO_OLLAMA_URL` and `ORDO_AI_CLI_PATH` for tests.
 - `AI_LIVE=lmstudio pnpm vitest run ai.live` sorts made-up senders with a real local model (also
   `ollama` or `claude`). It's skipped by default.
