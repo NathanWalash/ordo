@@ -10,13 +10,15 @@ export interface ProviderInfo {
   kind: ProviderKind
   /** Who receives the prompt for a cloud provider. */
   vendor?: string
+  /** Ordo turns the CLI's tools off but couldn't confirm that none remain; the UI says so. */
+  experimental?: boolean
 }
 
 export const PROVIDERS: readonly ProviderInfo[] = [
   { id: 'lmstudio', label: 'LM Studio', kind: 'local' },
   { id: 'ollama', label: 'Ollama', kind: 'local' },
   { id: 'claude-cli', label: 'Claude Code CLI', kind: 'cloud', vendor: 'Anthropic' },
-  { id: 'codex-cli', label: 'Codex CLI', kind: 'cloud', vendor: 'OpenAI' },
+  { id: 'codex-cli', label: 'Codex CLI', kind: 'cloud', vendor: 'OpenAI', experimental: true },
 ]
 
 export const providerInfo = (id: ProviderId): ProviderInfo => PROVIDERS.find((p) => p.id === id)!

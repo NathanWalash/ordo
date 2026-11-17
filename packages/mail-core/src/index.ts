@@ -5,10 +5,10 @@ export { categorise } from './rules'
 export { analyseSenders, type CategorisedSender } from './analyse'
 export {
   aiCategorise,
-  AI_CHOICES,
+  AI_CATEGORIES,
+  type AiCategory,
   type AiCategoryCache,
   type AiCategoryRecord,
-  type AiChoice,
   type AiSortedSender,
   type AiSortOptions,
   type AiSortProgress,

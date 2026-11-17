@@ -15,7 +15,7 @@ let stdin = ''
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (c) => (stdin += c))
 process.stdin.on('end', () => {
-  fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ name, args, stdin, cwd: process.cwd() }))
+  fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ name, args, stdin, cwd: process.cwd(), files: fs.readdirSync('.') }))
   if (mode === 'hang') return setInterval(() => {}, 1000)
   if (name === 'claude') return claude()
   return codex()
@@ -26,7 +26,8 @@ function claude() {
     return
   }
   if (mode === 'crash') {
-    process.stderr.write('Error: something broke\n')
+    process.stdout.write('model said: the ssh key is AAAA\n')
+    process.stderr.write('thinking: the ssh key is AAAA\nError: something broke\n')
     process.exit(2)
   }
   if (mode === 'not-json') return process.stdout.write('hello')
@@ -51,13 +52,13 @@ function codex() {
     return
   }
   if (mode === 'crash') {
-    process.stderr.write('Error: unexpected argument\n')
+    process.stderr.write('codex: the ssh key is AAAA\nError: unexpected argument\n')
     process.exit(2)
   }
   const out = args[args.indexOf('-o') + 1]
   const schemaAt = args.indexOf('--output-schema')
   const schema = schemaAt >= 0 ? fs.readFileSync(args[schemaAt + 1], 'utf8') : null
-  fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ name, args, stdin, cwd: process.cwd(), schema }))
+  fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ name, args, stdin, cwd: process.cwd(), files: fs.readdirSync('.'), schema }))
   fs.writeFileSync(out, '{"word":"no"}\n')
   process.stdout.write('{"word":"no"}\n')
 }

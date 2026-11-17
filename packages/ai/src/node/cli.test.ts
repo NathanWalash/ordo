@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { basename } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ClaudeCliProvider, CodexCliProvider } from './cli'
+import { ClaudeCliProvider, CODEX_DISABLED_FEATURES, CodexCliProvider } from './cli'
 import { makeFakeClis } from './fake-cli'
 import { CommandResolver } from './process'
 
@@ -15,6 +16,7 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
       args: string[]
       stdin: string
       cwd: string
+      files: string[]
       schema?: string
     }
   const schema = { type: 'object', properties: { word: { type: 'string' } }, required: ['word'] }
@@ -72,6 +74,10 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
         '--tools',
         '',
         '--strict-mcp-config',
+        '--mcp-config',
+        '{"mcpServers":{}}',
+        '--permission-mode',
+        'dontAsk',
         '--disable-slash-commands',
         '--no-session-persistence',
         '--system-prompt',
@@ -81,9 +87,10 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
         '--json-schema',
         JSON.stringify(schema),
       ])
-      expect(call.args.some((a) => a.includes('dangerously'))).toBe(false)
-      // Runs in a throwaway folder that is removed afterwards.
+      expect(call.args.some((a) => /dangerously|bypass|--add-dir|--allowedTools/i.test(a))).toBe(false)
+      // Runs in an empty throwaway folder that is removed afterwards.
       expect(call.cwd).toMatch(/ordo-ai-/)
+      expect(call.files).toEqual([])
       expect(existsSync(call.cwd)).toBe(false)
     })
 
@@ -99,11 +106,11 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
       )
     })
 
-    it('reports a crash with the end of stderr', async () => {
+    it("reports a crash with the CLI's error line only, never other output", async () => {
       vi.stubEnv('FAKE_MODE', 'crash')
-      await expect(claude.complete({ system: 's', prompt: 'p' })).rejects.toThrow(
-        'Claude Code failed: Error: something broke',
-      )
+      await expect(claude.complete({ system: 's', prompt: 'p' })).rejects.toMatchObject({
+        message: 'Claude Code failed: Error: something broke',
+      })
     })
 
     it('rejects output that is not an envelope', async () => {
@@ -163,6 +170,9 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
         '--skip-git-repo-check',
         '--ephemeral',
         '--ignore-user-config',
+        ...CODEX_DISABLED_FEATURES.flatMap((f) => ['--disable', f]),
+        '-c',
+        'web_search="disabled"',
         '--color',
         'never',
         '-C',
@@ -173,7 +183,13 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
         `${dir}/reply.txt`,
         '-',
       ])
-      expect(call.args.some((a) => a.includes('dangerously'))).toBe(false)
+      expect(call.args.some((a) => /dangerously|bypass|--add-dir|full-access/i.test(a))).toBe(false)
+      expect(call.args).toEqual(
+        expect.arrayContaining(['--disable', 'shell_tool', '--disable', 'unified_exec']),
+      )
+      // The scratch folder is the working root and holds nothing but the schema.
+      expect(call.cwd.endsWith(basename(dir))).toBe(true)
+      expect(call.files).toEqual(['schema.json'])
       expect(existsSync(dir)).toBe(false)
     })
 
@@ -186,9 +202,10 @@ describe.skipIf(!posix)('CLI providers (fake CLIs on PATH)', () => {
 
     it('reports a failed run', async () => {
       vi.stubEnv('FAKE_MODE', 'crash')
-      await expect(codex.complete({ system: 's', prompt: 'p' })).rejects.toThrow(
-        'Codex failed: Error: unexpected argument',
-      )
+      // Codex prints its transcript to stderr; only the error line is used.
+      await expect(codex.complete({ system: 's', prompt: 'p' })).rejects.toMatchObject({
+        message: 'Codex failed: Error: unexpected argument',
+      })
     })
   })
 })

@@ -43,18 +43,17 @@ export interface JsonRequest<T> extends Omit<CompleteRequest, 'schema'> {
 export async function completeJson<T>(provider: ModelProvider, req: JsonRequest<T>): Promise<T> {
   const { jsonSchema, validate, ...rest } = req
   let prompt = rest.prompt
-  let problem = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await provider.complete({ ...rest, prompt, schema: jsonSchema })
     try {
       const value = res.json !== undefined ? res.json : parseModelJson(res.text)
       return validate.parse(value)
     } catch (err) {
-      problem = describeIssue(err)
       prompt =
-        `${rest.prompt}\n\nYour previous reply could not be used (${problem}). ` +
+        `${rest.prompt}\n\nYour previous reply could not be used (${describeIssue(err)}). ` +
         'Reply again with only a JSON value that matches the schema, and nothing else.'
     }
   }
-  throw new AiError('bad-response', `The model's reply wasn't in the expected format (${problem}).`)
+  // The problem text can quote the reply, so it goes back to the model only, never into the error.
+  throw new AiError('bad-response', "The model's reply wasn't in the expected format.")
 }
