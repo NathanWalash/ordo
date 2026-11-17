@@ -8,6 +8,7 @@ export {
   testImapLogin,
   type ImapConfig,
 } from './imap'
-export { MailStore, type MailboxState } from './store'
+export { MailStore, type MailboxState, type NewCleanup } from './store'
 export { scanMailbox, type ScanOptions } from './scan'
 export { BlockedAddressError, createGuardedFetch, createGuardedLookup, type Resolver } from './net-guard'
+export { runCleanup, undoCleanup, type CleanupOptions } from './cleanup'

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { MessageHeader } from './types'
+import type { CleanupRecord, CleanupSenderResult, MessageHeader } from './types'
 
 export interface MailboxState {
   uidValidity: string
@@ -44,7 +44,54 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS messages_from ON messages (from_address);
 CREATE TABLE IF NOT EXISTS replied_to (address TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS cleanups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  mailbox TEXT NOT NULL,
+  trash_mailbox TEXT,
+  trash_uid_validity TEXT,
+  moved INTEGER NOT NULL,
+  senders TEXT NOT NULL,
+  uid_map TEXT,
+  error TEXT,
+  undone_at INTEGER,
+  restored INTEGER
+);
 `
+
+type CleanupRow = {
+  id: number
+  created_at: number
+  mailbox: string
+  trash_mailbox: string | null
+  trash_uid_validity: string | null
+  moved: number
+  senders: string
+  uid_map: string | null
+  error: string | null
+  undone_at: number | null
+  restored: number | null
+}
+
+export type NewCleanup = Omit<CleanupRecord, 'id' | 'canUndo' | 'undoneAt' | 'restored'>
+
+function toCleanup(r: CleanupRow): CleanupRecord {
+  const uidMap = r.uid_map ? (JSON.parse(r.uid_map) as [number, number][]) : null
+  return {
+    id: r.id,
+    at: new Date(r.created_at),
+    mailbox: r.mailbox,
+    trashMailbox: r.trash_mailbox,
+    trashUidValidity: r.trash_uid_validity,
+    moved: r.moved,
+    senders: JSON.parse(r.senders) as CleanupSenderResult[],
+    uidMap,
+    error: r.error,
+    canUndo: Boolean(uidMap?.length) && r.undone_at === null,
+    undoneAt: r.undone_at === null ? null : new Date(r.undone_at),
+    restored: r.restored,
+  }
+}
 
 /**
  * Local cache of scanned message headers (never bodies), so re-scans only fetch
@@ -133,6 +180,63 @@ export class MailStore {
     }))
   }
 
+  /** Cached UIDs in `mailbox` from each of these senders (addresses compared case-insensitively). */
+  uidsFrom(mailbox: string, addresses: Iterable<string>): Map<string, number[]> {
+    const wanted = new Set([...addresses].map((a) => a.trim().toLowerCase()))
+    const out = new Map<string, number[]>([...wanted].map((a) => [a, []]))
+    const rows = this.db
+      .prepare('SELECT uid, from_address FROM messages WHERE mailbox = ? ORDER BY uid')
+      .all(mailbox) as { uid: number; from_address: string }[]
+    for (const r of rows) out.get(r.from_address.trim().toLowerCase())?.push(r.uid)
+    return out
+  }
+
+  /** Forget cached headers for messages that have left `mailbox`. */
+  deleteMessages(mailbox: string, uids: readonly number[]): void {
+    const del = this.db.prepare('DELETE FROM messages WHERE mailbox = ? AND uid = ?')
+    this.transaction(() => {
+      for (const uid of uids) del.run(mailbox, uid)
+    })
+  }
+
+  addCleanup(c: NewCleanup): CleanupRecord {
+    const res = this.db
+      .prepare(
+        'INSERT INTO cleanups (created_at, mailbox, trash_mailbox, trash_uid_validity, moved, senders, uid_map, error) ' +
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        c.at.getTime(),
+        c.mailbox,
+        c.trashMailbox,
+        c.trashUidValidity,
+        c.moved,
+        JSON.stringify(c.senders),
+        c.uidMap ? JSON.stringify(c.uidMap) : null,
+        c.error,
+      )
+    return this.cleanup(Number(res.lastInsertRowid))!
+  }
+
+  cleanup(id: number): CleanupRecord | null {
+    const row = this.db.prepare('SELECT * FROM cleanups WHERE id = ?').get(id) as CleanupRow | undefined
+    return row ? toCleanup(row) : null
+  }
+
+  /** Every clean-up, newest first. */
+  cleanups(): CleanupRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM cleanups ORDER BY created_at DESC, id DESC')
+      .all() as CleanupRow[]
+    return rows.map(toCleanup)
+  }
+
+  markUndone(id: number, restored: number, at: Date): void {
+    this.db
+      .prepare('UPDATE cleanups SET undone_at = ?, restored = ? WHERE id = ?')
+      .run(at.getTime(), restored, id)
+  }
+
   setRepliedTo(addresses: Iterable<string>): void {
     const insert = this.db.prepare('INSERT OR IGNORE INTO replied_to (address) VALUES (?)')
     this.transaction(() => {
@@ -146,9 +250,11 @@ export class MailStore {
     return new Set(rows.map((r) => r.address))
   }
 
-  /** Delete every cached header and state, e.g. when the account is disconnected. */
+  /** Delete every cached header, state and clean-up record, e.g. when the account is disconnected. */
   clear(): void {
-    this.db.exec('DELETE FROM messages; DELETE FROM mailbox_state; DELETE FROM replied_to;')
+    this.db.exec(
+      'DELETE FROM messages; DELETE FROM mailbox_state; DELETE FROM replied_to; DELETE FROM cleanups;',
+    )
   }
 
   close(): void {
