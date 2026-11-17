@@ -42,7 +42,7 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       undo: vi.fn(async () => ({ ok: true as const, restored: 2, missing: 0 })),
     },
     calendar: {
-      status: () => ({ connected: false }),
+      status: () => ({ connected: false, lastSync: null, syncing: false, subscriptions: 0 }),
       sync: vi.fn(async () => ({
         ok: true as const,
         calendars: 1,

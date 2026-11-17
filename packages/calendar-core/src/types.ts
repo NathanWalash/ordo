@@ -1,3 +1,6 @@
+/** Where a calendar comes from: the iCloud account, a subscribed link or an imported .ics file. */
+export type CalendarSource = 'icloud' | 'link' | 'file'
+
 /** A calendar the account can see, e.g. "Home" or "Work". */
 export interface CalendarInfo {
   /** Stable id from the provider (for CalDAV, the calendar collection URL). */
@@ -6,6 +9,8 @@ export interface CalendarInfo {
   /** CSS colour, normalised to `#rrggbb`. */
   color?: string
   readOnly: boolean
+  /** Set on calendars read from the cache. */
+  source?: CalendarSource
 }
 
 /** A calendar as listed by a provider, with a token that changes whenever its contents do. */
@@ -69,4 +74,6 @@ export interface CalendarSyncResult {
   skipped: number
   events: number
   stopped: boolean
+  /** Calendars that couldn't be fetched this time, when the sync carried on without them. */
+  failed?: { calendarId: string; name: string; message: string }[]
 }

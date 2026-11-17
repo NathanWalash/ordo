@@ -8,6 +8,13 @@ export interface SyncOptions {
   onProgress?: (p: CalendarSyncProgress) => void
   /** Refetch every calendar even if its version is unchanged. */
   force?: boolean
+  /** Which calendars in the store this provider owns; others are left alone. */
+  provider?: string
+  /**
+   * Carry on past a calendar that fails to fetch, keeping its cached events and listing it in
+   * `failed`. For subscribed links, where one dead link shouldn't stop the rest.
+   */
+  continueOnError?: boolean
 }
 
 /**
@@ -16,12 +23,12 @@ export interface SyncOptions {
  * `window`). The provider must already be connected.
  */
 export async function syncCalendars(
-  provider: CalendarProvider,
+  source: CalendarProvider,
   store: CalendarStore,
-  { window, signal, onProgress, force = false }: SyncOptions,
+  { window, signal, onProgress, force = false, provider = 'icloud', continueOnError = false }: SyncOptions,
 ): Promise<CalendarSyncResult> {
-  const calendars = await provider.listCalendars()
-  store.setCalendars(calendars)
+  const calendars = await source.listCalendars()
+  store.setCalendars(calendars, provider)
   const result: CalendarSyncResult = {
     calendars: calendars.length,
     fetched: 0,
@@ -45,7 +52,18 @@ export async function syncCalendars(
       result.skipped++
       continue
     }
-    const events = await provider.fetchEvents(cal.id, window)
+    let events
+    try {
+      events = await source.fetchEvents(cal.id, window)
+    } catch (err) {
+      if (!continueOnError || signal?.aborted) throw err
+      ;(result.failed ??= []).push({
+        calendarId: cal.id,
+        name: cal.name,
+        message: err instanceof Error ? err.message : String(err),
+      })
+      continue
+    }
     if (signal?.aborted) return { ...result, stopped: true }
     store.replaceEvents(cal.id, events, window, cal.version)
     result.fetched++

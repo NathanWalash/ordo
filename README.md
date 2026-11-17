@@ -48,6 +48,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Unclutter clean-up history with undo                                   | Done    |
 | Full mail client: read, search, compose                                | Planned |
 | Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
+| Calendar: subscribe by link (Google, Outlook, webcal) or import .ics   | Done    |
 | Create and edit calendar events                                        | Planned |
 | Money: import bank statement CSVs, spending by category and month      | Done    |
 | Money: find bills and subscriptions in statements and email receipts   | Done    |
@@ -114,7 +115,7 @@ apps/desktop          Electron app
 packages/shared       Module registry and the typed IPC contract
 packages/mail-core    Mail logic with no Electron dependency, fully unit-tested
 packages/ai           Model providers (LM Studio, Ollama, Claude Code and Codex CLIs)
-packages/calendar-core  CalDAV, iCalendar parsing and recurrence, calendar cache and layout
+packages/calendar-core  CalDAV and calendar links, iCalendar parsing and recurrence, calendar cache and layout
 e2e/                  Playwright tests that launch the built app
 docs/design.md        Design decisions and roadmap
 ```

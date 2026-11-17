@@ -257,6 +257,8 @@ export async function runCommand(
   }
   const offset = options.offset ?? 0
   const connected = () => services.account().connected
+  // Calendars added by link or file work without an iCloud account.
+  const hasCalendars = () => connected() || services.calendar.status().subscriptions > 0
 
   switch (command.name) {
     case 'status': {
@@ -276,13 +278,15 @@ export async function runCommand(
                 messages: account.messageCount,
               }
             : { connected: false },
-          calendar: calendar.connected
-            ? {
-                connected: true,
-                lastSync: calendar.lastSync,
-                calendars: services.calendar.calendars().length,
-              }
-            : { connected: false },
+          calendar:
+            calendar.connected || calendar.subscriptions > 0
+              ? {
+                  connected: calendar.connected,
+                  lastSync: calendar.lastSync,
+                  calendars: services.calendar.calendars().length,
+                  subscriptions: calendar.subscriptions,
+                }
+              : { connected: false },
           ai: {
             provider: ai.provider,
             model: ai.model,
@@ -355,7 +359,7 @@ export async function runCommand(
     }
 
     case 'calendar sync': {
-      if (!connected()) return NOT_CONNECTED
+      if (!hasCalendars()) return NOT_CONNECTED
       const r = await services.calendar.sync(options.progress?.calendar)
       if (!r.ok) return fromService(r)
       const { ok: _ok, ...rest } = r
@@ -363,7 +367,7 @@ export async function runCommand(
     }
 
     case 'calendar events': {
-      if (!connected()) return NOT_CONNECTED
+      if (!hasCalendars()) return NOT_CONNECTED
       const start = day(command.from)
       const end = day(command.to)
       end.setDate(end.getDate() + 1) // --to is inclusive

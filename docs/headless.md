@@ -54,25 +54,25 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 
 ## Commands
 
-| Command                                                                       | What it does                                                   |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `status`                                                                      | Account email (never the password), last scan, AI, counts      |
-| `scan`                                                                        | Fetch new inbox headers into the cache (progress on stderr)    |
-| `senders [--category <c>] [--limit <n>]`                                      | Senders by email count. `other` means uncategorised            |
-| `cleanup plan --sender <address>... [--no-unsubscribe] [--no-trash]`          | Dry run: exactly what a clean-up would do. Changes nothing     |
-| `cleanup run --sender <address>... [--no-unsubscribe] [--no-trash] --confirm` | Unsubscribe and move the senders' emails to Trash \*           |
-| `history [--limit <n>]`                                                       | Past clean-ups, newest first                                   |
-| `undo <id> --confirm`                                                         | Move a clean-up's emails back from Trash \*                    |
-| `calendar sync`                                                               | Fetch changed calendars into the cache                         |
-| `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days            |
-| `money bills`                                                                 | Bills and subscriptions, and ones found to confirm in the app  |
-| `money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]`       | Imported transactions, newest first                            |
-| `money balances`                                                              | Who owes whom for shared bills                                 |
-| `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                 |
-| `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \* |
-| `ai status`                                                                   | Model providers and the saved choice                           |
-| `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \* |
-| `help`, `--help`, `-h`                                                        | The command list                                               |
+| Command                                                                       | What it does                                                     |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `status`                                                                      | Account email (never the password), last scan, AI, counts        |
+| `scan`                                                                        | Fetch new inbox headers into the cache (progress on stderr)      |
+| `senders [--category <c>] [--limit <n>]`                                      | Senders by email count. `other` means uncategorised              |
+| `cleanup plan --sender <address>... [--no-unsubscribe] [--no-trash]`          | Dry run: exactly what a clean-up would do. Changes nothing       |
+| `cleanup run --sender <address>... [--no-unsubscribe] [--no-trash] --confirm` | Unsubscribe and move the senders' emails to Trash \*             |
+| `history [--limit <n>]`                                                       | Past clean-ups, newest first                                     |
+| `undo <id> --confirm`                                                         | Move a clean-up's emails back from Trash \*                      |
+| `calendar sync`                                                               | Fetch changed iCloud calendars and calendar links into the cache |
+| `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
+| `money bills`                                                                 | Bills and subscriptions, and ones found to confirm in the app    |
+| `money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]`       | Imported transactions, newest first                              |
+| `money balances`                                                              | Who owes whom for shared bills                                   |
+| `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                   |
+| `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \*   |
+| `ai status`                                                                   | Model providers and the saved choice                             |
+| `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \*   |
+| `help`, `--help`, `-h`                                                        | The command list                                                 |
 
 \* Changes something: needs `--allow-changes` as well as `--confirm`.
 

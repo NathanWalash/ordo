@@ -46,7 +46,7 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       d.account.connected
         ? `Mail:      ${clean(d.account.email)} · ${plural(d.account.messages, 'email')} cached · last scan ${when(d.account.lastScan)}`
         : 'Mail:      not connected (connect an account in the Ordo app)',
-      d.calendar.connected
+      d.calendar.calendars !== undefined
         ? `Calendar:  ${plural(d.calendar.calendars, 'calendar')} · last sync ${when(d.calendar.lastSync)}`
         : 'Calendar:  not connected',
       `AI:        ${d.ai.provider === 'none' ? 'off' : `${d.ai.provider}${d.ai.model ? ` (${clean(d.ai.model)})` : ''}${d.ai.sortSenders ? ', sorting senders' : ''}${d.ai.money ? ', Money' : ''}`}`,
@@ -133,7 +133,10 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
         (d.missing ? ` ${d.missing} couldn't be restored.` : ''),
 
   'calendar sync': (d) =>
-    `Synced ${plural(d.calendars, 'calendar')} (${d.fetched} fetched, ${d.skipped} unchanged): ${plural(d.events, 'event')}.`,
+    `Synced ${plural(d.calendars, 'calendar')} (${d.fetched} fetched, ${d.skipped} unchanged): ${plural(d.events, 'event')}.` +
+    (d.failed?.length
+      ? ` Couldn't update ${d.failed.map((f: { name: string }) => clean(f.name, 40)).join(', ')}.`
+      : ''),
 
   'calendar events': (d) =>
     d.total === 0
