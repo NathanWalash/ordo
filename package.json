@@ -16,9 +16,11 @@
     "test:e2e": "pnpm build && playwright test",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "icon": "electron scripts/render-icon.mjs",
-    "test:integration": "vitest run imap.integration",
+    "test:integration": "vitest run integration",
     "imap:start": "docker run -d --rm --name ordo-greenmail -p 3143:3143 -e GREENMAIL_OPTS=\"-Dgreenmail.setup.test.imap -Dgreenmail.users=test:abcd-efgh-ijkl-mnop@ordo.test -Dgreenmail.users.login=email -Dgreenmail.hostname=0.0.0.0\" greenmail/standalone:2.1.2",
-    "imap:stop": "docker stop ordo-greenmail"
+    "imap:stop": "docker stop ordo-greenmail",
+    "caldav:start": "docker run -d --rm --name ordo-radicale -p 5232:5232 tomsquest/docker-radicale:3.9.1.0 /venv/bin/radicale --server-hosts 0.0.0.0:5232 --auth-type none --storage-filesystem-folder /data/collections",
+    "caldav:stop": "docker stop ordo-radicale"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -30,13 +30,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - name: IMAP integration tests (GreenMail)
+      - name: Integration tests (GreenMail IMAP, Radicale CalDAV)
         run: |
           pnpm imap:start
+          pnpm caldav:start
           node scripts/wait-for-port.mjs 3143
+          node scripts/wait-for-port.mjs 5232
           pnpm test:integration
         env:
           IMAP_TEST_PORT: '3143'
+          CALDAV_TEST_PORT: '5232'
 
   e2e:
     name: Build and end-to-end (${{ matrix.os }})
