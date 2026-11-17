@@ -13,6 +13,15 @@ export const electronPath = createRequire(import.meta.url)('electron') as string
  */
 export const KEYCHAIN_SWITCHES = ['--use-mock-keychain', '--password-store=basic']
 
+/**
+ * GitHub's Ubuntu runners block the unprivileged namespaces Chromium's sandbox needs, so Electron
+ * aborts at start-up. Playwright adds --no-sandbox for the windowed tests; headless runs need it too.
+ */
+const PLATFORM_SWITCHES = process.platform === 'linux' ? ['--no-sandbox'] : []
+
+/** Every Chromium switch a headless test run passes before the app path. */
+export const TEST_SWITCHES = [...PLATFORM_SWITCHES, ...KEYCHAIN_SWITCHES]
+
 export const tempProfile = () => mkdtempSync(join(tmpdir(), 'ordo-headless-'))
 
 /** The environment a headless run gets: a throwaway profile and the same test overrides as the app. */
@@ -35,7 +44,7 @@ export interface Run {
 /** Run `Electron apps/desktop --headless <args>` like a user or script would, and collect its output. */
 export function ordo(args: string[], userData: string, env: Record<string, string> = {}): Promise<Run> {
   return new Promise((resolve, reject) => {
-    const child = spawn(electronPath, [...KEYCHAIN_SWITCHES, 'apps/desktop', '--headless', ...args], {
+    const child = spawn(electronPath, [...TEST_SWITCHES, 'apps/desktop', '--headless', ...args], {
       env: headlessEnv(userData, env),
       stdio: ['ignore', 'pipe', 'pipe'],
     })

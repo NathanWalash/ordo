@@ -7,7 +7,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { test, expect } from '@playwright/test'
 import { imapPort, seedMailbox, TEST_ACCOUNT } from './imap'
 import { launchApp } from './launch'
-import { electronPath, headlessEnv, json, KEYCHAIN_SWITCHES, ordo, tempProfile } from './headless'
+import { electronPath, headlessEnv, json, ordo, TEST_SWITCHES, tempProfile } from './headless'
 
 // Ordo without a window: the CLI and the MCP server, spawned like a script or an agent would.
 // No Playwright Electron here; the windowed app is only used once, to connect the account.
@@ -20,7 +20,7 @@ const toolText = (r: unknown) => JSON.parse(((r as CallToolResult).content[0] as
 async function mcpClient(userData: string, extraArgs: string[] = [], env: Record<string, string> = {}) {
   const transport = new StdioClientTransport({
     command: electronPath,
-    args: [...KEYCHAIN_SWITCHES, 'apps/desktop', '--headless', '--mcp', ...extraArgs],
+    args: [...TEST_SWITCHES, 'apps/desktop', '--headless', '--mcp', ...extraArgs],
     env: headlessEnv(userData, env),
     stderr: 'pipe',
   })
@@ -60,7 +60,8 @@ test.describe('without an account', () => {
   test('mail commands say to connect in the app first', async () => {
     const r = await ordo(['senders'], profile)
     expect(r.code).toBe(1)
-    expect(r.stdout).toBe('')
+    // Nothing on stdout (Electron on Windows may still print a blank line when it exits).
+    expect(r.stdout.trim()).toBe('')
     expect(r.stderr).toContain('No iCloud account is connected')
   })
 

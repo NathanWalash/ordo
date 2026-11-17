@@ -40,7 +40,9 @@ pipes, so the MCP server is unaffected.
 
 On Linux, headless mode doesn't need a display: it was checked with no X server or Wayland at all
 (Electron 45, Debian 12). Chromium may still log a few lines about D-Bus or the GPU to stderr;
-stdout stays clean.
+stdout stays clean. Running the unpackaged app (`pnpm ordo`) on a distribution that blocks
+unprivileged user namespaces, such as Ubuntu 24.04, needs `--no-sandbox` before `apps/desktop`,
+as the end-to-end tests do; packaged builds ship Chromium's sandbox helper and don't.
 
 Headless runs use the same data folder as the app (on macOS
 `~/Library/Application Support/Ordo`). Only unpackaged development builds honour `ORDO_USER_DATA`
