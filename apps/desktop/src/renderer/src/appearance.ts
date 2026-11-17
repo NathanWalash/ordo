@@ -15,3 +15,14 @@ export function useAppearance(): Appearance | null {
   }, [])
   return appearance
 }
+
+/** Mirror the appearance onto classes on <html> that the CSS keys off. Call once, in App. */
+export function useAppearanceClasses(): void {
+  const appearance = useAppearance()
+  useEffect(() => {
+    if (!appearance) return
+    const root = document.documentElement.classList
+    root.toggle('reduce-transparency', appearance.reducedTransparency)
+    root.toggle('opaque-sidebar', appearance.opaqueSidebar)
+  }, [appearance])
+}

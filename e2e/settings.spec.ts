@@ -69,3 +69,23 @@ test('the theme is saved and survives a relaunch', async () => {
   await page.getByRole('navigation').getByRole('button', { name: 'Settings' }).click()
   await expect(themeRadio('Dark')).toBeChecked()
 })
+
+test('the toolbar is frosted glass, and solid when transparency is reduced', async () => {
+  const reducedByOs = await page.evaluate(
+    async () =>
+      (await window.ordo.settings.appearance()).reducedTransparency ||
+      matchMedia('(prefers-reduced-transparency: reduce)').matches,
+  )
+  test.skip(reducedByOs, 'This machine already has Reduce transparency on')
+  const look = () =>
+    page.locator('main > header').evaluate((el) => {
+      const s = getComputedStyle(el)
+      return { filter: s.backdropFilter, background: s.backgroundColor }
+    })
+  expect(await look()).toEqual({ filter: 'blur(24px) saturate(1.8)', background: 'rgba(30, 30, 30, 0.7)' })
+
+  // The renderer sets this class when the main process reports the OS asks for reduced transparency.
+  await page.evaluate(() => document.documentElement.classList.add('reduce-transparency'))
+  expect(await look()).toEqual({ filter: 'none', background: DARK })
+  await page.evaluate(() => document.documentElement.classList.remove('reduce-transparency'))
+})

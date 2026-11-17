@@ -47,7 +47,7 @@ export function SenderTable({ senders, banner, actions }: Props) {
     })
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 flex-col">
       <div className="px-6 pt-5">
         {banner}
         <div className="flex items-baseline justify-between gap-3">
@@ -81,10 +81,11 @@ export function SenderTable({ senders, banner, actions }: Props) {
         </div>
       </div>
 
-      <div className="mt-4 min-h-0 flex-1 overflow-auto border-t border-sep">
+      <div className="mt-4 flex-1 border-t border-sep">
         <table className="w-full table-fixed border-collapse">
-          <thead className="sticky top-0 bg-content text-left text-[11px] text-ink-3">
-            <tr className="border-b border-sep">
+          {/* Collapsed table borders don't stick, so the header's hairline is a shadow on its cells. */}
+          <thead className="glass-bar sticky top-0 z-[1] text-left text-[11px] text-ink-3 [&_th]:shadow-[inset_0_-1px_0_var(--sep)]">
+            <tr>
               <th className="w-10" />
               <th className="py-1.5 font-medium">Sender</th>
               <th className="w-20 pr-4 text-right font-medium">Emails</th>
@@ -139,7 +140,7 @@ export function SenderTable({ senders, banner, actions }: Props) {
         </table>
       </div>
 
-      <footer className="flex items-center justify-between gap-3 border-t border-sep px-5 py-2.5">
+      <footer className="glass-bar sticky bottom-0 z-[1] flex items-center justify-between gap-3 border-t border-sep px-5 py-2.5">
         <span className="flex items-center gap-1.5 text-ink-2">
           <ShieldCheck size={14} />
           {chosen.length
