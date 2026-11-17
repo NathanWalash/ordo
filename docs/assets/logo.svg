@@ -1,14 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Ordo logo">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5B5BF0"/>
-      <stop offset="1" stop-color="#8E44D9"/>
-    </linearGradient>
-  </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
-  <g fill="#fff">
-    <rect x="280" y="318" width="464" height="84" rx="42"/>
-    <rect x="280" y="470" width="352" height="84" rx="42" opacity="0.85"/>
-    <rect x="280" y="622" width="240" height="84" rx="42" opacity="0.7"/>
-  </g>
+  <!-- Ordo "Ink" mark: four equal stacked cards, black at the front and lighter greys behind.
+       Each front card sits on a slightly larger white card, which draws the gap above it.
+       818px tile on the 1024 canvas (macOS icon grid). -->
+  <rect x="103" y="103" width="818" height="818" rx="185" fill="#FFFFFF" stroke="#D1D1D6" stroke-width="6"/>
+  <rect x="265" y="251" width="494" height="234" rx="69" fill="#E5E5EA"/>
+  <rect x="253" y="335" width="518" height="258" rx="81" fill="#FFFFFF"/>
+  <rect x="265" y="347" width="494" height="234" rx="69" fill="#C7C7CC"/>
+  <rect x="253" y="431" width="518" height="258" rx="81" fill="#FFFFFF"/>
+  <rect x="265" y="443" width="494" height="234" rx="69" fill="#8E8E93"/>
+  <rect x="253" y="527" width="518" height="258" rx="81" fill="#FFFFFF"/>
+  <rect x="265" y="539" width="494" height="234" rx="69" fill="#1C1C1E"/>
 </svg>

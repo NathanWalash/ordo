@@ -8,6 +8,7 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- New logo and app icon: four stacked cards, black at the front and lighter greys behind, on a white tile.
 - Sort with AI in Unclutter: asks the model chosen in Settings → AI about the senders in Other, with progress, Stop and a summary. Sorted rows show a sparkle with the model's confidence, and earlier answers are kept without asking again. Without a model set up, the button opens Settings.
 - Bill due dates, yearly renewals and trial ends from Money appear on the Calendar, drawn so they never look like events.
 - Unclutter clean-up. "Review and clear" opens a review sheet listing the selected senders, with Unsubscribe (one-click, link or email) and Move to Trash for each, a summary and a Clear button. People you've written to are refused again in the main process, whatever the window sends.
