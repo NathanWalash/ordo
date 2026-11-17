@@ -2,21 +2,26 @@ import { z } from 'zod'
 import type {
   CalendarEvent,
   CalendarInfo,
+  CalendarSource,
   CalendarSyncProgress,
   CalendarSyncResult,
   DateRange,
 } from '@ordo/calendar-core'
 
-export type { CalendarEvent, CalendarInfo, CalendarSyncProgress, DateRange }
+export type { CalendarEvent, CalendarInfo, CalendarSource, CalendarSyncProgress, DateRange }
 
 /** A calendar in the sidebar list, with the user's choice of whether to show it. */
 export interface CalendarListItem extends CalendarInfo {
   visible: boolean
 }
 
-/** Calendar uses the same iCloud account as Mail: connected means an account is saved. */
-export type CalendarStatus =
-  { connected: false } | { connected: true; email: string; lastSync: string | null; syncing: boolean }
+/**
+ * Calendar uses the same iCloud account as Mail: connected means an account is saved.
+ * `subscriptions` counts calendars added by link or file, which work without iCloud.
+ */
+export type CalendarStatus = { lastSync: string | null; syncing: boolean; subscriptions: number } & (
+  { connected: false } | { connected: true; email: string }
+)
 
 /** `busy`: already syncing in this process; `locked`: another Ordo process is writing. */
 export type CalendarSyncError = 'auth' | 'network' | 'busy' | 'locked' | 'unknown'
@@ -26,6 +31,22 @@ export type CalendarSyncOutcome =
 export const DateRangeSchema = z.object({ start: z.date(), end: z.date() }).refine((r) => r.start < r.end, {
   message: 'start must be before end',
 })
+
+export const AddCalendarLinkSchema = z.object({ url: z.string().trim().min(1).max(4096) })
+export type AddCalendarLinkInput = z.infer<typeof AddCalendarLinkSchema>
+
+export type AddCalendarError =
+  | 'url'
+  | 'denied'
+  | 'not-found'
+  | 'network'
+  | 'not-calendar'
+  | 'too-large'
+  | 'duplicate'
+  | 'storage'
+  | 'locked'
+export type AddCalendarOutcome =
+  { ok: true; calendar: CalendarListItem } | { ok: false; error: AddCalendarError; message: string }
 
 export const SetVisibleSchema = z.object({ calendarId: z.string().min(1), visible: z.boolean() })
 export type SetVisibleInput = z.infer<typeof SetVisibleSchema>
@@ -53,6 +74,12 @@ export interface CalendarApi {
   /** Cached occurrences overlapping the range, from visible calendars only. */
   events(range: DateRange): Promise<CalendarEvent[]>
   setVisible(input: SetVisibleInput): Promise<void>
+  /** Subscribe to a calendar by its link (https:// or webcal://), e.g. Google's secret iCal address. */
+  addLink(input: AddCalendarLinkInput): Promise<AddCalendarOutcome>
+  /** Pick an .ics file and add it as a calendar; null if the picker was cancelled. */
+  importFile(): Promise<AddCalendarOutcome | null>
+  /** Remove a calendar added by link or file. iCloud calendars can't be removed here. */
+  remove(calendarId: string): Promise<{ ok: true } | { ok: false; message: string }>
 }
 
 export const CALENDAR_IPC = {
@@ -62,4 +89,7 @@ export const CALENDAR_IPC = {
   calendarList: 'calendar:list',
   calendarEvents: 'calendar:events',
   calendarSetVisible: 'calendar:set-visible',
+  calendarAddLink: 'calendar:add-link',
+  calendarImportFile: 'calendar:import-file',
+  calendarRemove: 'calendar:remove',
 } as const
