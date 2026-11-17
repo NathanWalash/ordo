@@ -1,5 +1,8 @@
 import { z } from 'zod'
 import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-core'
+import { CALENDAR_IPC, type CalendarApi } from './calendar'
+
+export * from './calendar'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -11,6 +14,7 @@ export interface ModuleInfo {
 
 export const MODULES: readonly ModuleInfo[] = [
   { id: 'mail', name: 'Mail' },
+  { id: 'calendar', name: 'Calendar' },
   { id: 'finance', name: 'Finance', comingSoon: true },
 ]
 
@@ -67,6 +71,7 @@ export interface OrdoApi {
   senders: {
     list(): Promise<CategorisedSender[]>
   }
+  calendar: CalendarApi
 }
 
 export const IPC = {
@@ -79,4 +84,5 @@ export const IPC = {
   scanStop: 'scan:stop',
   scanProgress: 'scan:progress',
   sendersList: 'senders:list',
+  ...CALENDAR_IPC,
 } as const

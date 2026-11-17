@@ -105,6 +105,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@ordo/calendar-core':
+        specifier: workspace:*
+        version: link:../calendar-core
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../mail-core
