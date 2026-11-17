@@ -3,7 +3,9 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { ImapFlow } from 'imapflow'
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
+import { imapPort, seedMailbox, TEST_ACCOUNT } from './imap'
 import { launchApp } from './launch'
 
 // The Monzo fixture has one merchant no rule knows, Zorblax Studio, which Monzo files as "general".
@@ -14,6 +16,19 @@ const shots = process.env['ORDO_SCREENSHOTS'] === '1'
 let lmStudio: Server
 const prompts: string[] = []
 const asked: Record<string, unknown>[] = []
+const pairPrompts: string[] = []
+const pairsAsked: Record<string, unknown>[] = []
+
+/** The JSON lines between `<tag>` and `</tag>`. */
+const block = (prompt: string, tag: string) =>
+  prompt
+    .slice(prompt.indexOf(`<${tag}>`) + tag.length + 2, prompt.indexOf(`</${tag}>`))
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
+
+const reply = (content: unknown) =>
+  JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(content) } }] })
 
 function startFakeLmStudio(): Promise<string> {
   lmStudio = createServer((req, res) => {
@@ -24,23 +39,24 @@ function startFakeLmStudio(): Promise<string> {
       if (req.url === '/v1/models') return res.end(JSON.stringify({ data: [{ id: 'openai/gpt-oss-20b' }] }))
       if (req.url === '/v1/chat/completions') {
         const prompt: string = JSON.parse(body).messages.at(-1).content
+        if (prompt.includes('<pairs>')) {
+          // Bill matching: says yes to every pair.
+          pairPrompts.push(prompt)
+          const pairs = block(prompt, 'pairs')
+          pairsAsked.push(...pairs)
+          return res.end(
+            reply({ results: pairs.map((p) => ({ pair: p['pair'], match: true, confidence: 0.9 })) }),
+          )
+        }
         prompts.push(prompt)
-        const block = prompt.slice(prompt.indexOf('<merchants>') + 11, prompt.indexOf('</merchants>'))
-        const merchants = block
-          .split('\n')
-          .filter(Boolean)
-          .map((l) => JSON.parse(l) as Record<string, unknown>)
+        const merchants = block(prompt, 'merchants')
         asked.push(...merchants)
         const results = merchants.map((m) => ({
           merchant: m['merchant'],
           category: 'Shopping',
           confidence: 0.85,
         }))
-        return res.end(
-          JSON.stringify({
-            choices: [{ message: { role: 'assistant', content: JSON.stringify({ results }) } }],
-          }),
-        )
+        return res.end(reply({ results }))
       }
       res.statusCode = 404
       res.end('{}')
@@ -74,7 +90,11 @@ test.beforeAll(async () => {
       },
     }),
   )
-  app = await launchApp({ ORDO_USER_DATA: userData, ORDO_LMSTUDIO_URL: await startFakeLmStudio() })
+  app = await launchApp({
+    ORDO_USER_DATA: userData,
+    ORDO_LMSTUDIO_URL: await startFakeLmStudio(),
+    ...(imapPort && { ORDO_IMAP_HOST: '127.0.0.1', ORDO_IMAP_PORT: imapPort }),
+  })
   page = await app.firstWindow()
   await app.evaluate(({ dialog }, path) => {
     dialog.showOpenDialog = (async () => ({
@@ -167,4 +187,59 @@ test('Settings → AI has the AI for Money switch with the privacy note', async 
     await toggle.evaluate((el) => el.scrollIntoView({ block: 'center' }))
     await page.screenshot({ path: 'test-results/money-ai-settings.png' })
   }
+})
+
+test.describe('with Mail connected (GreenMail)', () => {
+  test.skip(!imapPort, 'Needs a local IMAP server: pnpm imap:start, then IMAP_TEST_PORT=3143')
+
+  // Spotify is a monthly payment in the statement; "Sptfy" emails are too different for the rules.
+  const TAG = Date.now().toString(36)
+
+  test('bill matching sends name and domain pairs, and a match waits for review in Bills', async () => {
+    await seedMailbox()
+    const c = new ImapFlow({
+      host: '127.0.0.1',
+      port: Number(imapPort),
+      secure: false,
+      auth: { user: TEST_ACCOUNT.email, pass: TEST_ACCOUNT.password },
+      logger: false,
+    })
+    await c.connect()
+    await c.append(
+      'INBOX',
+      `From: Sptfy <billing@sptfy-${TAG}.example>\r\nTo: ${TEST_ACCOUNT.email}\r\n` +
+        `Subject: Your Sptfy Premium renews on 12 Dec for £12.99\r\nDate: Mon, 16 Nov 2026 10:00:00 +0000\r\n\r\nHi\r\n`,
+    )
+    await c.logout()
+
+    await nav('Inbox').click()
+    await page.getByRole('button', { name: 'Connect iCloud' }).click()
+    await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
+    await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)
+    await page.getByRole('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
+    await page.getByRole('button', { name: 'Scan inbox' }).click()
+    await expect(page.getByRole('row', { name: /Sptfy/ })).toBeVisible({ timeout: 15_000 })
+
+    await nav('Finances').click()
+    await page.getByRole('button', { name: 'Sort with AI' }).click()
+    await expect(page.getByText(/It matched 1 bill to your email/)).toBeVisible()
+    const spotify = pairsAsked.find((p) => p['bankMerchant'] === 'Spotify')
+    expect(spotify).toMatchObject({
+      emailSender: 'Sptfy',
+      emailDomain: `sptfy-${TAG}.example`,
+      emailKinds: ['renewal'],
+    })
+    for (const leak of ['Premium', '12 Dec', '12.99', '2026'])
+      expect(pairPrompts.join('\n')).not.toContain(leak)
+
+    await nav('Bills & Subscriptions').click()
+    const review = page.getByRole('list', { name: 'Detected bills' })
+    const row = review.getByRole('listitem').filter({ hasText: 'Spotify' })
+    await expect(row.getByText('Matched by AI')).toBeVisible()
+    await expect(row.getByText('Both', { exact: true })).toBeVisible()
+    // Still waiting for you: nothing was confirmed.
+    await expect(page.getByRole('button', { name: 'Confirm Spotify' })).toBeVisible()
+    await expect(review.getByText('Sptfy', { exact: true })).toHaveCount(0)
+    if (shots) await page.screenshot({ path: 'test-results/money-ai-bills.png' })
+  })
 })
