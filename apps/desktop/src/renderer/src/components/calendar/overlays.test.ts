@@ -11,9 +11,12 @@ const item = (id: string, day: number, kind: CalendarOverlayItem['kind'] = 'bill
 const range = { start: new Date(2026, 10, 1), end: new Date(2026, 11, 1) }
 
 describe('loadOverlays', () => {
-  it('ships with no sources', async () => {
-    expect(OVERLAY_SOURCES).toEqual([])
-    expect(await loadOverlays(range)).toEqual([])
+  it('ships with Money as the only source', () => {
+    expect(OVERLAY_SOURCES.map((s) => s.id)).toEqual(['money'])
+  })
+
+  it('returns nothing when there are no sources', async () => {
+    expect(await loadOverlays(range, [])).toEqual([])
   })
 
   it('merges sources by date, drops items outside the range and skips failing sources', async () => {

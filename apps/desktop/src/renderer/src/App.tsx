@@ -75,6 +75,7 @@ export function App() {
               account={account}
               onConnect={() => setConnecting(true)}
               onScanned={() => void refreshAccount()}
+              onOpenSettings={() => setRoute('settings')}
             />
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}

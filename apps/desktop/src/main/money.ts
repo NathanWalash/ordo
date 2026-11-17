@@ -6,6 +6,7 @@ import {
   allocate,
   applySuggestions,
   balances,
+  billsToCalendarItems,
   detectRecurring,
   emailHints,
   filterTransactions,
@@ -35,6 +36,7 @@ import {
   StatementInputSchema,
   TransactionQuerySchema,
   type BillView,
+  type CalendarOverlayItem,
   type ImportOutcome,
   type MoneyOverview,
   type MoneyResult,
@@ -182,6 +184,33 @@ async function overview(): Promise<MoneyOverview> {
   }
 }
 
+const DAY_MS = 86_400_000
+const isDate = (d: unknown): d is Date => d instanceof Date && !Number.isNaN(d.getTime())
+
+/** Bills, renewals and trial ends in `[start, end)` as Calendar overlay items. Amounts are GBP. */
+async function dueDates(raw: unknown): Promise<CalendarOverlayItem[]> {
+  const r = raw as { start?: unknown; end?: unknown } | null
+  if (!isDate(r?.start) || !isDate(r?.end)) return []
+  const { start, end } = r as { start: Date; end: Date }
+  // The calendar asks for a month or a week at a time; refuse anything absurd.
+  if (end <= start || end.getTime() - start.getTime() > 400 * DAY_MS) return []
+  const { bills } = await current()
+  const items = billsToCalendarItems(bills, {
+    from: toISODate(start),
+    to: toISODate(new Date(end.getTime() - 1)),
+  })
+  return items.map((i) => {
+    const [y, m, d] = i.date.split('-').map(Number) as [number, number, number]
+    return {
+      id: `money:${i.id}`,
+      date: new Date(y, m - 1, d),
+      title: i.title,
+      kind: i.kind,
+      ...(i.amount !== undefined && { amount: { value: i.amount / 100, currency: 'GBP' } }),
+    }
+  })
+}
+
 async function confirmBill(raw: unknown): Promise<MoneyResult> {
   const parsed = ConfirmBillSchema.safeParse(raw)
   if (!parsed.success) return fail(firstIssue(parsed.error))
@@ -315,6 +344,7 @@ export function registerMoneyIpc(): void {
   ipcMain.handle(MONEY_IPC.saveSplit, (_e, input: unknown) => saveSplit(input))
   ipcMain.handle(MONEY_IPC.deleteSplit, (_e, billId: unknown) => moneyStore().deleteSplit(String(billId)))
   ipcMain.handle(MONEY_IPC.settle, (_e, input: unknown) => settle(input))
+  ipcMain.handle(MONEY_IPC.dueDates, (_e, range: unknown) => dueDates(range))
   ipcMain.handle(MONEY_IPC.deleteSettlement, (_e, id: unknown) => moneyStore().deleteSettlement(String(id)))
 }
 

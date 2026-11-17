@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ExternalLink, ShieldCheck, Trash2, Zap } from 'lucide-react'
+import { ExternalLink, ShieldCheck, Sparkles, Trash2, Zap } from 'lucide-react'
 import type { Category, CategorisedSender } from '@ordo/mail-core'
 import { Button } from './Button'
 
@@ -13,8 +13,11 @@ export const CATEGORY_LABELS: { id: Category; label: string }[] = [
 ]
 export const categoryColor = (c: Category) => `var(--${c})`
 
+/** A sender, plus who sorted it when AI sorting is on. */
+export type ListedSender = CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number }
+
 interface Props {
-  senders: CategorisedSender[]
+  senders: ListedSender[]
   /** Shown above the makeup bar, e.g. a sample-data notice. */
   banner?: ReactNode
   /** Right side of the summary line, e.g. a "Scan again" button. */
@@ -124,6 +127,14 @@ export function SenderTable({ senders, banner, actions, onReview }: Props) {
                         style={{ background: categoryColor(s.category) }}
                       />
                       <span className="truncate font-medium">{s.name ?? s.address}</span>
+                      {s.sortedBy === 'ai' && (
+                        <span
+                          className="flex shrink-0 items-center text-ink-3"
+                          title={`Sorted by AI${s.confidence !== undefined ? ` (${Math.round(s.confidence * 100)}% sure)` : ''}`}
+                        >
+                          <Sparkles size={11} aria-label="Sorted by AI" />
+                        </span>
+                      )}
                     </div>
                     <div className="truncate pl-4 text-[12px] text-ink-2">
                       {person ? "Someone you've written to. Never included in bulk actions." : s.address}
@@ -147,7 +158,7 @@ export function SenderTable({ senders, banner, actions, onReview }: Props) {
         <span className="flex items-center gap-1.5 text-ink-2">
           <ShieldCheck size={14} />
           {chosen.length
-            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, recoverable for 30 days.`
+            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, and you can undo the move from History.`
             : 'Select senders to clear. Emails go to Trash, not deleted.'}
         </span>
         <Button

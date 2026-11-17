@@ -88,6 +88,19 @@ test('detected subscriptions can be confirmed', async () => {
   await expect(review.getByText('Thames Water')).toHaveCount(0)
 })
 
+test('confirmed bills show on the Calendar', async () => {
+  await page.getByRole('navigation').getByRole('button', { name: 'Calendar' }).click()
+  await page.getByRole('radiogroup', { name: 'Calendar view' }).getByRole('radio', { name: 'Agenda' }).click()
+  // Netflix is monthly, so next month always has a due date whatever today is.
+  await page.getByRole('button', { name: 'Next' }).click()
+  const due = page.getByRole('button', { name: /Netflix/ }).first()
+  await expect(due).toBeVisible()
+  await expect(due).toContainText('£10.99')
+  // A dismissed suggestion never reaches the calendar.
+  await expect(page.getByRole('button', { name: /Thames Water/ })).toHaveCount(0)
+  await nav('Bills & Subscriptions').click()
+})
+
 test('splits a bill with a flatmate and settles up', async () => {
   await page.getByLabel('Flatmate name').fill('Sam')
   await page.getByRole('button', { name: 'Add', exact: true }).click()

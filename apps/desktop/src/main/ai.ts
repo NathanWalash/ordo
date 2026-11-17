@@ -96,6 +96,33 @@ export async function test(input: AiTestInput): Promise<AiTestResult> {
 
 let running: AbortController | null = null
 
+/** The model a sort uses: the saved one, or the provider's recommended one. Cache keys depend on it. */
+async function resolveModel(ai: AiSettings): Promise<string | undefined> {
+  if (ai.provider === 'none') return undefined
+  if (ai.model) return ai.model
+  return recommendedModel(ai.provider, await providers[ai.provider].listModels()) ?? undefined
+}
+
+/**
+ * The sender list, with earlier AI answers applied from the cache when AI sorting is on.
+ * Never asks a model; if anything goes wrong it falls back to the rules alone.
+ */
+export async function sendersWithAi() {
+  const list = senders()
+  const ai = readSettings(settingsFile()).ai
+  if (ai.provider === 'none' || !ai.sortSenders || !allowed(ai, ai.provider)) return list
+  try {
+    const result = await aiCategorise(list, providers[ai.provider], {
+      model: await resolveModel(ai),
+      cache: mailStore(),
+      cacheOnly: true,
+    })
+    return result.senders
+  } catch {
+    return list
+  }
+}
+
 export async function categoriseSenders(
   sender: WebContents,
   input: AiSortInput = {},
@@ -111,7 +138,7 @@ export async function categoriseSenders(
   running = new AbortController()
   const provider = providers[ai.provider]
   try {
-    const model = ai.model ?? recommendedModel(ai.provider, await provider.listModels()) ?? undefined
+    const model = await resolveModel(ai)
     const result = await aiCategorise(senders(), provider, {
       model,
       scope: parsed.data.scope,

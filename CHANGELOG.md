@@ -8,6 +8,8 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Sort with AI in Unclutter: asks the model chosen in Settings → AI about the senders in Other, with progress, Stop and a summary. Sorted rows show a sparkle with the model's confidence, and earlier answers are kept without asking again. Without a model set up, the button opens Settings.
+- Bill due dates, yearly renewals and trial ends from Money appear on the Calendar, drawn so they never look like events.
 - Unclutter clean-up. "Review and clear" opens a review sheet listing the selected senders, with Unsubscribe (one-click, link or email) and Move to Trash for each, a summary and a Clear button. People you've written to are refused again in the main process, whatever the window sends.
 - One-click unsubscribe (RFC 8058) is a cookie-less HTTPS POST from the main process with a 10 second timeout and at most three https-only redirects. It never reaches private, local or link-local addresses, checked when connecting, so DNS tricks can't get round it.
 - Unsubscribe links open in your browser; plain http links only after the sheet has shown you the URL and you've turned them on.

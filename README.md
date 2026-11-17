@@ -43,7 +43,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Scan inbox headers and group by sender                                 | Done    |
 | Sort senders with rules                                                | Done    |
 | AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test  | Done    |
-| Sort unsure senders with a model (engine and IPC; Unclutter UI next)   | Next    |
+| Sort with AI in Unclutter: a model sorts the senders in Other          | Done    |
 | One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Done    |
 | Unclutter clean-up history with undo                                   | Done    |
 | Full mail client: read, search, compose                                | Planned |
@@ -52,7 +52,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: import bank statement CSVs, spending by category and month      | Done    |
 | Money: find bills and subscriptions in statements and email receipts   | Done    |
 | Money: split bills with flatmates, balances and settling up            | Done    |
-| Money: bill due dates on the Calendar                                  | Next    |
+| Money: bill due dates, renewals and trial ends on the Calendar         | Done    |
 | Money: local-model help matching bills to receipts                     | Planned |
 
 ## Install

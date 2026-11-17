@@ -321,6 +321,26 @@ describe('aiCategorise with the SQLite cache', () => {
     expect(store.getAiCategories('lmstudio:m1', ['a@x.example']).size).toBe(0)
   })
 
+  it('applies only cached answers with cacheOnly, never asking the model', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'ordo-ai-cache-'))
+    store = new MailStore(join(dir, 'mail.sqlite'))
+    const known = sender('a@x.example')
+    await aiCategorise([known], fakeProvider(answerAll('receipts')).provider, { model: 'm', cache: store })
+
+    const quiet = fakeProvider(answerAll('promotions'))
+    const r = await aiCategorise([known, sender('new@x.example')], quiet.provider, {
+      model: 'm',
+      cache: store,
+      cacheOnly: true,
+    })
+    expect(quiet.calls).toHaveLength(0)
+    expect(r.senders.map((s) => [s.address, s.category, s.sortedBy])).toEqual([
+      ['a@x.example', 'receipts', 'ai'],
+      ['new@x.example', 'uncategorised', 'rules'],
+    ])
+    expect(r).toMatchObject({ cached: 1, failed: 0 })
+  })
+
   it('ignores a cached People answer', async () => {
     dir = mkdtempSync(join(tmpdir(), 'ordo-ai-cache-'))
     store = new MailStore(join(dir, 'mail.sqlite'))
