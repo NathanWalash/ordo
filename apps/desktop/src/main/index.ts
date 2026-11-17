@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
@@ -25,8 +26,20 @@ function winOverlay() {
   }
 }
 
+/**
+ * In development Ordo runs inside the stock Electron app, which shows Electron's icon. Point the
+ * Dock (macOS) and the window (Windows, Linux) at Ordo's own icon. Packaged builds get it from
+ * electron-builder instead.
+ */
+const devIcon = (() => {
+  if (app.isPackaged) return undefined
+  const icon = join(__dirname, '../../build/icon.png')
+  return existsSync(icon) ? icon : undefined
+})()
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
+    ...(devIcon && !isMac && { icon: devIcon }),
     width: 1240,
     height: 800,
     minWidth: 920,
@@ -102,6 +115,7 @@ app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
+  if (devIcon && isMac) app.dock?.setIcon(devIcon)
   setupAppearance()
   setupAi()
   createWindow()
