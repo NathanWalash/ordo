@@ -22,7 +22,8 @@ export type CleanupRequest = z.input<typeof CleanupRequestSchema>
 
 export const CleanupIdSchema = z.number().int().positive()
 
-export type CleanupError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'busy' | 'unknown'
+/** `busy`: a scan or clean-up is running in this process; `locked`: another Ordo process is writing. */
+export type CleanupError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'busy' | 'locked' | 'unknown'
 
 export type CleanupOutcome =
   | {

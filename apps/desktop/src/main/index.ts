@@ -5,8 +5,11 @@ import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
-import { sendersWithAi, setupAi } from './ai'
+import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
+import { releaseWriteLock, toRenderer } from './writes'
+import { headlessArgs } from './headless/args'
+import { runHeadless } from './headless/run'
 
 app.setName('Ordo')
 
@@ -73,43 +76,59 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-ipcMain.handle(IPC.appInfo, (): AppInfo => {
-  const accent = isMac || isWin ? systemPreferences.getAccentColor() : ''
-  return {
-    name: app.getName(),
-    version: app.getVersion(),
-    platform: process.platform as AppInfo['platform'],
-    accentColor: accent ? `#${accent.slice(0, 6)}` : null,
-  }
-})
-
-ipcMain.handle(IPC.accountStatus, () => mail.status())
-ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
-ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
-ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
-ipcMain.handle(IPC.scanStop, () => mail.stopScan())
-ipcMain.handle(IPC.sendersList, () => sendersWithAi())
-registerCalendarIpc()
-registerCleanupIpc()
-registerMoneyIpc()
-
-app.on('before-quit', () => mail.closeMail())
-app.on('before-quit', () => closeCalendar())
-app.on('before-quit', () => closeMoney())
-
-app.whenReady().then(() => {
+/** Start-up overrides for tests, honoured identically by the app and headless mode. */
+function applyTestOverrides(): void {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
-  setupAppearance()
-  setupAi()
-  createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
-})
+}
 
-app.on('window-all-closed', () => {
-  if (!isMac) app.quit()
-})
+/** The app with its window: IPC handlers for the renderer, then the window once Electron is ready. */
+function startApp(): void {
+  ipcMain.handle(IPC.appInfo, (): AppInfo => {
+    const accent = isMac || isWin ? systemPreferences.getAccentColor() : ''
+    return {
+      name: app.getName(),
+      version: app.getVersion(),
+      platform: process.platform as AppInfo['platform'],
+      accentColor: accent ? `#${accent.slice(0, 6)}` : null,
+    }
+  })
+
+  ipcMain.handle(IPC.accountStatus, () => mail.status())
+  ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
+  ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
+  ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
+  ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
+  ipcMain.handle(IPC.scanStop, () => mail.stopScan())
+  ipcMain.handle(IPC.sendersList, () => sendersWithAi())
+  registerCalendarIpc()
+  registerCleanupIpc()
+  registerMoneyIpc()
+
+  app.on('before-quit', () => mail.closeMail())
+  app.on('before-quit', () => closeCalendar())
+  app.on('before-quit', () => closeMoney())
+  app.whenReady().then(() => {
+    applyTestOverrides()
+    setupAppearance()
+    initAi()
+    registerAiIpc()
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+
+  app.on('window-all-closed', () => {
+    if (!isMac) app.quit()
+  })
+}
+
+// A write cut short by quitting must not leave the lock behind for the next run.
+process.on('exit', releaseWriteLock)
+
+// `--headless <command>` or `--headless --mcp`: no window, see headless/run.ts and docs/headless.md.
+const headless = headlessArgs(process.argv)
+if (headless) void runHeadless(headless, applyTestOverrides)
+else startApp()

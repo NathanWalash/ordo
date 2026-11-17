@@ -112,6 +112,8 @@ export class MailStore implements AiCategoryCache {
 
   constructor(path: string) {
     this.db = new DatabaseSync(path)
+    // The app and a headless Ordo may share this file: wait for the other's write instead of failing.
+    this.db.exec('PRAGMA busy_timeout = 5000;')
     this.db.exec('PRAGMA journal_mode = WAL;')
     this.db.exec(SCHEMA)
   }

@@ -66,7 +66,7 @@ export type AiSortOutcome =
       failed: number
       errors: string[]
     }
-  | { ok: false; message: string }
+  | { ok: false; message: string; error?: 'locked' }
 
 export interface AiApi {
   /** Detect every provider. `refresh` looks for newly installed CLIs again. */

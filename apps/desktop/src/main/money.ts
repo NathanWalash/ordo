@@ -1,5 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { open, readFile, realpath, stat } from 'node:fs/promises'
+import { basename, extname, join, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import {
   ME,
@@ -41,10 +41,12 @@ import {
   type MoneyOverview,
   type MoneyResult,
   type StatementFile,
+  type StatementInput,
   type StatementPreview,
   type TransactionPage,
 } from '@ordo/shared'
 import { cachedInboxHeaders } from './mail'
+import { Locked, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
 const moneyStore = () => (store ??= new MoneyStore(join(app.getPath('userData'), 'money.sqlite')))
@@ -74,6 +76,48 @@ async function pickStatement(win: BrowserWindow | null): Promise<StatementFile |
   return { fileName, text: await readFile(path, 'utf8') }
 }
 
+/** Headless imports read a file named on the command line: a CSV export, never anything big. */
+export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
+
+/**
+ * Import a statement from a path (headless mode). The path must resolve to a regular `.csv`
+ * file under 5 MB; it is then parsed and saved exactly like a file picked in the app.
+ */
+export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+  let real: string
+  try {
+    real = await realpath(resolve(path))
+  } catch {
+    return { ok: false, message: 'That file doesn’t exist.' }
+  }
+  if (extname(real).toLowerCase() !== '.csv')
+    return { ok: false, message: 'Choose a .csv bank statement export.' }
+  // Check before opening: opening a FIFO or device could block or never end.
+  if (!(await stat(real)).isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+  const tooBig = {
+    ok: false,
+    message: 'That file is too big to be a bank statement export (over 5 MB).',
+  } as const
+  const file = await open(real, 'r')
+  let bytes: Buffer
+  try {
+    const info = await file.stat()
+    if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+    if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
+    bytes = await file.readFile()
+  } finally {
+    await file.close()
+  }
+  if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
+  return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
+}
+
+/** How much is stored, for `status`. */
+export function counts(): { transactions: number; accounts: number; bills: number } {
+  const s = moneyStore()
+  return { transactions: s.transactions().length, accounts: s.accounts().length, bills: s.bills().length }
+}
+
 /** `Monzo` for a recognised Monzo export, otherwise the file name (`joint-account.csv` → `Joint account`). */
 function accountNameFor(layout: string | null, fileName: string): string {
   if (layout && layout !== 'CSV' && layout !== 'Custom') return layout
@@ -81,7 +125,7 @@ function accountNameFor(layout: string | null, fileName: string): string {
   return base ? base.charAt(0).toUpperCase() + base.slice(1) : 'Bank account'
 }
 
-function previewStatement(raw: unknown): StatementPreview {
+export function previewStatement(raw: unknown): StatementPreview {
   const input = StatementInputSchema.parse(raw)
   const r = parseStatement(input.text, { accountName: 'preview', mapping: input.mapping })
   if (!r.ok) return { ...r, suggestedAccount: accountNameFor(null, input.fileName) }
@@ -100,10 +144,15 @@ function previewStatement(raw: unknown): StatementPreview {
   }
 }
 
-function importStatement(raw: unknown): ImportOutcome {
+/** Save a statement's transactions. Re-imported transactions are skipped. */
+export async function importStatement(raw: unknown): Promise<ImportOutcome> {
   const parsed = StatementInputSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
-  const input = parsed.data
+  const result = await withWriteLock('importing a statement', async () => saveStatement(parsed.data))
+  return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
+}
+
+function saveStatement(input: StatementInput): ImportOutcome {
   const detected = parseStatement(input.text, { accountName: 'preview', mapping: input.mapping })
   const accountName =
     input.accountName || accountNameFor(detected.ok ? detected.layout : null, input.fileName)
@@ -112,7 +161,7 @@ function importStatement(raw: unknown): ImportOutcome {
   return { ok: true, accountName, ...moneyStore().addTransactions(r.transactions) }
 }
 
-function transactions(raw: unknown): TransactionPage {
+export function transactions(raw: unknown): TransactionPage {
   const q = TransactionQuerySchema.parse(raw ?? {})
   const s = moneyStore()
   const all = s.transactions()
@@ -159,7 +208,7 @@ async function current() {
   return { today, stored, ...found, ...resolved }
 }
 
-async function overview(): Promise<MoneyOverview> {
+export async function overview(): Promise<MoneyOverview> {
   const s = moneyStore()
   const c = await current()
   const splits = s.splits()
@@ -188,7 +237,7 @@ const DAY_MS = 86_400_000
 const isDate = (d: unknown): d is Date => d instanceof Date && !Number.isNaN(d.getTime())
 
 /** Bills, renewals and trial ends in `[start, end)` as Calendar overlay items. Amounts are GBP. */
-async function dueDates(raw: unknown): Promise<CalendarOverlayItem[]> {
+export async function dueDates(raw: unknown): Promise<CalendarOverlayItem[]> {
   const r = raw as { start?: unknown; end?: unknown } | null
   if (!isDate(r?.start) || !isDate(r?.end)) return []
   const { start, end } = r as { start: Date; end: Date }
