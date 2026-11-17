@@ -94,6 +94,12 @@ importers:
         specifier: ^2.12.1
         version: 2.12.1
 
+  packages/money-core:
+    dependencies:
+      '@ordo/mail-core':
+        specifier: workspace:*
+        version: link:../mail-core
+
   packages/shared:
     dependencies:
       '@ordo/mail-core':

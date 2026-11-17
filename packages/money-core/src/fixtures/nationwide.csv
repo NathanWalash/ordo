@@ -1,0 +1,12 @@
+"Account Name:","FlexAccount ****1234"
+"Account Balance:","£1,204.33"
+"Available Balance: ","£1,204.33"
+
+"Date","Transaction type","Description","Paid out","Paid in","Balance"
+"04 Sep 2026","Direct debit","SKY DIGITAL","£35.00","","£2,840.10"
+"10 Sep 2026","Visa purchase","CARD PAYMENT TO TFL TRAVEL CH ON 09-09-2026","£2.80","","£2,837.30"
+"11 Sep 2026","Visa purchase","CARD PAYMENT TO WAITROSE 1234 ON 10-09-2026","£64.12","","£2,773.18"
+"30 Sep 2026","Bank credit","SALARY ACME","","£2,450.00","£5,223.18"
+"04 Oct 2026","Direct debit","SKY DIGITAL","£35.00","","£5,188.18"
+"04 Nov 2026","Direct debit","SKY DIGITAL","£35.00","","£5,153.18"
+"05 Nov 2026","Visa purchase","CARD PAYMENT TO DISNEY PLUS ON 04-11-2026","£4.99","","£5,148.19"
