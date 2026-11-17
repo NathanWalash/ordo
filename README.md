@@ -19,8 +19,8 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** You can connect iCloud, scan your inbox and see who's filling it.
-> Unsubscribing and clearing mail is next. See the [roadmap](#roadmap).
+> **Early days.** You can connect iCloud, scan your inbox, see who's filling it, and
+> unsubscribe and clear senders with a review step and undo. See the [roadmap](#roadmap).
 
 ## Why Ordo
 
@@ -39,12 +39,13 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Home screen and module sidebar                                         | Done    |
 | Unclutter preview with sample data                                     | Done    |
 | Light, dark or system theme, with frosted glass surfaces               | Done    |
-| Connect iCloud (app-specific password in the Keychain)                 | Next    |
-| Scan inbox headers and group by sender                                 | Planned |
+| Connect iCloud (app-specific password in the Keychain)                 | Done    |
+| Scan inbox headers and group by sender                                 | Done    |
 | Sort senders with rules                                                | Done    |
 | AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test  | Done    |
 | Sort unsure senders with a model (engine and IPC; Unclutter UI next)   | Next    |
-| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Next    |
+| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Done    |
+| Unclutter clean-up history with undo                                   | Done    |
 | Full mail client: read, search, compose                                | Planned |
 | Finance module                                                         | Later   |
 

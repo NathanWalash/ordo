@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type OrdoApi, type ScanProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
+import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
 
 const api: OrdoApi = {
   app: {
@@ -45,6 +46,16 @@ const api: OrdoApi = {
   },
   senders: {
     list: () => ipcRenderer.invoke(IPC.sendersList),
+  },
+  cleanup: {
+    run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),
+    onProgress: (listener) => {
+      const handler = (_e: IpcRendererEvent, p: CleanupProgress) => listener(p)
+      ipcRenderer.on(CLEANUP_IPC.progress, handler)
+      return () => ipcRenderer.removeListener(CLEANUP_IPC.progress, handler)
+    },
+    history: () => ipcRenderer.invoke(CLEANUP_IPC.history),
+    undo: (id) => ipcRenderer.invoke(CLEANUP_IPC.undo, id),
   },
 }
 

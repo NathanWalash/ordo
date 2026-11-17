@@ -22,14 +22,33 @@ import {
 } from '@ordo/shared'
 import { canStoreSecrets, deleteAccount, loadAccount, recordScan, saveAccount } from './account'
 
-const INBOX = 'INBOX'
+export const INBOX = 'INBOX'
 let store: MailStore | null = null
 let running: AbortController | null = null
+/** A clean-up or undo is changing the mailbox; scans wait for it. */
+let changing = false
 
 export const mailStore = () => (store ??= new MailStore(join(app.getPath('userData'), 'mail.sqlite')))
 
+/** Run `fn` unless a scan or another change is already running. Returns null when busy. */
+export async function exclusively<T>(fn: () => Promise<T>): Promise<T | null> {
+  if (running || changing) return null
+  changing = true
+  try {
+    return await fn()
+  } finally {
+    changing = false
+  }
+}
+
+/**
+ * Test-only: an unpackaged build may treat http://127.0.0.1 unsubscribe links like https,
+ * so end-to-end tests can point one-click unsubscribe at a local server. Never in packaged builds.
+ */
+export const allowLoopbackHttp = () => !app.isPackaged && process.env['ORDO_TEST_ALLOW_LOOPBACK_HTTP'] === '1'
+
 /** iCloud by default. Tests can point an unpackaged build at a local IMAP server. */
-function imapConfig(user: string, pass: string): ImapConfig {
+export function imapConfig(user: string, pass: string): ImapConfig {
   const host = !app.isPackaged ? process.env['ORDO_IMAP_HOST'] : undefined
   if (host)
     return {
@@ -42,7 +61,7 @@ function imapConfig(user: string, pass: string): ImapConfig {
   return { ...ICLOUD_IMAP, user, pass }
 }
 
-function explain(err: unknown): { error: ConnectError; message: string } {
+export function explain(err: unknown): { error: ConnectError; message: string } {
   if (err instanceof MailAuthError)
     return {
       error: 'auth',
@@ -105,6 +124,7 @@ export async function startScan(sender: WebContents): Promise<ScanOutcome> {
   const a = loadAccount()
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
   if (running) return { ok: false, error: 'unknown', message: 'A scan is already running.' }
+  if (changing) return { ok: false, error: 'unknown', message: 'Wait for the clean-up to finish.' }
   running = new AbortController()
   const provider = new ImapMailProvider(imapConfig(a.email, a.password))
   try {
@@ -130,7 +150,7 @@ export function stopScan(): void {
 
 export function senders() {
   const s = mailStore()
-  return analyseSenders(s.headers(INBOX), s.repliedTo())
+  return analyseSenders(s.headers(INBOX), s.repliedTo(), { allowLoopbackHttp: allowLoopbackHttp() })
 }
 
 export function closeMail(): void {

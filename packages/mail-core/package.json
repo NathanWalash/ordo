@@ -13,6 +13,9 @@
   "dependencies": {
     "@ordo/ai": "workspace:*",
     "imapflow": "^2.12.1",
+    "nodemailer": "^10.3.1",
+    "tldts": "~7.4.19",
+    "undici": "^7.30.2",
     "zod": "^4.6.7"
   }
 }

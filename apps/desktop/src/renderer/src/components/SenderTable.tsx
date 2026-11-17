@@ -19,10 +19,12 @@ interface Props {
   banner?: ReactNode
   /** Right side of the summary line, e.g. a "Scan again" button. */
   actions?: ReactNode
+  /** Open the review sheet for the selected senders. Without it (sample data) clearing is off. */
+  onReview?: (chosen: CategorisedSender[]) => void
 }
 
 /** Inbox makeup, category filters and a selectable sender list. People can never be selected. */
-export function SenderTable({ senders, banner, actions }: Props) {
+export function SenderTable({ senders, banner, actions, onReview }: Props) {
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -35,7 +37,8 @@ export function SenderTable({ senders, banner, actions }: Props) {
     .filter((c) => c.id === 'people' || c.id === 'uncategorised')
     .reduce((n, c) => n + c.count, 0)
   const visible = senders.filter((s) => filter === 'all' || s.category === filter)
-  const chosen = senders.filter((s) => selected.has(s.address))
+  // People can't be selected, but never pass one on even if the state says so.
+  const chosen = senders.filter((s) => selected.has(s.address) && s.category !== 'people')
   const chosenCount = chosen.reduce((n, s) => n + s.count, 0)
 
   const toggle = (address: string) =>
@@ -144,14 +147,15 @@ export function SenderTable({ senders, banner, actions }: Props) {
         <span className="flex items-center gap-1.5 text-ink-2">
           <ShieldCheck size={14} />
           {chosen.length
-            ? `${chosen.length} senders, ${chosenCount.toLocaleString()} emails. They'll go to Trash, recoverable for 30 days.`
+            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, recoverable for 30 days.`
             : 'Select senders to clear. Emails go to Trash, not deleted.'}
         </span>
         <Button
           variant="primary"
           icon={<Trash2 size={14} />}
-          disabled
-          title="Review and clean-up arrive in the next update"
+          disabled={!chosen.length || !onReview}
+          title={onReview ? undefined : 'Connect iCloud to clear your own mail'}
+          onClick={() => onReview?.(chosen)}
         >
           Review and clear
         </Button>
