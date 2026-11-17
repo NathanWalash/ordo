@@ -1,18 +1,54 @@
 import { useEffect, useState } from 'react'
-import { FileUp, Landmark } from 'lucide-react'
-import { formatPence } from '@ordo/money-core'
-import type { TransactionPage } from '@ordo/shared'
+import { FileUp, Landmark, Sparkles } from 'lucide-react'
+import { SPENDING_CATEGORIES, formatPence, type Transaction } from '@ordo/money-core'
+import {
+  AI_PROVIDERS,
+  type AiSettings,
+  type MoneyAiOutcome,
+  type MoneyAiProgress,
+  type TransactionPage,
+} from '@ordo/shared'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { formatDate, formatMonth, Notice, Panel, Select } from '../components/money/ui'
 import { useStatementImport } from '../components/money/useStatementImport'
 
-export function FinancesPage() {
+const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/** What Sort with AI did, in a sentence or two. */
+function sortSummary(name: string, r: Extract<MoneyAiOutcome, { ok: true }>): string {
+  const parts = [
+    r.changed
+      ? `${name} sorted ${plural(r.changed, 'merchant')} out of Other.`
+      : r.merchants
+        ? `${name} left everything in Other where it was.`
+        : 'Nothing was left in Other.',
+  ]
+  if (r.billsMatched)
+    parts.push(
+      `It matched ${plural(r.billsMatched, 'bill')} to your email: check them in Bills & Subscriptions.`,
+    )
+  if (r.failed) parts.push(`${plural(r.failed, 'merchant')} couldn't be sorted.`)
+  return [...parts, ...r.errors].join(' ')
+}
+
+export function FinancesPage({ onOpenSettings }: { onOpenSettings?: () => void }) {
   const [page, setPage] = useState<TransactionPage | null>(null)
   const [account, setAccount] = useState('')
   const [month, setMonth] = useState('')
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [ai, setAi] = useState<AiSettings | null>(null)
+  const [sorting, setSorting] = useState<MoneyAiProgress | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void window.ordo.settings.get().then((s) => live && setAi(s.ai))
+    return () => {
+      live = false
+    }
+  }, [])
 
   const importer = useStatementImport((o) => {
     setNotice(
@@ -33,6 +69,37 @@ export function FinancesPage() {
   }, [account, month, version])
 
   if (!page) return null
+
+  const aiReady = ai !== null && ai.provider !== 'none' && ai.money
+  const aiName = AI_PROVIDERS.find((p) => p.id === ai?.provider)?.label ?? 'AI'
+  const unsure = page.uncategorisedMerchants
+
+  const sortWithAi = async () => {
+    if (!aiReady) return onOpenSettings?.()
+    setError(null)
+    setNotice(null)
+    setSorting({ phase: 'categories', done: 0, total: unsure })
+    const off = window.ordo.money.onAiProgress(setSorting)
+    try {
+      const res = await window.ordo.money.aiSort()
+      if (!res.ok) setError(res.message)
+      else setNotice(sortSummary(aiName, res))
+      setVersion((v) => v + 1)
+    } finally {
+      off()
+      setSorting(null)
+    }
+  }
+
+  const setCategory = async (t: Transaction, category: string | null) => {
+    setError(null)
+    const res = await window.ordo.money.setCategory({
+      transactionId: t.id,
+      category: category as (typeof SPENDING_CATEGORIES)[number] | null,
+    })
+    if (!res.ok) setError(res.message)
+    setVersion((v) => v + 1)
+  }
 
   const importButton = (
     <Button variant="primary" icon={<FileUp size={14} />} onClick={() => void importer.pick()}>
@@ -79,14 +146,45 @@ export function FinancesPage() {
           ))}
         </Select>
         <span className="flex-1" />
+        {(unsure > 0 || aiReady) && (
+          <Button
+            icon={<Sparkles size={13} />}
+            disabled={Boolean(sorting)}
+            onClick={() => void sortWithAi()}
+            title={
+              aiReady
+                ? `Ask ${aiName} to categorise the ${plural(unsure, 'merchant')} in Other and match bills to your email. It sees merchant names and rough amounts, never balances, accounts or dates.`
+                : 'Set up a model and turn on AI for Money in Settings → AI'
+            }
+          >
+            Sort with AI
+          </Button>
+        )}
         {importButton}
       </div>
 
-      {notice && (
+      {sorting ? (
+        <div
+          className="mt-3 flex items-center justify-between gap-3 rounded-md bg-hover px-3 py-2 text-ink-2"
+          aria-live="polite"
+        >
+          <span className="flex items-center gap-1.5">
+            <Sparkles size={13} />
+            {sorting.phase === 'categories'
+              ? `Sorting with ${aiName}… ${sorting.done} of ${plural(sorting.total, 'merchant')}`
+              : `Matching bills with ${aiName}… ${sorting.done} of ${sorting.total}`}
+          </span>
+          <Button onClick={() => void window.ordo.money.aiStop()}>Stop</Button>
+        </div>
+      ) : error ? (
+        <div className="mt-3">
+          <Notice tone="error">{error}</Notice>
+        </div>
+      ) : notice ? (
         <div className="mt-3">
           <Notice>{notice}</Notice>
         </div>
-      )}
+      ) : null}
 
       <div className="mt-4 grid grid-cols-3 gap-3">
         <Stat label="Money in" value={formatPence(summary.moneyIn)} tone="in" />
@@ -148,7 +246,7 @@ export function FinancesPage() {
             <tr className="border-b border-sep">
               <th className="w-24 py-1.5 pl-4 font-medium">Date</th>
               <th className="font-medium">Merchant</th>
-              <th className="w-32 font-medium">Category</th>
+              <th className="w-40 font-medium">Category</th>
               {showAccount && <th className="w-28 font-medium">Account</th>}
               <th className="w-28 pr-4 text-right font-medium">Amount</th>
             </tr>
@@ -160,7 +258,9 @@ export function FinancesPage() {
                 <td className="truncate pr-3" title={t.description}>
                   {t.merchant ?? t.description}
                 </td>
-                <td className="truncate pr-3 text-ink-2">{t.category}</td>
+                <td className="pr-3">
+                  <CategoryCell transaction={t} onChange={(c) => void setCategory(t, c)} />
+                </td>
                 {showAccount && <td className="truncate pr-3 text-ink-2">{t.accountName}</td>}
                 <td className={`pr-4 text-right tabular-nums ${t.amount > 0 ? 'text-success' : ''}`}>
                   {t.amount > 0 ? '+' : ''}
@@ -173,6 +273,51 @@ export function FinancesPage() {
       </div>
       {importer.overlay}
       {importer.sheet}
+    </div>
+  )
+}
+
+const AUTOMATIC = '__automatic__'
+
+/**
+ * The category, as a menu to change it. A sparkle marks a model's choice, with its confidence.
+ * Your own choice always wins; "Automatic" goes back to the bank's, the rules' or the model's.
+ */
+function CategoryCell({
+  transaction: t,
+  onChange,
+}: {
+  transaction: Transaction
+  onChange: (category: string | null) => void
+}) {
+  const current = t.category ?? 'Other'
+  const options: string[] = SPENDING_CATEGORIES.includes(current as never)
+    ? [...SPENDING_CATEGORIES]
+    : [current, ...SPENDING_CATEGORIES]
+  const name = t.merchant ?? t.description
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <select
+        aria-label={`Category for ${name}`}
+        value={current}
+        onChange={(e) => onChange(e.target.value === AUTOMATIC ? null : e.target.value)}
+        className="no-drag -ml-1 h-6 min-w-0 max-w-full appearance-none [field-sizing:content] truncate rounded-[5px] bg-transparent px-1 text-[13px] text-ink-2 outline-none hover:bg-hover focus:ring-1 focus:ring-accent"
+      >
+        {options.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+        {t.categorisedBy === 'you' && <option value={AUTOMATIC}>Automatic</option>}
+      </select>
+      {t.categorisedBy === 'ai' && (
+        <span
+          className="flex shrink-0 items-center text-ink-3"
+          title={`Categorised by AI${t.confidence !== undefined ? ` (${Math.round(t.confidence * 100)}% sure)` : ''}`}
+        >
+          <Sparkles size={11} aria-label="Categorised by AI" />
+        </span>
+      )}
     </div>
   )
 }

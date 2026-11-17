@@ -80,7 +80,7 @@ export function App() {
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
           {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
-          {route === 'money/finances' && <FinancesPage />}
+          {route === 'money/finances' && <FinancesPage onOpenSettings={() => setRoute('settings')} />}
           {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
           {route === 'settings' && <SettingsPage />}
         </div>
