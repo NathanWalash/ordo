@@ -45,6 +45,9 @@ importers:
         specifier: ^2.12.1
         version: 2.12.1
     devDependencies:
+      '@ordo/ai':
+        specifier: workspace:*
+        version: link:../../packages/ai
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../../packages/mail-core
@@ -108,6 +111,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@ordo/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../mail-core

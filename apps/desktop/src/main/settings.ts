@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
+  AiSettingsSchema,
   DEFAULT_SETTINGS,
   SettingsPatchSchema,
   SettingsSchema,
@@ -12,6 +13,8 @@ import {
 // Reading is forgiving: a bad field falls back to its default, a bad file to all defaults.
 const StoredSettings = SettingsSchema.extend({
   theme: ThemeSchema.catch(DEFAULT_SETTINGS.theme),
+  // Older files have no `ai`; an invalid one (e.g. a cloud provider without consent) turns AI off.
+  ai: AiSettingsSchema.catch(() => ({ ...DEFAULT_SETTINGS.ai })),
 }).catch(() => ({ ...DEFAULT_SETTINGS }))
 
 /** Load settings from disk. Never throws: a missing, unreadable or corrupt file gives the defaults. */

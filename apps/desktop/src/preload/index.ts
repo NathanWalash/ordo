@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type OrdoApi, type ScanProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
+import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 
 const api: OrdoApi = {
   app: {
@@ -14,6 +15,17 @@ const api: OrdoApi = {
       const handler = (_e: IpcRendererEvent, a: Appearance) => listener(a)
       ipcRenderer.on(SETTINGS_IPC.appearanceChanged, handler)
       return () => ipcRenderer.removeListener(SETTINGS_IPC.appearanceChanged, handler)
+    },
+  },
+  ai: {
+    status: (refresh) => ipcRenderer.invoke(AI_IPC.aiStatus, refresh),
+    test: (input) => ipcRenderer.invoke(AI_IPC.aiTest, input),
+    categoriseSenders: (input) => ipcRenderer.invoke(AI_IPC.aiCategorise, input),
+    stop: () => ipcRenderer.invoke(AI_IPC.aiStop),
+    onProgress: (listener) => {
+      const handler = (_e: IpcRendererEvent, p: AiSortProgress) => listener(p)
+      ipcRenderer.on(AI_IPC.aiProgress, handler)
+      return () => ipcRenderer.removeListener(AI_IPC.aiProgress, handler)
     },
   },
   account: {
