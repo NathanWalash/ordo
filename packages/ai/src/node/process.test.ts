@@ -31,7 +31,7 @@ describe('findOnPath', () => {
   it('tries PATHEXT extensions on Windows', () => {
     const dir = join(root, 'win')
     const cmd = exe(dir, 'claude.cmd', '@echo off')
-    // Case-insensitive file systems may match an earlier PATHEXT spelling (.CMD).
+    // Case-insensitive file systems may match the upper-case PATHEXT spelling (.CMD) first.
     expect(findOnPath('claude', dir, 'win32')?.toLowerCase()).toBe(cmd.toLowerCase())
   })
 })

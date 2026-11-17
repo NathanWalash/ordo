@@ -109,7 +109,18 @@ export function runProcess(file: string, opts: RunOptions): Promise<RunResult> {
 /** Find `name` in a PATH string, the way a shell would (PATHEXT on Windows). */
 export function findOnPath(name: string, pathValue: string, platform = process.platform): string | null {
   const exts =
-    platform === 'win32' ? (process.env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : ['']
+    platform === 'win32'
+      ? // Try each PATHEXT entry as written and in lower case: npm installs `claude.cmd`, and
+        // case-sensitive file systems (tests on Linux, some Windows dev setups) won't match `.CMD`.
+        [
+          ...new Set(
+            (process.env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD')
+              .split(';')
+              .filter(Boolean)
+              .flatMap((e) => [e, e.toLowerCase()]),
+          ),
+        ]
+      : ['']
   for (const dir of pathValue.split(platform === 'win32' ? ';' : ':')) {
     if (!dir) continue
     for (const ext of extname(name) ? [''] : exts) {
