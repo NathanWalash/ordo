@@ -257,6 +257,11 @@ export function FinancesPage({ onOpenSettings }: { onOpenSettings?: () => void }
                 <td className="py-1.5 pl-4 text-ink-2 tabular-nums">{formatDate(t.date, true)}</td>
                 <td className="truncate pr-3" title={t.description}>
                   {t.merchant ?? t.description}
+                  {t.transferAccount && (
+                    <span className="ml-2 text-[12px] text-ink-2">
+                      {t.amount < 0 ? 'to' : 'from'} your {t.transferAccount} account
+                    </span>
+                  )}
                 </td>
                 <td className="pr-3">
                   <CategoryCell transaction={t} onChange={(c) => void setCategory(t, c)} />

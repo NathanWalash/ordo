@@ -83,3 +83,4 @@ export {
   type TransactionFilter,
   type TransactionSummary,
 } from './summary'
+export { pairOwnTransfers } from './transfers'

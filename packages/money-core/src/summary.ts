@@ -32,12 +32,20 @@ export function filterTransactions(transactions: Transaction[], f: TransactionFi
   )
 }
 
-export function summarise(transactions: Transaction[]): TransactionSummary {
+/**
+ * Totals for a list of transactions. With `excludeOwnTransfers` (the "All accounts" view), money
+ * moved between your own accounts is left out, so it isn't counted as both spending and income.
+ */
+export function summarise(
+  transactions: Transaction[],
+  opts: { excludeOwnTransfers?: boolean } = {},
+): TransactionSummary {
   let moneyIn = 0
   let moneyOut = 0
   const cats = new Map<string, number>()
   const months = new Map<string, MonthTotal>()
   for (const t of transactions) {
+    if (opts.excludeOwnTransfers && t.transferWith) continue
     const m = months.get(monthOf(t.date)) ?? { month: monthOf(t.date), moneyIn: 0, moneyOut: 0 }
     months.set(m.month, m)
     if (t.amount > 0) {

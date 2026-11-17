@@ -18,6 +18,7 @@ import {
   linkBills,
   monthlyCost,
   monthOf,
+  pairOwnTransfers,
   noAdvisor,
   parseStatement,
   resolveBills,
@@ -214,14 +215,15 @@ function saveStatement(input: StatementInput): ImportOutcome {
 export async function transactions(raw: unknown): Promise<TransactionPage> {
   const q = TransactionQuerySchema.parse(raw ?? {})
   const s = moneyStore()
-  const all = await categorised(s.transactions())
+  const all = pairOwnTransfers(await categorised(s.transactions()))
   const inAccount = filterTransactions(all, { account: q.account })
   const shown = filterTransactions(inAccount, { month: q.month })
   return {
     transactions: shown,
     accounts: s.accounts(),
     months: [...new Set(inAccount.map((t) => monthOf(t.date)))],
-    summary: summarise(shown),
+    // Viewing one account, a transfer out of it is still money out of that account.
+    summary: summarise(shown, { excludeOwnTransfers: !q.account }),
     uncategorisedMerchants: merchantsNeedingCategory(all),
   }
 }

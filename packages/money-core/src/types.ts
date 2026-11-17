@@ -18,6 +18,10 @@ export interface Transaction {
    * `confidence` from 0 to 1) or the person (`you`, which always wins). Not stored; added when listed.
    */
   categorisedBy?: 'ai' | 'you'
+  /** The other half of a transfer between your own accounts (not stored; added when listed). */
+  transferWith?: string
+  /** The account on the other side of that transfer. */
+  transferAccount?: string
   confidence?: number
 }
 
