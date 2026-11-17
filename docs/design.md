@@ -24,7 +24,7 @@ built in. **Finance** and other modules come later.
 
 - Hosted web version (the core/UI split keeps a local web mode cheap later).
 - Gmail (the `MailProvider` interface leaves room; IMAP + app password first).
-- Sending unsubscribe emails (`mailto:`), auto-creating iCloud rules.
+- Auto-creating iCloud rules.
 - Signed / notarised builds.
 
 ## Anti-goals
@@ -75,6 +75,9 @@ process through the typed `window.ordo` API exposed by the preload script
 1. **Shell + Unclutter** — account setup (Apple ID + app-specific password),
    header-only scan into SQLite, sender grouping, rule + AI classification,
    review plan, RFC 8058 one-click unsubscribe, move to Trash, audit log.
+   Built: the review sheet, one-click / link / mailto unsubscribe, move to
+   Trash with the UIDPLUS UID map, and a History view with Undo move (see
+   "Clean-up" below).
 2. **Reading** — folders, message list, threading (`References` /
    `In-Reply-To`), safe HTML reader (DOMPurify + sandboxed frame, remote
    images blocked by default), archive/trash/flag, IMAP IDLE, FTS5 search.
@@ -94,6 +97,29 @@ no-reply addresses, people you have replied to → People). The rest goes to an
 
 Only sender name, address, domain and a few subject lines are sent. Model
 output can only be a label; it can never trigger an action.
+
+### Clean-up
+
+- The renderer only sends choices (address, unsubscribe, trash). The main
+  process re-runs the sender analysis and builds the plan itself, refusing
+  anyone categorised as people or found in Sent.
+- One-click: `POST List-Unsubscribe=One-Click`, no cookies, `User-Agent: Ordo`,
+  10 s timeout, at most three redirects, https only. IP-literal and
+  single-label hosts are refused, and an undici `Agent` with a guarded
+  `lookup` refuses private, loopback, link-local, CGNAT and similar addresses
+  at connect time (no DNS-rebinding gap).
+- Links open with `shell.openExternal`; plain http only after the sheet
+  shows the URL and the user turns it on.
+- mailto: one recipient from the URL path (any `to`/`cc`/`bcc` refuses it),
+  sent with nodemailer over `smtp.mail.me.com:587` (STARTTLS). A recipient on
+  another registrable domain than the From or List-Id needs a tick. Subject
+  and body come from the header only when short plain text; otherwise
+  "unsubscribe". At most 50 per clean-up.
+- Move: `UID MOVE` to the `\Trash` mailbox in batches of 250 (imapflow falls
+  back to COPY + `\Deleted` + EXPUNGE without MOVE). The COPYUID map and
+  Trash UIDVALIDITY go in the `cleanups` table with per-sender results. Undo
+  moves the mapped UIDs that still exist back to INBOX; if Trash's UIDVALIDITY
+  changed nothing is restored. Without UIDPLUS, Undo isn't offered.
 
 ## Look and feel
 

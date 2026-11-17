@@ -30,6 +30,15 @@ pnpm imap:stop
 ```
 
 The test server accepts `test@ordo.test` with the password `abcd-efgh-ijkl-mnop`.
+`pnpm imap:start` opens IMAP on port 3143 and SMTP on 3025 (used to test unsubscribe emails).
+The clean-up end-to-end test also runs a local http endpoint for one-click unsubscribe; the
+unpackaged app accepts `http://127.0.0.1` there only because the test sets
+`ORDO_TEST_ALLOW_LOOPBACK_HTTP=1`. Add `ORDO_E2E_SCREENSHOTS=1` to save light and dark
+screenshots of the review sheet, result and history under `test-results/screenshots/`.
+
+To run the unpackaged app against other servers, set `ORDO_IMAP_HOST` / `ORDO_IMAP_PORT`
+(and `ORDO_SMTP_HOST` / `ORDO_SMTP_PORT`, plus `ORDO_SMTP_REQUIRE_TLS=1` if the server
+offers STARTTLS). Packaged builds ignore all of these.
 
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.
