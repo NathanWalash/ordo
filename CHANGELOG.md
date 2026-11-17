@@ -8,6 +8,7 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- `pnpm dev` on macOS shows the app as Ordo in the menu bar, Dock and Cmd-Tab instead of Electron, by renaming the development copy of Electron before it starts. Packaged builds were already named Ordo.
 - Add a calendar by link: paste a calendar's iCal link (Google's **Secret address in iCal format**, Outlook's published ICS link, any `webcal://` or `.ics` link) and Ordo shows it under **Other calendars**, read-only, next to iCloud's. Useful for a Google work calendar that doesn't sync properly into iCloud. Ordo checks the link really is a calendar before saving it, keeps it encrypted with the system keychain, refreshes it with every sync, and says which link stopped working instead of dropping its events. Links must be https, and neither a link nor its redirects may reach this computer or the local network.
 - Import an `.ics` file as a calendar of its own, with its recurring events expanded like any other.
 - Calendars added by link or file work without an iCloud account, survive disconnecting iCloud, and can be removed from the calendar list. Headless `calendar sync` and `calendar events` include them.
