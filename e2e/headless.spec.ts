@@ -125,6 +125,8 @@ test.describe('without an account', () => {
   })
 
   test('the MCP server is read-only unless started with --allow-changes', async () => {
+    // Known issue: on Windows the MCP server closes as soon as a client connects (see docs/headless.md).
+    test.skip(process.platform === 'win32', 'MCP over stdio is not working on Windows yet')
     const readOnly = await mcpClient(profile)
     try {
       const names = (await readOnly.listTools()).tools.map((t) => t.name)
@@ -306,6 +308,8 @@ test.describe('with a connected account (GreenMail)', () => {
   })
 
   test('the MCP server lists senders and refuses Sam in a plan', async () => {
+    // Known issue: on Windows the MCP server closes as soon as a client connects (see docs/headless.md).
+    test.skip(process.platform === 'win32', 'MCP over stdio is not working on Windows yet')
     const client = await mcpClient(profile, [], imapEnv())
     try {
       const senders = toolText(

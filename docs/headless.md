@@ -38,6 +38,10 @@ On Windows, Ordo.exe is a windowed program, so a plain Command Prompt may not sh
 Pipe or redirect it (`Ordo.exe --headless status | more`, or `> out.txt`); MCP clients always use
 pipes, so the MCP server is unaffected.
 
+**Known issue on Windows:** the MCP server (`--headless --mcp`) closes as soon as a client
+connects, so agents can't use Ordo on Windows yet. The CLI commands work there. The MCP tests are
+skipped on Windows until this is fixed.
+
 On Linux, headless mode doesn't need a display: it was checked with no X server or Wayland at all
 (Electron 45, Debian 12). Chromium may still log a few lines about D-Bus or the GPU to stderr;
 stdout stays clean. Running the unpackaged app (`pnpm ordo`) on a distribution that blocks
