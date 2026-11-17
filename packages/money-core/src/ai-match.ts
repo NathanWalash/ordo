@@ -43,7 +43,7 @@ export interface MatchResult {
   pairs: number
   /** Pairs answered by the model or the cache. */
   checked: number
-  /** Pairs the model said match, confidently enough. */
+  /** Bank bills the model matched to at least one sender, confidently enough. */
   matched: number
   cached: number
   failed: number
@@ -264,7 +264,7 @@ export async function aiMatchBills(
     suggestions,
     pairs: total,
     checked: answers.size,
-    matched: suggestions.length,
+    matched: new Set(suggestions.map((s) => s.key)).size,
     cached,
     failed,
     errors,

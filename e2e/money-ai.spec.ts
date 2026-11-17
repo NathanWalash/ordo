@@ -218,15 +218,20 @@ test.describe('with Mail connected (GreenMail)', () => {
     await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)
     await page.getByRole('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
     await page.getByRole('button', { name: 'Scan inbox' }).click()
-    await expect(page.getByRole('row', { name: /Sptfy/ })).toBeVisible({ timeout: 15_000 })
+    // Earlier runs may have left other Sptfy emails in the shared test mailbox.
+    await expect(page.getByRole('row', { name: new RegExp(`sptfy-${TAG}`) })).toBeVisible({ timeout: 15_000 })
 
     await nav('Finances').click()
     await page.getByRole('button', { name: 'Sort with AI' }).click()
     await expect(page.getByText(/It matched 1 bill to your email/)).toBeVisible()
-    const spotify = pairsAsked.find((p) => p['bankMerchant'] === 'Spotify')
+    // Ordo keeps one hint per sender name and kind, so the domain may be from an earlier run's email.
+    const spotify = pairsAsked.find((p) => p['emailSender'] === 'Sptfy')
     expect(spotify).toMatchObject({
+      bankMerchant: 'Spotify',
+      bankAmount: '£10–£20',
+      cadence: 'monthly',
       emailSender: 'Sptfy',
-      emailDomain: `sptfy-${TAG}.example`,
+      emailDomain: expect.stringMatching(/^sptfy-[a-z0-9]+\.example$/),
       emailKinds: ['renewal'],
     })
     for (const leak of ['Premium', '12 Dec', '12.99', '2026'])
