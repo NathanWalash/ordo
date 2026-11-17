@@ -1,5 +1,5 @@
-import { readFile, stat } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { open, readFile, realpath, stat } from 'node:fs/promises'
+import { basename, extname, join, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import {
   ME,
@@ -74,6 +74,48 @@ async function pickStatement(win: BrowserWindow | null): Promise<StatementFile |
   if ((await stat(path)).size > MAX_STATEMENT_BYTES)
     return { fileName, text: '', error: 'That file is too big to be a bank statement export.' }
   return { fileName, text: await readFile(path, 'utf8') }
+}
+
+/** Headless imports read a file named on the command line: a CSV export, never anything big. */
+export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
+
+/**
+ * Import a statement from a path (headless mode). The path must resolve to a regular `.csv`
+ * file under 5 MB; it is then parsed and saved exactly like a file picked in the app.
+ */
+export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+  let real: string
+  try {
+    real = await realpath(resolve(path))
+  } catch {
+    return { ok: false, message: 'That file doesn’t exist.' }
+  }
+  if (extname(real).toLowerCase() !== '.csv')
+    return { ok: false, message: 'Choose a .csv bank statement export.' }
+  // Check before opening: opening a FIFO or device could block or never end.
+  if (!(await stat(real)).isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+  const tooBig = {
+    ok: false,
+    message: 'That file is too big to be a bank statement export (over 5 MB).',
+  } as const
+  const file = await open(real, 'r')
+  let bytes: Buffer
+  try {
+    const info = await file.stat()
+    if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+    if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
+    bytes = await file.readFile()
+  } finally {
+    await file.close()
+  }
+  if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
+  return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
+}
+
+/** How much is stored, for `status`. */
+export function counts(): { transactions: number; accounts: number; bills: number } {
+  const s = moneyStore()
+  return { transactions: s.transactions().length, accounts: s.accounts().length, bills: s.bills().length }
 }
 
 /** `Monzo` for a recognised Monzo export, otherwise the file name (`joint-account.csv` → `Joint account`). */

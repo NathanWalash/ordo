@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app, type WebContents } from 'electron'
-import { busyMessage, WriteLock } from './lock'
+import { busyMessage, WriteLock, type LockHolder } from './lock'
 
 export type WriteOwner = 'app' | 'headless' | 'mcp'
 
@@ -31,6 +31,11 @@ export async function withWriteLock<T>(task: string, fn: () => Promise<T>): Prom
   } finally {
     got.release()
   }
+}
+
+/** Who holds the lock right now (this process or another), if anyone. */
+export function lockHolder(): LockHolder | null {
+  return writeLock().holder()
 }
 
 /** Drop the lock on the way out, even if a write was interrupted. */
