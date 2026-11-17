@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancePage } from './pages/FinancePage'
+import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
 import { useAppearanceClasses } from './appearance'
@@ -74,6 +75,7 @@ export function App() {
               onScanned={() => void refreshAccount()}
             />
           )}
+          {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
           {route === 'finance' && <FinancePage />}
           {route === 'settings' && <SettingsPage />}
         </div>
