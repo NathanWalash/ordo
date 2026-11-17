@@ -41,7 +41,9 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Light, dark or system theme, with frosted glass surfaces               | Done    |
 | Connect iCloud (app-specific password in the Keychain)                 | Next    |
 | Scan inbox headers and group by sender                                 | Planned |
-| Sort senders with rules, then a local or cloud model                   | Planned |
+| Sort senders with rules                                                | Done    |
+| AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test  | Done    |
+| Sort unsure senders with a model (engine and IPC; Unclutter UI next)   | Next    |
 | One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Next    |
 | Full mail client: read, search, compose                                | Planned |
 | Finance module                                                         | Later   |
@@ -77,6 +79,7 @@ apps/desktop          Electron app
   src/renderer        React UI (Tailwind CSS)
 packages/shared       Module registry and the typed IPC contract
 packages/mail-core    Mail logic with no Electron dependency, fully unit-tested
+packages/ai           Model providers (LM Studio, Ollama, Claude Code and Codex CLIs)
 e2e/                  Playwright tests that launch the built app
 docs/design.md        Design decisions and roadmap
 ```
@@ -95,7 +98,7 @@ Playwright, electron-builder, pnpm workspaces.
 3. **Writing mail:** compose, reply, drafts, attachments.
 4. **Finance** and other modules.
 
-More detail in [docs/design.md](docs/design.md).
+More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md).
 
 ## Contributing
 
