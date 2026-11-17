@@ -114,14 +114,14 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 
 export type DateOrder = 'dmy' | 'mdy'
 
-const NUMERIC = /^(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})(?:[ T].*)?$/
+const NUMERIC = /^(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})(?:,?[ T].*)?$/
 const NAMED = /^(\d{1,2})[\s-]([a-z]{3})[a-z]*[\s-](\d{2,4})(?:[ T].*)?$/i
 
 const fullYear = (y: number) => (y < 100 ? 2000 + y : y)
 
 /**
  * Read a statement date: `2026-11-17`, `17/11/2026`, `17-11-26`, `17 Nov 2026`, `17-Nov-2026`,
- * optionally followed by a time. Slash dates are day-first (UK) unless `order` says otherwise.
+ * optionally followed by a time (`13/11/26, 19:58` in Monzo's search export). Slash dates are day-first (UK) unless `order` says otherwise.
  */
 export function parseStatementDate(raw: string, order: DateOrder = 'dmy'): ISODate | null {
   const s = raw.trim()

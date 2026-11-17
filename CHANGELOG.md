@@ -8,6 +8,10 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- HSBC statements: the headerless `date,description,amount` export is read without asking, and HSBC's transaction codes are understood. Direct debits and standing orders no rule places count as Bills, foreign card fees as Fees, and the codes and exchange-rate details are dropped from merchant names.
+- The Monzo app's search export (`ID, Created, Title, Subtitle, …`), including its `13/11/26, 19:58` dates, Monzo's own categories and the Subtitle shown after the name.
+- Transfers between your own accounts: money out of one imported account and the same amount into another within three days, where one side names the other account or both are transfers, is paired and marked "to/from your … account". All accounts totals leave it out, so it isn't counted as both spending and income. A single account still shows it.
+- More UK chains in the category rules (One Stop, Wetherspoon, Beryl, First Bus, TK Maxx…), and keywords also match plurals like `SAINSBURYS`.
 - Sort with AI for Money: with **Use AI for Money** on in Settings → AI (off by default), Finances gets a Sort with AI button that asks your chosen model to categorise the merchants left in Other, one item per merchant with a cleaned name, a description with every number removed, in or out, and a rough amount band. Never balances, account details, dates or exact amounts. Rows a model categorised show a sparkle with its confidence; answers are cached per merchant and model, and applied without asking again. Same cloud consent and write lock as sorting senders. See [docs/ai.md](docs/ai.md#money).
 - AI bill matching: the same run asks the model whether recurring bank payments the rules couldn't link (like `AMZN MKTP`) belong to an email sender (`Amazon`). A match only adds the emails to a detected bill marked **Matched by AI** in Bills; the model never confirms a bill.
 - Change a transaction's category from the menu on its row on Finances. Your choice wins over the bank, the rules and AI; **Automatic** undoes it.
