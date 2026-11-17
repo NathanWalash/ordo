@@ -1,10 +1,11 @@
-export const ROUTES = ['home', 'mail/inbox', 'mail/unclutter', 'finance'] as const
+export const ROUTES = ['home', 'mail/inbox', 'mail/unclutter', 'calendar', 'finance'] as const
 export type Route = (typeof ROUTES)[number]
 
 export const TITLES: Record<Route, string> = {
   home: 'Home',
   'mail/inbox': 'Inbox',
   'mail/unclutter': 'Unclutter',
+  calendar: 'Calendar',
   finance: 'Finance',
 }
 

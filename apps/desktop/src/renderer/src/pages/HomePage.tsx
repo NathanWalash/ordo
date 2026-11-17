@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Inbox, Sparkles, Wallet, ChevronRight } from 'lucide-react'
+import { Inbox, Sparkles, Wallet, ChevronRight, CalendarDays } from 'lucide-react'
 import type { Route } from '../routes'
 
 function greeting(d = new Date()) {
@@ -30,6 +30,13 @@ export function HomePage({ onNavigate }: { onNavigate: (r: Route) => void }) {
           title="Unclutter"
           detail="Find the senders filling your inbox, unsubscribe and clear them out."
           onClick={() => onNavigate('mail/unclutter')}
+        />
+        <Row
+          icon={<CalendarDays size={18} />}
+          tint="var(--danger)"
+          title="Calendar"
+          detail="Your iCloud calendars by month, week or as an agenda."
+          onClick={() => onNavigate('calendar')}
         />
         <Row
           icon={<Wallet size={18} />}
