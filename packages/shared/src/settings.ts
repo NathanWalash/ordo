@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiSettingsSchema, DEFAULT_AI_SETTINGS } from './ai'
 
 /** `system` follows the OS; `light` and `dark` override it for Ordo only. */
 export const THEMES = ['system', 'light', 'dark'] as const
@@ -8,10 +9,11 @@ export type Theme = z.infer<typeof ThemeSchema>
 /** App preferences saved in `userData/settings.json`. */
 export const SettingsSchema = z.object({
   theme: ThemeSchema,
+  ai: AiSettingsSchema,
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
-export const DEFAULT_SETTINGS: Settings = { theme: 'system' }
+export const DEFAULT_SETTINGS: Settings = { theme: 'system', ai: DEFAULT_AI_SETTINGS }
 
 /** What the renderer may change in one call. Unknown keys are rejected. */
 export const SettingsPatchSchema = SettingsSchema.partial().strict()

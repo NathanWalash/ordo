@@ -4,6 +4,7 @@ import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
+import { setupAi } from './ai'
 
 app.setName('Ordo')
 
@@ -96,6 +97,7 @@ app.whenReady().then(() => {
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
   setupAppearance()
+  setupAi()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -58,7 +58,7 @@ test('arrow keys move the choice', async () => {
 })
 
 test('the theme is saved and survives a relaunch', async () => {
-  expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).toEqual({ theme: 'dark' })
+  expect(JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8'))).toMatchObject({ theme: 'dark' })
 
   await app.close()
   app = await launch()

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-core'
 import type { SettingsApi } from './settings'
+import type { AiApi } from './ai'
 import type { CleanupApi } from './cleanup'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
@@ -43,6 +44,7 @@ export type ScanOutcome = ({ ok: true } & ScanResult) | { ok: false; error: Conn
 
 export type { CategorisedSender, ScanProgress }
 export * from './settings'
+export * from './ai'
 export * from './cleanup'
 
 /**
@@ -54,6 +56,7 @@ export interface OrdoApi {
     info(): Promise<AppInfo>
   }
   settings: SettingsApi
+  ai: AiApi
   account: {
     status(): Promise<AccountStatus>
     /** Check the credentials without saving them. */

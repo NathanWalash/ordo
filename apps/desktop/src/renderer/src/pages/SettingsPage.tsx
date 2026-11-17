@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Monitor, Moon, Sun } from 'lucide-react'
-import type { Settings, Theme } from '@ordo/shared'
+import type { AiSettings as Ai, Settings, Theme } from '@ordo/shared'
+import { AiSettings } from '../components/AiSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
+import { Row, Section } from '../components/SettingsSection'
 import { useAppearance } from '../appearance'
 
 const THEME_OPTIONS = [
@@ -10,7 +12,7 @@ const THEME_OPTIONS = [
   { value: 'dark', label: 'Dark', icon: <Moon size={13} /> },
 ] as const satisfies readonly { value: Theme; label: string; icon: ReactNode }[]
 
-/** App preferences, grouped into sections. Accounts and AI sorting will join Appearance here. */
+/** App preferences, grouped into sections. Accounts will join Appearance and AI here. */
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const appearance = useAppearance()
@@ -26,6 +28,11 @@ export function SettingsPage() {
   const setTheme = async (theme: Theme) => {
     setSettings((s) => s && { ...s, theme })
     setSettings(await window.ordo.settings.set({ theme }))
+  }
+
+  const setAi = async (ai: Ai) => {
+    setSettings((s) => s && { ...s, ai })
+    setSettings(await window.ordo.settings.set({ ai }))
   }
 
   return (
@@ -52,30 +59,7 @@ export function SettingsPage() {
           />
         )}
       </Section>
-    </div>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  const id = `settings-${title.toLowerCase().replace(/\W+/g, '-')}`
-  return (
-    <section aria-labelledby={id} className="mb-8">
-      <h2 id={id} className="mb-2 px-1 text-[13px] font-semibold text-ink-2">
-        {title}
-      </h2>
-      <div className="overflow-hidden rounded-xl border border-sep">{children}</div>
-    </section>
-  )
-}
-
-function Row({ label, detail, control }: { label: string; detail?: string; control?: ReactNode }) {
-  return (
-    <div className="flex min-h-12 items-center gap-4 border-b border-sep px-4 py-2.5 last:border-b-0">
-      <div className="flex-1">
-        <div className="text-[13px] font-medium">{label}</div>
-        {detail && <div className="text-[12px] leading-snug text-ink-2">{detail}</div>}
-      </div>
-      {control}
+      {settings && <AiSettings ai={settings.ai} onSave={setAi} />}
     </div>
   )
 }

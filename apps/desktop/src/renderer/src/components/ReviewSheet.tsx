@@ -226,6 +226,7 @@ function ReviewRow({
         <div className="text-right tabular-nums">{s.count.toLocaleString()}</div>
         <div className="flex items-center gap-2">
           <Switch
+            size="mini"
             label={`Unsubscribe from ${name}`}
             checked={choice.unsubscribe}
             disabled={s.unsubscribe.kind === 'none'}
@@ -235,6 +236,7 @@ function ReviewRow({
         </div>
         <div className="flex items-center">
           <Switch
+            size="mini"
             label={`Move emails from ${name} to Trash`}
             checked={choice.trash}
             onChange={(trash) => onChange({ trash })}

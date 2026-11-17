@@ -3,11 +3,19 @@ interface Props {
   label: string
   checked: boolean
   disabled?: boolean
+  /** `mini` for dense rows such as the review sheet; `regular` for Settings. */
+  size?: 'regular' | 'mini'
   onChange: (checked: boolean) => void
 }
 
-/** macOS-style mini switch. */
-export function Switch({ label, checked, disabled, onChange }: Props) {
+const SIZES = {
+  regular: { track: 'h-[22px] w-[38px]', knob: 'size-[18px]', on: 'translate-x-4' },
+  mini: { track: 'h-[18px] w-8', knob: 'size-[14px]', on: 'translate-x-[14px]' },
+}
+
+/** macOS-style toggle. */
+export function Switch({ label, checked, disabled, size = 'regular', onChange }: Props) {
+  const s = SIZES[size]
   return (
     <button
       type="button"
@@ -16,13 +24,13 @@ export function Switch({ label, checked, disabled, onChange }: Props) {
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
+      className={`no-drag relative ${s.track} shrink-0 rounded-full transition-colors disabled:opacity-40 ${
         checked ? 'bg-accent' : 'bg-selected shadow-[inset_0_0_0_1px_var(--sep)]'
       }`}
     >
       <span
-        className={`absolute top-[2px] left-[2px] size-[14px] rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.3)] transition-transform ${
-          checked ? 'translate-x-[14px]' : ''
+        className={`absolute top-[2px] left-[2px] ${s.knob} rounded-full bg-white shadow-[0_1px_3px_rgb(0_0_0/0.3)] transition-transform ${
+          checked ? s.on : ''
         }`}
       />
     </button>
