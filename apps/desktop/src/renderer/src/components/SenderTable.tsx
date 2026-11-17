@@ -158,7 +158,7 @@ export function SenderTable({ senders, banner, actions, onReview }: Props) {
         <span className="flex items-center gap-1.5 text-ink-2">
           <ShieldCheck size={14} />
           {chosen.length
-            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, recoverable for 30 days.`
+            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, and you can undo the move from History.`
             : 'Select senders to clear. Emails go to Trash, not deleted.'}
         </span>
         <Button
