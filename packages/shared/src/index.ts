@@ -40,6 +40,7 @@ export type AccountStatus =
 export type ScanOutcome = ({ ok: true } & ScanResult) | { ok: false; error: ConnectError; message: string }
 
 export type { CategorisedSender, ScanProgress }
+export * from './settings'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
