@@ -17,6 +17,8 @@ import type {
   CalendarSyncProgress,
 } from '@ordo/shared'
 import { Button } from '../components/Button'
+import { Sheet } from '../components/Sheet'
+import { AddCalendarSheet } from '../components/calendar/AddCalendarSheet'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { AgendaView } from '../components/calendar/AgendaView'
 import { CalendarList } from '../components/calendar/CalendarList'
@@ -32,30 +34,77 @@ interface Props {
   onConnect: () => void
 }
 
-/** Calendar uses the iCloud account connected for Mail. Until then it previews sample data. */
+/**
+ * Calendar shows the iCloud account connected for Mail and any calendars added by link or
+ * file. With neither, it previews sample data.
+ */
 export function CalendarPage({ account, onConnect }: Props) {
-  if (!account?.connected) return <SampleCalendar onConnect={onConnect} />
-  return <LiveCalendar key={account.email} />
+  const [subscriptions, setSubscriptions] = useState<number | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [changes, setChanges] = useState(0)
+
+  const recount = useCallback(async () => {
+    setSubscriptions((await window.ordo.calendar.status()).subscriptions)
+  }, [])
+  useEffect(() => {
+    let live = true
+    void window.ordo.calendar.status().then((s) => live && setSubscriptions(s.subscriptions))
+    return () => {
+      live = false
+    }
+  }, [account])
+
+  if (subscriptions === null) return null
+  const add = () => setAdding(true)
+  return (
+    <>
+      {account?.connected || subscriptions > 0 ? (
+        <LiveCalendar
+          key={account?.connected ? account.email : 'links'}
+          icloud={account?.connected === true}
+          changes={changes}
+          onAdd={add}
+          onRemoved={() => void recount()}
+        />
+      ) : (
+        <SampleCalendar onConnect={onConnect} onAdd={add} />
+      )}
+      {adding && (
+        <AddCalendarSheet
+          onClose={() => setAdding(false)}
+          onAdded={() => {
+            setAdding(false)
+            setChanges((n) => n + 1)
+            void recount()
+          }}
+        />
+      )}
+    </>
+  )
 }
 
 const loadSample = async (range: DateRange) => sampleEvents(range)
 const loadLive = (range: DateRange) => window.ordo.calendar.events(range)
 
-function SampleCalendar({ onConnect }: { onConnect: () => void }) {
+function SampleCalendar({ onConnect, onAdd }: { onConnect: () => void; onAdd: () => void }) {
   const [calendars, setCalendars] = useState(SAMPLE_CALENDARS)
   return (
     <CalendarBrowser
       listTitle="Sample"
       calendars={calendars}
       onToggle={(id, visible) => setCalendars((cs) => cs.map((c) => (c.id === id ? { ...c, visible } : c)))}
+      onAdd={onAdd}
       loadEvents={loadSample}
       reloadKey={0}
       banner={
         <div className="flex items-center justify-between gap-3 rounded-md bg-hover px-3 py-2 text-ink-2">
-          Sample data. Connect your iCloud account to see your own calendars.
-          <Button variant="primary" onClick={onConnect}>
-            Connect iCloud
-          </Button>
+          Sample data. Connect your iCloud account or add a calendar by link to see your own.
+          <span className="flex shrink-0 gap-2">
+            <Button onClick={onAdd}>Add calendar…</Button>
+            <Button variant="primary" onClick={onConnect}>
+              Connect iCloud
+            </Button>
+          </span>
         </div>
       }
     />
@@ -65,12 +114,24 @@ function SampleCalendar({ onConnect }: { onConnect: () => void }) {
 /** Sync again on opening if the cache is older than this. */
 const STALE_MS = 10 * 60_000
 
-function LiveCalendar() {
+function LiveCalendar({
+  icloud,
+  changes,
+  onAdd,
+  onRemoved,
+}: {
+  icloud: boolean
+  /** Bumped when a calendar is added elsewhere, to reload the list. */
+  changes: number
+  onAdd: () => void
+  onRemoved: () => void
+}) {
   const [calendars, setCalendars] = useState<CalendarListItem[]>([])
   const [status, setStatus] = useState<CalendarStatus | null>(null)
   const [progress, setProgress] = useState<CalendarSyncProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [removing, setRemoving] = useState<CalendarListItem | null>(null)
 
   const refresh = useCallback(async () => {
     const [c, s] = await Promise.all([window.ordo.calendar.calendars(), window.ordo.calendar.status()])
@@ -87,6 +148,7 @@ function LiveCalendar() {
       try {
         const res = await window.ordo.calendar.sync({ force })
         if (!res.ok && res.error !== 'busy') setError(res.message)
+        if (res.ok && res.failed?.length) setError(failedMessage(res.failed))
         await refresh()
       } finally {
         off()
@@ -103,12 +165,27 @@ function LiveCalendar() {
       if (!live) return
       setCalendars(c)
       setStatus(s)
-      if (s.connected && (!s.lastSync || Date.now() - Date.parse(s.lastSync) > STALE_MS)) void sync()
+      if (!s.lastSync || Date.now() - Date.parse(s.lastSync) > STALE_MS) void sync()
     })
     return () => {
       live = false
     }
   }, [sync])
+
+  // A calendar was added: it's already cached, so just show it.
+  useEffect(() => {
+    if (!changes) return
+    let live = true
+    void Promise.all([window.ordo.calendar.calendars(), window.ordo.calendar.status()]).then(([c, s]) => {
+      if (!live) return
+      setCalendars(c)
+      setStatus(s)
+      setReloadKey((k) => k + 1)
+    })
+    return () => {
+      live = false
+    }
+  }, [changes])
 
   const toggle = async (id: string, visible: boolean) => {
     setCalendars((cs) => cs.map((c) => (c.id === id ? { ...c, visible } : c)))
@@ -116,39 +193,111 @@ function LiveCalendar() {
     setReloadKey((k) => k + 1)
   }
 
-  const lastSync = status?.connected ? status.lastSync : null
+  const lastSync = status?.lastSync ?? null
   return (
-    <CalendarBrowser
-      listTitle="iCloud"
-      calendars={calendars}
-      onToggle={(id, visible) => void toggle(id, visible)}
-      loadEvents={loadLive}
-      reloadKey={reloadKey}
-      banner={error && <div className="rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
-      actions={
-        <button
-          type="button"
-          onClick={() => void sync(true)}
-          disabled={progress !== null}
-          aria-label="Sync calendars"
-          title="Sync calendars"
-          className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover disabled:opacity-60"
-        >
-          <RefreshCw size={14} className={progress ? 'animate-spin' : ''} />
-        </button>
-      }
+    <>
+      <CalendarBrowser
+        listTitle="iCloud"
+        calendars={calendars}
+        onToggle={(id, visible) => void toggle(id, visible)}
+        onAdd={onAdd}
+        onRemove={setRemoving}
+        loadEvents={loadLive}
+        reloadKey={reloadKey}
+        banner={error && <div className="rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
+        actions={
+          <button
+            type="button"
+            onClick={() => void sync(true)}
+            disabled={progress !== null}
+            aria-label="Sync calendars"
+            title="Sync calendars"
+            className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover disabled:opacity-60"
+          >
+            <RefreshCw size={14} className={progress ? 'animate-spin' : ''} />
+          </button>
+        }
+        footer={
+          <span aria-live="polite">
+            {progress
+              ? progress.total
+                ? `Syncing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
+                : icloud
+                  ? 'Connecting to iCloud…'
+                  : 'Syncing…'
+              : lastSync
+                ? `Updated ${new Date(lastSync).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+                : 'Not synced yet'}
+          </span>
+        }
+      />
+      {removing && (
+        <RemoveSheet
+          calendar={removing}
+          onClose={() => setRemoving(null)}
+          onRemoved={async () => {
+            setRemoving(null)
+            await refresh()
+            onRemoved()
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function failedMessage(failed: { name: string; message: string }[]): string {
+  if (failed.length === 1)
+    return failed[0]!.message.startsWith(failed[0]!.name)
+      ? failed[0]!.message
+      : `Couldn’t update ${failed[0]!.name}. ${failed[0]!.message}`
+  return `Couldn’t update ${failed.map((f) => f.name).join(', ')}. Check their links still work.`
+}
+
+function RemoveSheet({
+  calendar,
+  onClose,
+  onRemoved,
+}: {
+  calendar: CalendarListItem
+  onClose: () => void
+  onRemoved: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const remove = async () => {
+    setBusy(true)
+    const r = await window.ordo.calendar.remove(calendar.id)
+    setBusy(false)
+    if (r.ok) onRemoved()
+    else setError(r.message)
+  }
+  return (
+    <Sheet
+      title={`Remove “${calendar.name}”?`}
+      width={420}
+      busy={busy}
+      onClose={onClose}
+      onSubmit={() => void remove()}
       footer={
-        <span aria-live="polite">
-          {progress
-            ? progress.total
-              ? `Syncing ${Math.min(progress.done + 1, progress.total)} of ${progress.total}…`
-              : 'Connecting to iCloud…'
-            : lastSync
-              ? `Updated ${new Date(lastSync).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-              : 'Not synced yet'}
-        </span>
+        <>
+          <span className="flex-1" />
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy}>
+            Remove
+          </Button>
+        </>
       }
-    />
+    >
+      <p className="text-[13px] leading-snug text-ink-2">
+        {calendar.source === 'link'
+          ? 'Ordo stops checking this link and forgets its events. The calendar itself isn’t changed.'
+          : 'Ordo forgets the events imported from this file. The file itself isn’t changed.'}
+      </p>
+      {error && <p className="text-[12px] text-danger">{error}</p>}
+    </Sheet>
   )
 }
 
@@ -172,6 +321,8 @@ interface BrowserProps {
   listTitle: string
   calendars: CalendarListItem[]
   onToggle: (calendarId: string, visible: boolean) => void
+  onAdd?: () => void
+  onRemove?: (calendar: CalendarListItem) => void
   /** Must be stable between renders; events are reloaded when it, the range or `reloadKey` changes. */
   loadEvents: (range: DateRange) => Promise<CalendarEvent[]>
   reloadKey: number
@@ -185,6 +336,8 @@ function CalendarBrowser({
   listTitle,
   calendars,
   onToggle,
+  onAdd,
+  onRemove,
   loadEvents,
   reloadKey,
   banner,
@@ -243,6 +396,8 @@ function CalendarBrowser({
         title={listTitle}
         calendars={calendars}
         onToggle={onToggle}
+        onAdd={onAdd}
+        onRemove={onRemove}
         overlaySources={OVERLAY_SOURCES}
         footer={footer}
       />
