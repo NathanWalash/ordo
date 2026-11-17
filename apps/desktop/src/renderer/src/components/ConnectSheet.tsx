@@ -67,7 +67,7 @@ export function ConnectSheet({ onClose, onConnected }: Props) {
         aria-modal="true"
         aria-labelledby="connect-title"
         onSubmit={submit}
-        className="flex h-fit w-[480px] flex-col gap-4 rounded-xl border border-black/10 bg-sheet p-6 pb-5 shadow-[0_20px_50px_rgb(0_0_0/0.25)]"
+        className="glass-panel flex h-fit w-[480px] flex-col gap-4 rounded-xl p-6 pb-5"
       >
         <div className="flex items-center gap-3.5">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-[10px] bg-accent text-white">

@@ -1,12 +1,17 @@
 // Runs against a real IMAP server. Start one with:
 //   pnpm imap:start
 // then: IMAP_TEST_PORT=3143 pnpm test:integration
+// (SMTP_TEST_PORT defaults to 3025, which `pnpm imap:start` also opens.)
 import { ImapFlow } from 'imapflow'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { analyseSenders } from './analyse'
+import { runCleanup, undoCleanup } from './cleanup'
+import { buildCleanupPlan } from './cleanup-plan'
 import { ImapMailProvider, MailAuthError, testImapLogin } from './imap'
 import { scanMailbox } from './scan'
+import { createMailtoSender } from './smtp'
 import { MailStore } from './store'
+import { planMailto } from './unsubscribe'
 
 const port = Number(process.env['IMAP_TEST_PORT'])
 const cfg = {
@@ -26,6 +31,8 @@ describe.skipIf(!port)('IMAP integration (GreenMail)', () => {
     await c.connect()
     const boxes = await c.list()
     if (!boxes.some((b) => b.path === 'Sent')) await c.mailboxCreate('Sent')
+    // GreenMail starts with INBOX only; imapflow recognises a mailbox named Trash as \Trash.
+    if (!boxes.some((b) => b.path === 'Trash')) await c.mailboxCreate('Trash')
     await c.append(
       'INBOX',
       raw(
@@ -69,6 +76,100 @@ describe.skipIf(!port)('IMAP integration (GreenMail)', () => {
     } finally {
       store.close()
       await provider.close()
+    }
+  })
+
+  it('moves a sender to Trash with a UID map, and undo puts the emails back', async () => {
+    const run = `${Date.now()}`
+    const from = `promo-${run}@store.example`
+    const c = new ImapFlow({ ...cfg, auth: { user: cfg.user, pass: cfg.pass }, logger: false })
+    await c.connect()
+    for (const n of [1, 2, 3])
+      await c.append(
+        'INBOX',
+        raw(`Store <${from}>`, `Deal ${n} ${run}`, 'List-Id: <deals.store.example>\r\n'),
+      )
+
+    const provider = new ImapMailProvider(cfg)
+    await provider.connect()
+    const store = new MailStore(':memory:')
+    const countIn = async (mailbox: string) => {
+      const lock = await c.getMailboxLock(mailbox)
+      try {
+        return ((await c.search({ from }, { uid: true })) || []).length
+      } finally {
+        lock.release()
+      }
+    }
+    try {
+      await scanMailbox(provider, store)
+      const senders = analyseSenders(store.headers('INBOX'), store.repliedTo())
+      const plan = buildCleanupPlan(senders, store.repliedTo(), [
+        { address: from, unsubscribe: false, trash: true },
+        { address: 'sam@friend.example', unsubscribe: false, trash: true },
+      ])
+      expect(plan.rejected.map((r) => r.address)).toEqual(['sam@friend.example'])
+
+      const record = await runCleanup(provider, store, plan.senders, {
+        batchSize: 2,
+        unsubscribe: async () => {
+          throw new Error('not called')
+        },
+      })
+      expect(record).toMatchObject({ moved: 3, trashMailbox: 'Trash', error: null, canUndo: true })
+      expect(record.uidMap).toHaveLength(3)
+      expect(record.trashUidValidity).toBe((await provider.status('Trash')).uidValidity)
+      expect(await countIn('INBOX')).toBe(0)
+      expect(await countIn('Trash')).toBe(3)
+      expect(store.uidsFrom('INBOX', [from]).get(from)).toEqual([])
+
+      expect(await undoCleanup(provider, store, record.id)).toEqual({ restored: 3, missing: 0 })
+      expect(await countIn('INBOX')).toBe(3)
+      expect(await countIn('Trash')).toBe(0)
+      // The restored emails come back on the next scan.
+      await scanMailbox(provider, store)
+      expect(store.uidsFrom('INBOX', [from]).get(from)).toHaveLength(3)
+    } finally {
+      store.close()
+      await provider.close()
+      await c.logout()
+    }
+  })
+
+  it('sends a mailto unsubscribe over SMTP', async () => {
+    const run = `${Date.now()}`
+    const sender = createMailtoSender(
+      {
+        host: cfg.host,
+        port: Number(process.env['SMTP_TEST_PORT'] ?? 3025),
+        secure: false,
+        requireTLS: false,
+        user: cfg.user,
+        pass: cfg.pass,
+      },
+      cfg.user,
+    )
+    try {
+      const plan = planMailto(`mailto:${cfg.user}?subject=unsubscribe%20${run}&body=list%3Dweekly`, {
+        domain: 'ordo.test',
+      })!
+      expect(plan.offDomain).toBe(false)
+      await sender.send(plan.message)
+    } finally {
+      sender.close()
+    }
+    const c = new ImapFlow({ ...cfg, auth: { user: cfg.user, pass: cfg.pass }, logger: false })
+    await c.connect()
+    try {
+      const lock = await c.getMailboxLock('INBOX')
+      try {
+        const found = (await c.search({ subject: `unsubscribe ${run}` }, { uid: true })) || []
+        expect(found).toHaveLength(1)
+      } finally {
+        lock.release()
+      }
+    } finally {
+      await c.logout()
     }
   })
 })

@@ -26,7 +26,7 @@ test('Unclutter lets you pick senders but never people', async () => {
   await expect(page.getByText('Sample data.')).toBeVisible()
 
   await page.getByRole('checkbox', { name: 'Select Northwind Outlet' }).check()
-  await expect(page.getByText(/1 senders, 642 emails/)).toBeVisible()
+  await expect(page.getByText(/1 sender, 642 emails/)).toBeVisible()
 
   await expect(page.getByRole('checkbox', { name: 'Select Sam Patel' })).toBeDisabled()
 })

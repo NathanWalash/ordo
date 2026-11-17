@@ -3,6 +3,9 @@ import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPre
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
+import { registerCleanupIpc } from './cleanup'
+import { hasMica, setupAppearance } from './appearance'
+import { setupAi } from './ai'
 
 app.setName('Ordo')
 
@@ -40,7 +43,7 @@ function createWindow(): BrowserWindow {
     ...(isWin && {
       titleBarStyle: 'hidden',
       titleBarOverlay: winOverlay(),
-      backgroundMaterial: 'mica',
+      backgroundMaterial: hasMica() ? 'mica' : 'none',
     }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -87,6 +90,7 @@ ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
 registerCalendarIpc()
+registerCleanupIpc()
 
 app.on('before-quit', () => mail.closeMail())
 app.on('before-quit', () => closeCalendar())
@@ -95,6 +99,8 @@ app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
+  setupAppearance()
+  setupAi()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
