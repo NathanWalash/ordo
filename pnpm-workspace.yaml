@@ -9,3 +9,10 @@ allowBuilds:
 # tldts 7.4.19 would otherwise pull a days-old tldts-core; keep them in step.
 overrides:
   tldts-core: 7.4.19
+  # @modelcontextprotocol/sdk's HTTP transports (unused: Ordo's MCP server is stdio only) would
+  # otherwise pull days-old releases; hold them at versions at least two weeks old.
+  hono: 4.13.16
+  '@hono/node-server': 2.1.5
+  encodeurl: 2.0.1
+  express-rate-limit: 8.7.2
+  jose: 6.2.15
