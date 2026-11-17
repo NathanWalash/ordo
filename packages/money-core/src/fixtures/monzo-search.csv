@@ -1,0 +1,7 @@
+ID,Created,Title,Subtitle,Amount,Currency,Categories
+tx_0000AAA1,"13/11/26, 19:58",Sam Example,,120.00,GBP,general
+tx_0000AAA2,"13/11/26, 19:21",ATM,,-20.00,GBP,cash
+tx_0000AAA3,"13/11/26, 19:20",TESTER A B,Monzo,30.00,GBP,transfers
+tx_0000AAA4,"08/11/26, 13:01",Alex Example,Ubers,-12.40,GBP,general
+tx_0000AAA5,"03/11/26, 13:26",Pasta Place,,-14.61,GBP,eating_out
+tx_0000AAA6,"02/11/26, 22:31",Jo Example,Sent from Revolut,25.00,GBP,income

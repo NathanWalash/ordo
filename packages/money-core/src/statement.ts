@@ -20,6 +20,8 @@ export interface ColumnMapping {
   credit?: number
   balance?: number
   category?: number
+  /** Extra detail shown after the description, e.g. Monzo's `Subtitle`. Not used for the merchant. */
+  reference?: number
   dateOrder?: DateOrder
 }
 
@@ -101,11 +103,13 @@ const DATE = [
   'value date',
   'booking date',
   'started date',
+  'created',
 ]
 const DESCRIPTION = [
   'counter party',
   'counterparty',
   'name',
+  'title',
   'payee',
   'merchant',
   'merchant name',
@@ -131,7 +135,8 @@ const DEBIT = [
 ]
 const CREDIT = ['credit', 'credit amount', 'paid in', 'money in', 'in', 'deposits', 'deposit', 'received']
 const BALANCE = ['balance', 'balance gbp', 'running balance']
-const CATEGORY = ['category', 'spending category']
+const CATEGORY = ['category', 'categories', 'spending category']
+const REFERENCE = ['subtitle']
 
 function find(headers: string[], names: string[]): number | undefined {
   for (const n of names) {
@@ -157,12 +162,15 @@ function mappingFromHeader(raw: string[], headerRow: number): ColumnMapping | nu
     ...(amount !== undefined ? { amount } : { debit, credit }),
     balance: find(h, BALANCE),
     category: find(h, CATEGORY),
+    reference: find(h, REFERENCE),
   }
 }
 
 function layoutName(raw: string[]): string {
   const h = new Set(raw.map(norm))
   if (h.has('transaction id') && h.has('emoji')) return 'Monzo'
+  // The Monzo app's search export: ID, Created, Title, Subtitle, Amount, Currency, Categories.
+  if (h.has('created') && h.has('title') && h.has('subtitle')) return 'Monzo'
   if (h.has('counter party') && h.has('spending category')) return 'Starling'
   if (h.has('started date') && h.has('completed date')) return 'Revolut'
   if (h.has('paid out') && h.has('paid in')) return 'Nationwide'
@@ -176,7 +184,28 @@ export function detectMapping(rows: string[][]): { mapping: ColumnMapping; layou
     const mapping = mappingFromHeader(rows[i]!, i)
     if (mapping) return { mapping, layout: layoutName(rows[i]!) }
   }
-  return null
+  return detectHeaderless(rows)
+}
+
+/** HSBC's transaction codes at the end of a description: contactless, card, direct debit... */
+export const HSBC_CODE = /\s(\)\)\)|VIS|DD|SO|BP|OBP|CR|DR|ATM)$/
+
+/**
+ * Files with no header row, like HSBC's `13/11/2026,TESCO STORES LEEDS ))),-3.41`: three
+ * columns of date, description and signed amount on (nearly) every row.
+ */
+function detectHeaderless(rows: string[][]): { mapping: ColumnMapping; layout: string } | null {
+  const body = rows.slice(0, 40)
+  if (!body.length) return null
+  const fits = body.filter(
+    (r) => r.length === 3 && parseStatementDate(r[0]!) !== null && parseAmount(r[2]!) !== null && r[1],
+  )
+  if (fits.length / body.length < 0.9) return null
+  const coded = fits.filter((r) => HSBC_CODE.test(r[1]!)).length / fits.length
+  return {
+    mapping: { headerRow: -1, date: 0, description: 1, amount: 2 },
+    layout: coded > 0.5 ? 'HSBC' : 'CSV',
+  }
 }
 
 /**
@@ -261,7 +290,10 @@ export function parseStatement(
   for (const row of body) {
     const date = parseStatementDate(row[mapping.date] ?? '', order)
     const amount = amountOf(row, mapping)
-    const description = (row[mapping.description] ?? '').replace(/\s+/g, ' ').trim()
+    const name = (row[mapping.description] ?? '').replace(/\s+/g, ' ').trim()
+    const ref =
+      mapping.reference !== undefined ? (row[mapping.reference] ?? '').replace(/\s+/g, ' ').trim() : ''
+    const description = ref && ref.toLowerCase() !== name.toLowerCase() ? `${name} · ${ref}` : name
     if (!date || amount === null || amount === 0 || !description) {
       skipped++
       continue
@@ -269,7 +301,7 @@ export function parseStatement(
     const base = `${options.accountName}|${date}|${amount}|${description.toLowerCase()}`
     const n = seen.get(base) ?? 0
     seen.set(base, n + 1)
-    const merchant = normaliseMerchant(description)
+    const merchant = normaliseMerchant(name || description)
     const bankCategory =
       mapping.category !== undefined ? tidyCategory(row[mapping.category] ?? '') : undefined
     transactions.push({

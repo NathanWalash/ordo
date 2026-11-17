@@ -12,6 +12,8 @@ const PREFIXES = [
   /^payment( to| from)\b/,
   /^(pos|visa|vis|dd|so|bp|fpo|fpi|bgc|deb|cpt|chq|tfr|dr|cr)\b/,
   /^(paypal|pp|sq|sumup|iz|zettle_|sp|tst|crv|lsp)\s*\*/,
+  // HSBC's foreign card payments: `INT'L 0084526750 ANTHROPIC* CLAUDE ...`
+  /^int'?l\b/,
 ]
 
 /** Known messy names → what people call them. Checked against the cleaned, lower-case text. */
@@ -39,7 +41,11 @@ const CITIES =
 
 /** Strip the noise from a statement description and return a display name, e.g. `Netflix`. */
 export function normaliseMerchant(description: string): string {
-  let s = ` ${description.toLowerCase()} `
+  let s = ` ${description
+    .toLowerCase()
+    // HSBC: the exchange-rate tail and the transaction code at the end
+    .replace(/\s[a-z]{3}\s+[\d.,]+\s*@\s*[\d.]+\s*visa rate.*$/, '')
+    .replace(/\s(\)\)\)|vis|dd|so|bp|obp|cr|dr|atm)$/, '')} `
     // dates and times: 03-11-2026, 03/11, 3 nov, 14:22, on 03 nov
     .replace(/\s(on|at)\s+\d{1,2}[\s/.-]*([a-z]{3}|\d{1,2})([\s/.-]*\d{2,4})?(?=\s)/g, ' ')
     .replace(/\s\d{1,2}[/.-]\d{1,2}([/.-]\d{2,4})?(?=\s)/g, ' ')
@@ -78,6 +84,8 @@ export function normaliseMerchant(description: string): string {
     .trim()
 
   for (let i = 0; i < 3; i++) s = s.replace(COUNTRY, '').replace(CITIES, '').trim()
+  // `ANTHROPIC* CLAUDE ANTHROPIC.COM` cleans to `anthropic anthropic`: drop repeated words.
+  s = s.replace(/\b([a-z][a-z&+']*)(\s\1\b)+/g, '$1')
   s = s.replace(/[\s.-]+$/, '').replace(/^[\s.-]+/, '')
 
   for (const [re, name] of ALIASES) if (re.test(s)) return name

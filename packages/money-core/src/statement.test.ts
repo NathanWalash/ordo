@@ -83,18 +83,68 @@ describe('parseStatement', () => {
     })
   })
 
+  it('reads a headerless date, description, amount file without asking', () => {
+    const r = parsed('headerless.csv', 'Bank')
+    expect(r.layout).toBe('CSV')
+    expect(r.mapping).toEqual({ headerRow: -1, date: 0, description: 1, amount: 2 })
+    expect(r.transactions.map((t) => t.amount)).toEqual([-799, -799, 1200])
+    expect(r.transactions[0]!.merchant).toBe('Audible')
+  })
+
   it('asks for a mapping when it cannot recognise the layout, with a sensible guess', () => {
-    const r = parseStatement(fixture('headerless.csv'), { accountName: 'HSBC' })
+    const text =
+      'x,17/10/2026,AUDIBLE UK,-7.99,a\ny,17/11/2026,AUDIBLE UK,-7.99\nz,18/11/2026,REFUND,12.00,b,c\n'
+    const r = parseStatement(text, { accountName: 'Bank' })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error).toBe('unrecognised')
     expect(r.sample).toHaveLength(3)
-    expect(r.suggested).toEqual({ headerRow: -1, date: 0, description: 1, amount: 2 })
+    expect(r.suggested).toMatchObject({ headerRow: -1, date: 1, amount: 3 })
 
-    const mapped = parsed('headerless.csv', 'HSBC', r.suggested)
-    expect(mapped.layout).toBe('Custom')
-    expect(mapped.transactions.map((t) => t.amount)).toEqual([-799, -799, 1200])
-    expect(mapped.transactions[0]!.merchant).toBe('Audible')
+    const mapped = parseStatement(text, { accountName: 'Bank', mapping: r.suggested })
+    expect(mapped.ok && mapped.layout).toBe('Custom')
+  })
+
+  it("reads the Monzo app's search export: Created, Title, Subtitle and Monzo's categories", () => {
+    const r = parsed('monzo-search.csv', 'Monzo')
+    expect(r.layout).toBe('Monzo')
+    expect(r.transactions).toHaveLength(6)
+    const [first, atm, transfer, uber, pasta] = r.transactions
+    expect(first).toMatchObject({ date: '2026-11-13', amount: 12000, description: 'Sam Example' })
+    expect(atm).toMatchObject({ amount: -2000, category: 'Cash' })
+    expect(transfer).toMatchObject({
+      description: 'TESTER A B · Monzo',
+      merchant: 'Tester A B',
+      category: 'Transfers',
+    })
+    expect(uber).toMatchObject({
+      description: 'Alex Example · Ubers',
+      merchant: 'Alex Example',
+      date: '2026-11-08',
+    })
+    expect(pasta).toMatchObject({ category: 'Eating out', amount: -1461 })
+  })
+
+  it("reads HSBC's headerless export and understands its transaction codes", () => {
+    const r = parsed('hsbc.csv', 'HSBC current')
+    expect(r.layout).toBe('HSBC')
+    expect(r.transactions).toHaveLength(10)
+    const by = (start: string) => r.transactions.find((t) => t.description.startsWith(start))!
+    expect(by('SAINSBURYS')).toMatchObject({ merchant: 'Sainsburys S Mkts Town', category: 'Groceries' })
+    expect(by('CITY COUNCIL')).toMatchObject({ merchant: 'City Council', category: 'Bills' })
+    expect(by('LETTINGS AGENT')).toMatchObject({ amount: -59750, category: 'Bills' })
+    expect(by('PAYPAL')).toMatchObject({ category: 'Other' })
+    expect(by("INT'L 0012345678 ANTHROPIC")).toMatchObject({ merchant: 'Anthropic' })
+    expect(by("INT'L 0074866721 GELATERIA").merchant).toBe('Gelateria Roma')
+    expect(by('Non-Sterling')).toMatchObject({ amount: -17, category: 'Fees' })
+    expect(by('EXAMPLE EMPLOYER')).toMatchObject({ amount: 202144, category: 'Income' })
+    expect(by('Test Person Monzo')).toMatchObject({ merchant: 'Test Person Monzo' })
+  })
+
+  it('keeps ids stable for exports without a Subtitle column', () => {
+    const a = parsed('monzo.csv', 'Monzo').transactions.map((t) => t.id)
+    const b = parsed('monzo.csv', 'Monzo').transactions.map((t) => t.id)
+    expect(a).toEqual(b)
   })
 
   it('reports a mapping that finds nothing', () => {
@@ -130,5 +180,24 @@ describe('parseStatement', () => {
       accountName: 'US',
     })
     expect(r.ok && r.transactions.map((t) => t.date)).toEqual(['2026-11-25', '2026-12-01'])
+  })
+})
+
+describe('HSBC transaction codes and categories', () => {
+  const one = (line: string) => {
+    const r = parseStatement(`${line}\n${line.replace(/^\d\d/, '01')}\n${line.replace(/^\d\d/, '02')}\n`, {
+      accountName: 'HSBC',
+    })
+    if (!r.ok) throw new Error(r.message)
+    return r.transactions[0]!
+  }
+  it("doesn't read the BP transfer code as BP petrol", () => {
+    expect(one('12/09/2026,North South Barber Haircut BP,-23.00').category).toBe('Other')
+  })
+  it('knows common UK chains and bike hire', () => {
+    expect(one('11/11/2026,ONE STOP 1630 HEADINGLEY ))),-2.85').category).toBe('Groceries')
+    expect(one('12/11/2026,BERYL LONDON VIS,-18.00').category).toBe('Transport')
+    expect(one('20/07/2026,LIME*RIDE CJPI LONDON VIS,-2.98').category).toBe('Transport')
+    expect(one('15/10/2026,JD WETHERSPOON Watford VIS,-4.19').category).toBe('Eating out')
   })
 })
