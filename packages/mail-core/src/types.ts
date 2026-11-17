@@ -26,9 +26,12 @@ export interface MessageHeader {
 }
 
 export type UnsubscribeMethod =
+  /** RFC 8058: an HTTPS POST does it, no browser needed. */
   | { kind: 'one-click'; url: string }
+  /** A web page to finish in the browser. May be plain http, which the review sheet spells out. */
   | { kind: 'link'; url: string }
-  | { kind: 'mailto'; address: string }
+  /** An email to send. `url` is the full mailto: URL, including any subject= and body=. */
+  | { kind: 'mailto'; address: string; url: string }
   | { kind: 'none' }
 
 export interface SenderSummary {
