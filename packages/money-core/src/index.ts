@@ -25,3 +25,8 @@ export {
   type ColumnMapping,
   type StatementResult,
 } from './statement'
+export { detectRecurring } from './recurring'
+export { emailHints, hintKind } from './email'
+export { linkBills, monthlyCost, resolveBills } from './link'
+export { billsToCalendarItems, type BillCalendarItem } from './calendar'
+export { applySuggestions, noAdvisor, type MatchAdvisor, type MatchSuggestion } from './advisor'
