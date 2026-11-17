@@ -43,6 +43,8 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Sort senders with rules, then a local or cloud model                   | Planned |
 | One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Next    |
 | Full mail client: read, search, compose                                | Planned |
+| Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
+| Create and edit calendar events                                        | Planned |
 | Finance module                                                         | Later   |
 
 ## Install
@@ -64,6 +66,8 @@ pnpm check        # format check, lint, typecheck, unit tests
 pnpm test:e2e     # build and run Playwright tests against the real app
 pnpm imap:start   # local IMAP test server (Docker), then:
 IMAP_TEST_PORT=3143 pnpm test:integration
+pnpm caldav:start # local CalDAV test server (Docker), then:
+CALDAV_TEST_PORT=5232 pnpm test:integration
 pnpm package      # build an installer for your OS into apps/desktop/release
 ```
 
@@ -76,6 +80,7 @@ apps/desktop          Electron app
   src/renderer        React UI (Tailwind CSS)
 packages/shared       Module registry and the typed IPC contract
 packages/mail-core    Mail logic with no Electron dependency, fully unit-tested
+packages/calendar-core  CalDAV, iCalendar parsing and recurrence, calendar cache and layout
 e2e/                  Playwright tests that launch the built app
 docs/design.md        Design decisions and roadmap
 ```
