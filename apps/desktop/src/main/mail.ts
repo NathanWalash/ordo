@@ -133,6 +133,11 @@ export function senders() {
   return analyseSenders(s.headers(INBOX), s.repliedTo())
 }
 
+/** Inbox headers already cached by a scan (no network), or null when Mail isn't connected. */
+export function cachedInboxHeaders() {
+  return loadAccount() ? mailStore().headers(INBOX) : null
+}
+
 export function closeMail(): void {
   running?.abort()
   store?.close()

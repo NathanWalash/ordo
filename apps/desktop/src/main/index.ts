@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
+import { closeMoney, registerMoneyIpc } from './money'
 
 app.setName('Ordo')
 
@@ -85,8 +86,10 @@ ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect())
 ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
+registerMoneyIpc()
 
 app.on('before-quit', () => mail.closeMail())
+app.on('before-quit', () => closeMoney())
 
 app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.

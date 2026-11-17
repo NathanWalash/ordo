@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type OrdoApi, type ScanProgress } from '@ordo/shared'
+import { moneyApi } from './money'
 
 const api: OrdoApi = {
   app: {
@@ -23,6 +24,7 @@ const api: OrdoApi = {
   senders: {
     list: () => ipcRenderer.invoke(IPC.sendersList),
   },
+  money: moneyApi,
 }
 
 contextBridge.exposeInMainWorld('ordo', api)

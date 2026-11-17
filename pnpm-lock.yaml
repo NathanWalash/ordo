@@ -48,6 +48,9 @@ importers:
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../../packages/mail-core
+      '@ordo/money-core':
+        specifier: workspace:*
+        version: link:../../packages/money-core
       '@ordo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -105,6 +108,9 @@ importers:
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../mail-core
+      '@ordo/money-core':
+        specifier: workspace:*
+        version: link:../money-core
       zod:
         specifier: ^4.6.7
         version: 4.6.7
