@@ -5,8 +5,7 @@ import type { CalendarOverlayItem, DateRange } from '@ordo/shared'
  * (bill due dates, renewals, trial ends...) that fall in a range; Calendar shows them
  * alongside events, styled by `kind`, and never treats them as calendar events.
  *
- * To add one, append to OVERLAY_SOURCES, e.g. Money:
- *   { id: 'money', name: 'Bills and renewals', load: (range) => window.ordo.money.dueDates(range) }
+ * To add one, append to OVERLAY_SOURCES.
  */
 export interface CalendarOverlaySource {
   id: string
@@ -15,7 +14,9 @@ export interface CalendarOverlaySource {
   load(range: DateRange): Promise<CalendarOverlayItem[]>
 }
 
-export const OVERLAY_SOURCES: readonly CalendarOverlaySource[] = []
+export const OVERLAY_SOURCES: readonly CalendarOverlaySource[] = [
+  { id: 'money', name: 'Bills and renewals', load: (range) => window.ordo.money.dueDates(range) },
+]
 
 /** Items from every source in `range`. A failing source is skipped rather than hiding the rest. */
 export async function loadOverlays(

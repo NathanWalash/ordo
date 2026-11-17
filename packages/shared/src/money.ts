@@ -1,3 +1,4 @@
+import type { CalendarOverlayItem, DateRange } from './calendar'
 import { z } from 'zod'
 import {
   isISODate,
@@ -44,6 +45,7 @@ export const MONEY_IPC = {
   deleteSplit: 'money:delete-split',
   settle: 'money:settle',
   deleteSettlement: 'money:delete-settlement',
+  dueDates: 'money:due-dates',
 } as const
 
 /** Statements bigger than this are almost certainly not a CSV export. */
@@ -204,4 +206,6 @@ export interface MoneyApi {
   deleteSplit(billId: string): Promise<void>
   settle(input: SettleInput): Promise<MoneyResult>
   deleteSettlement(id: string): Promise<void>
+  /** Active bills' due dates, renewals and trial ends in `range`, for the Calendar. */
+  dueDates(range: DateRange): Promise<CalendarOverlayItem[]>
 }

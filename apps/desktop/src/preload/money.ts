@@ -19,4 +19,5 @@ export const moneyApi: MoneyApi = {
   deleteSplit: (billId) => ipcRenderer.invoke(MONEY_IPC.deleteSplit, billId),
   settle: (input) => ipcRenderer.invoke(MONEY_IPC.settle, input),
   deleteSettlement: (id) => ipcRenderer.invoke(MONEY_IPC.deleteSettlement, id),
+  dueDates: (range) => ipcRenderer.invoke(MONEY_IPC.dueDates, range),
 }
