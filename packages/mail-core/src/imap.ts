@@ -1,6 +1,6 @@
 import { ImapFlow } from 'imapflow'
 import { SCAN_HEADER_FIELDS, toMessageHeader } from './headers'
-import type { MailboxStatus, MailProvider, MessageHeader, SpecialMailbox } from './types'
+import type { MailboxStatus, MailProvider, MessageHeader, MoveResult, SpecialMailbox } from './types'
 
 export interface ImapConfig {
   host: string
@@ -30,7 +30,7 @@ function wrap(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
 }
 
-/** IMAP access for iCloud (or any IMAP server, for tests). Read-mostly: only moveToTrash changes anything. */
+/** IMAP access for iCloud (or any IMAP server, for tests). Read-mostly: only moveMessages changes anything. */
 export class ImapMailProvider implements MailProvider {
   private client: ImapFlow
 
@@ -104,13 +104,29 @@ export class ImapMailProvider implements MailProvider {
     }
   }
 
-  async moveToTrash(mailbox: string, uids: number[]): Promise<void> {
-    if (!uids.length) return
-    const trash = await this.findMailbox('\\Trash')
-    if (!trash) throw new Error('No Trash mailbox found')
-    const lock = await this.client.getMailboxLock(mailbox)
+  async moveMessages(from: string, to: string, uids: number[]): Promise<MoveResult> {
+    if (!uids.length) return { uidValidity: null, uidMap: new Map() }
+    const lock = await this.client.getMailboxLock(from)
     try {
-      await this.client.messageMove(uids.join(','), trash, { uid: true })
+      // imapflow uses UID MOVE when the server has MOVE, else COPY, flag \Deleted and (UID) EXPUNGE.
+      const res = await this.client.messageMove(uids.join(','), to, { uid: true })
+      if (!res) throw new Error(`Couldn't move messages to ${to}`)
+      return {
+        uidValidity: res.uidValidity !== undefined ? String(res.uidValidity) : null,
+        uidMap: res.uidMap ?? null,
+      }
+    } finally {
+      lock.release()
+    }
+  }
+
+  async existingUids(mailbox: string, uids: number[]): Promise<number[]> {
+    if (!uids.length) return []
+    const lock = await this.client.getMailboxLock(mailbox, { readOnly: true })
+    try {
+      if (!this.client.mailbox || this.client.mailbox.exists === 0) return []
+      const found = await this.client.search({ uid: uids.join(',') }, { uid: true })
+      return found ? found.filter((u) => uids.includes(u)) : []
     } finally {
       lock.release()
     }

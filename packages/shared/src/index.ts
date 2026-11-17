@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-core'
 import type { SettingsApi } from './settings'
+import type { CleanupApi } from './cleanup'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -42,6 +43,7 @@ export type ScanOutcome = ({ ok: true } & ScanResult) | { ok: false; error: Conn
 
 export type { CategorisedSender, ScanProgress }
 export * from './settings'
+export * from './cleanup'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -70,6 +72,7 @@ export interface OrdoApi {
   senders: {
     list(): Promise<CategorisedSender[]>
   }
+  cleanup: CleanupApi
 }
 
 export const IPC = {
