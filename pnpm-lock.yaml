@@ -88,6 +88,15 @@ importers:
         specifier: ^8.3.8
         version: 8.3.8(@types/node@26.6.6)(jiti@2.7.0)
 
+  packages/calendar-core:
+    dependencies:
+      ical.js:
+        specifier: ^2.2.1
+        version: 2.2.1
+      tsdav:
+        specifier: ^2.5.0
+        version: 2.5.0
+
   packages/mail-core:
     dependencies:
       imapflow:
@@ -1342,6 +1351,9 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
+  ical.js@2.2.1:
+    resolution: {integrity: sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg==}
+
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
@@ -2058,6 +2070,10 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
+  tsdav@2.5.0:
+    resolution: {integrity: sha512-xcLbZ1Lwfr9OOlnLZGgICwkbqDHTGO9Gcn/k6ycwByt5TZf8LjEQhWFcim46M9Jq2aY19Nz4CV2tzJkWiqq2Iw==}
+    engines: {node: '>=18'}
+
   tslib@2.9.1:
     resolution: {integrity: sha512-a4Ux9VKuIMHsOS7ENbEq6hK2ZGYIT27Rtl0E4eD9KqwxhKiQeMZE/9xb3IdYwWaSOyIBQLExhQgXDTYoiCxnWA==}
 
@@ -2238,6 +2254,10 @@ packages:
 
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+
+  xml-js@1.6.11:
+    resolution: {integrity: sha512-7rVi2KMfwfWFl+GpPg6m80IVMWXLRjO+PxTq7V2CDhoGak0wzYzFgUY2m4XJ47OGdXd8eLE8EmwfAmdjw7lC1g==}
+    hasBin: true
 
   xmlbuilder@15.1.1:
     resolution: {integrity: sha512-yMqGBqtXyeN1e3TGYvgNgDVZ3j84W4cwkOXQswghol6APgZWaff9lnbvN7MHYJOiXsvGPXtjTYJEiC9J2wv9Eg==}
@@ -3685,6 +3705,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  ical.js@2.2.1: {}
+
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
@@ -4329,6 +4351,13 @@ snapshots:
     dependencies:
       typescript: 6.0.3
 
+  tsdav@2.5.0:
+    dependencies:
+      debug: 4.4.3
+      xml-js: 1.6.11
+    transitivePeerDependencies:
+      - supports-color
+
   tslib@2.9.1: {}
 
   type-check@0.4.0:
@@ -4450,6 +4479,10 @@ snapshots:
       strip-ansi: 6.0.1
 
   wrappy@1.0.2: {}
+
+  xml-js@1.6.11:
+    dependencies:
+      sax: 1.6.1
 
   xmlbuilder@15.1.1: {}
 
