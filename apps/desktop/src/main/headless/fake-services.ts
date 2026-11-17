@@ -75,7 +75,13 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       counts: () => ({ transactions: 0, accounts: 0, bills: 0 }),
     },
     ai: {
-      settings: () => ({ provider: 'none', model: null, sortSenders: false, cloudConsent: null }),
+      settings: () => ({
+        provider: 'none',
+        model: null,
+        sortSenders: false,
+        money: false,
+        cloudConsent: null,
+      }),
       status: async () => [],
       sort: vi.fn(async () => ({ ok: false as const, message: 'Choose a model in Settings → AI first.' })),
     },

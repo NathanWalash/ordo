@@ -89,9 +89,13 @@ test('picking LM Studio preselects gpt-oss-20b and saves it', async () => {
   await expect(model).toHaveValue('openai/gpt-oss-20b')
   await expect(model.locator('option')).toHaveText(['gemma-4-26b-a4b-qat', 'openai/gpt-oss-20b'])
   await expect(ai().getByText('Stays on this computer.')).toBeVisible()
-  await expect
-    .poll(savedAi)
-    .toEqual({ provider: 'lmstudio', model: 'openai/gpt-oss-20b', sortSenders: false, cloudConsent: null })
+  await expect.poll(savedAi).toEqual({
+    provider: 'lmstudio',
+    model: 'openai/gpt-oss-20b',
+    sortSenders: false,
+    money: false,
+    cloudConsent: null,
+  })
 
   const toggle = page.getByRole('switch', { name: "Use AI to sort senders Ordo isn't sure about" })
   await toggle.click()
