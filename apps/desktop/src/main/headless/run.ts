@@ -27,6 +27,8 @@ export async function runHeadless(args: string[], setup: () => void): Promise<vo
   // stdout carries the output (or MCP messages) only: anything else that logs goes to stderr.
   for (const level of ['log', 'info', 'debug', 'warn'] as const) console[level] = console.error
   if (process.platform === 'darwin') app.dock?.hide()
+  // Nothing is drawn. Without this, Linux with no display logs a page of GPU errors to stderr.
+  app.disableHardwareAcceleration()
 
   const json = args.includes('--json')
   const pending: string[] = []
