@@ -9,5 +9,24 @@ export {
   normaliseColor,
   type CalDavConfig,
 } from './caldav'
-export { CalendarStore, type CalendarSyncState, type StoredCalendar } from './store'
+export {
+  CalendarStore,
+  FEEDS,
+  ICLOUD,
+  type CalendarSyncState,
+  type StoredCalendar,
+  type StoredFeed,
+} from './store'
+export {
+  checkFeedUrl,
+  describeIcs,
+  FEED_MAX_BYTES,
+  FeedError,
+  FeedProvider,
+  fetchFeed,
+  type Feed,
+  type FeedErrorKind,
+  type FeedKind,
+  type FeedUrlCheck,
+} from './feeds'
 export { syncCalendars, type SyncOptions } from './sync'

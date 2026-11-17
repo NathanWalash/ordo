@@ -107,4 +107,22 @@ describe('syncCalendars', () => {
     expect(result).toMatchObject({ fetched: 1, stopped: true })
     expect(provider.fetched).toEqual(['home'])
   })
+
+  it('carries on past a calendar that fails, keeping its cached events, when asked to', async () => {
+    await syncCalendars(provider, store, { window: WINDOW, force: true })
+    const before = store.count()
+    const failing = Object.assign(Object.create(provider) as FakeProvider, {
+      fetchEvents: async (id: string) => {
+        if (id === 'home') throw new Error('Nothing was found at that link.')
+        return provider.events[id] ?? []
+      },
+    })
+    await expect(syncCalendars(failing, store, { window: WINDOW, force: true })).rejects.toThrow(/Nothing/)
+    const result = await syncCalendars(failing, store, { window: WINDOW, force: true, continueOnError: true })
+    expect(result).toMatchObject({
+      fetched: 1,
+      failed: [{ calendarId: 'home', name: 'Home', message: 'Nothing was found at that link.' }],
+    })
+    expect(store.count()).toBe(before)
+  })
 })

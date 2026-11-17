@@ -1,10 +1,25 @@
 import { DatabaseSync } from 'node:sqlite'
 import { overlaps } from './time'
-import type { CalendarEvent, CalendarInfo, DateRange, RemoteCalendar } from './types'
+import type { FeedKind } from './feeds'
+import type { CalendarEvent, CalendarInfo, CalendarSource, DateRange, RemoteCalendar } from './types'
 
 /** A cached calendar, with the user's choice of whether to show it. */
 export interface StoredCalendar extends CalendarInfo {
   visible: boolean
+}
+
+/**
+ * A subscribed link or imported file, as saved. `secret` is the link as the app stores it
+ * (encrypted by the caller); `host` is safe to show. Files keep their whole `ics` text.
+ */
+export interface StoredFeed {
+  id: string
+  kind: FeedKind
+  name: string
+  color?: string
+  secret?: string
+  host?: string
+  ics?: string
 }
 
 /** What was fetched for a calendar last time, so unchanged calendars can be skipped. */
@@ -16,6 +31,7 @@ export interface CalendarSyncState {
 
 type CalendarRow = {
   id: string
+  source: string
   name: string
   color: string | null
   read_only: number
@@ -63,7 +79,21 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_start ON events (start);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS feeds (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  color TEXT,
+  secret TEXT,
+  host TEXT,
+  ics TEXT,
+  added INTEGER NOT NULL
+);
 `
+
+/** Calendars from the iCloud account; subscribed links and files belong to FEEDS. */
+export const ICLOUD = 'icloud'
+export const FEEDS = 'feeds'
 
 const DAY_MS = 86_400_000
 
@@ -87,38 +117,113 @@ export class CalendarStore {
     this.db.exec('PRAGMA busy_timeout = 5000;')
     this.db.exec('PRAGMA journal_mode = WAL;')
     this.db.exec(SCHEMA)
+    const cols = this.db.prepare('PRAGMA table_info(calendars)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'provider'))
+      this.db.exec(`ALTER TABLE calendars ADD COLUMN provider TEXT NOT NULL DEFAULT '${ICLOUD}'`)
   }
 
+  /** iCloud calendars first, then subscriptions in the order they were added. */
   calendars(): StoredCalendar[] {
-    const rows = this.db.prepare('SELECT * FROM calendars ORDER BY position').all() as CalendarRow[]
+    const rows = this.db
+      .prepare(
+        `SELECT c.*, COALESCE(f.kind, '${ICLOUD}') AS source FROM calendars c ` +
+          `LEFT JOIN feeds f ON f.id = c.id ORDER BY c.provider = '${FEEDS}', c.position`,
+      )
+      .all() as CalendarRow[]
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
       color: r.color ?? undefined,
       readOnly: r.read_only === 1,
       visible: r.visible === 1,
+      source: r.source as CalendarSource,
     }))
   }
 
   /**
-   * Record the provider's current list of calendars. Keeps each calendar's visibility and
-   * sync state, and forgets calendars (and their events) that no longer exist.
+   * Record a provider's current list of calendars. Keeps each calendar's visibility and
+   * sync state, and forgets that provider's calendars (and their events) that no longer exist.
+   * Other providers' calendars are left alone.
    */
-  setCalendars(list: RemoteCalendar[]): void {
+  setCalendars(list: RemoteCalendar[], provider: string = ICLOUD): void {
     const upsert = this.db.prepare(
-      'INSERT INTO calendars (id, name, color, read_only, position) VALUES (?, ?, ?, ?, ?) ' +
+      'INSERT INTO calendars (id, name, color, read_only, position, provider) VALUES (?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, ' +
-        'read_only = excluded.read_only, position = excluded.position',
+        'read_only = excluded.read_only, position = excluded.position, provider = excluded.provider',
     )
     const ids = new Set(list.map((c) => c.id))
-    const gone = this.calendars().filter((c) => !ids.has(c.id))
+    const gone = (
+      this.db.prepare('SELECT id FROM calendars WHERE provider = ?').all(provider) as { id: string }[]
+    ).filter((c) => !ids.has(c.id))
     this.transaction(() => {
-      list.forEach((c, i) => upsert.run(c.id, c.name, c.color ?? null, c.readOnly ? 1 : 0, i))
-      for (const c of gone) {
-        this.db.prepare('DELETE FROM events WHERE calendar_id = ?').run(c.id)
-        this.db.prepare('DELETE FROM calendars WHERE id = ?').run(c.id)
-      }
+      list.forEach((c, i) => upsert.run(c.id, c.name, c.color ?? null, c.readOnly ? 1 : 0, i, provider))
+      for (const c of gone) this.dropCalendar(c.id)
     })
+  }
+
+  feeds(): StoredFeed[] {
+    const rows = this.db.prepare('SELECT * FROM feeds ORDER BY added, id').all() as {
+      id: string
+      kind: FeedKind
+      name: string
+      color: string | null
+      secret: string | null
+      host: string | null
+      ics: string | null
+    }[]
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      name: r.name,
+      color: r.color ?? undefined,
+      secret: r.secret ?? undefined,
+      host: r.host ?? undefined,
+      ics: r.ics ?? undefined,
+    }))
+  }
+
+  feedCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM feeds').get() as { n: number }).n
+  }
+
+  addFeed(feed: StoredFeed): void {
+    this.db
+      .prepare(
+        'INSERT INTO feeds (id, kind, name, color, secret, host, ics, added) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        feed.id,
+        feed.kind,
+        feed.name,
+        feed.color ?? null,
+        feed.secret ?? null,
+        feed.host ?? null,
+        feed.ics ?? null,
+        Date.now(),
+      )
+  }
+
+  /** Forget a subscription or imported file, with its calendar and events. False if there's no such feed. */
+  removeFeed(id: string): boolean {
+    let removed = false
+    this.transaction(() => {
+      removed = Number(this.db.prepare('DELETE FROM feeds WHERE id = ?').run(id).changes) > 0
+      if (removed) this.dropCalendar(id)
+    })
+    return removed
+  }
+
+  /** Forget one provider's calendars and events, e.g. iCloud's when the account is disconnected. */
+  clearProvider(provider: string): void {
+    const ids = this.db.prepare('SELECT id FROM calendars WHERE provider = ?').all(provider) as {
+      id: string
+    }[]
+    this.transaction(() => ids.forEach((c) => this.dropCalendar(c.id)))
+  }
+
+  private dropCalendar(id: string): void {
+    this.db.prepare('DELETE FROM events WHERE calendar_id = ?').run(id)
+    this.db.prepare('DELETE FROM calendars WHERE id = ?').run(id)
   }
 
   setVisible(calendarId: string, visible: boolean): void {
@@ -205,9 +310,9 @@ export class CalendarStore {
         .run(key, value)
   }
 
-  /** Forget every calendar and event, e.g. when the account is disconnected. */
+  /** Forget everything: every calendar, event, subscription and note. */
   clear(): void {
-    this.db.exec('DELETE FROM events; DELETE FROM calendars; DELETE FROM meta;')
+    this.db.exec('DELETE FROM events; DELETE FROM calendars; DELETE FROM meta; DELETE FROM feeds;')
   }
 
   close(): void {
