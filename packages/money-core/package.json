@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ordo/mail-core": "workspace:*"
+    "@ordo/ai": "workspace:*",
+    "@ordo/mail-core": "workspace:*",
+    "zod": "^4.6.7"
   }
 }

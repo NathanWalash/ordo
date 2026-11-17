@@ -65,17 +65,28 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         hasTransactions: false,
         mailConnected: true,
       }),
-      transactions: () => ({
+      transactions: async () => ({
         transactions: [],
         accounts: [],
         months: [],
         summary: { moneyIn: 0, moneyOut: 0, byCategory: [], byMonth: [] },
+        uncategorisedMerchants: 0,
       }),
       importFile: vi.fn(async () => ({ ok: true as const, accountName: 'Monzo', added: 3, duplicates: 0 })),
       counts: () => ({ transactions: 0, accounts: 0, bills: 0 }),
+      aiSort: vi.fn(async () => ({
+        ok: false as const,
+        message: 'Turn on AI for Money in Settings → AI first.',
+      })),
     },
     ai: {
-      settings: () => ({ provider: 'none', model: null, sortSenders: false, cloudConsent: null }),
+      settings: () => ({
+        provider: 'none',
+        model: null,
+        sortSenders: false,
+        money: false,
+        cloudConsent: null,
+      }),
       status: async () => [],
       sort: vi.fn(async () => ({ ok: false as const, message: 'Choose a model in Settings → AI first.' })),
     },

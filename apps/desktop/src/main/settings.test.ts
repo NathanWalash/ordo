@@ -77,6 +77,7 @@ describe('AI settings', () => {
     provider: 'lmstudio',
     model: 'openai/gpt-oss-20b',
     sortSenders: true,
+    money: false,
     cloudConsent: null,
   } as const
 
@@ -87,8 +88,22 @@ describe('AI settings', () => {
       provider: 'none',
       model: null,
       sortSenders: false,
+      money: false,
       cloudConsent: null,
     })
+  })
+
+  it('keeps AI settings saved before AI for Money existed, with Money off', () => {
+    const before = {
+      provider: 'lmstudio',
+      model: 'openai/gpt-oss-20b',
+      sortSenders: true,
+      cloudConsent: null,
+    } as const
+    writeFileSync(file, JSON.stringify({ theme: 'dark', ai: before }))
+    expect(readSettings(file)).toEqual({ theme: 'dark', ai: { ...before, money: false } })
+    expect(updateSettings(file, { ai: { ...before, money: true } }).ai.money).toBe(true)
+    expect(readSettings(file).ai.money).toBe(true)
   })
 
   it('saves a local provider without any consent', () => {
@@ -97,7 +112,7 @@ describe('AI settings', () => {
   })
 
   it('refuses a cloud provider without consent for that provider', () => {
-    const claude = { provider: 'claude-cli', model: 'haiku', sortSenders: true } as const
+    const claude = { provider: 'claude-cli', model: 'haiku', sortSenders: true, money: false } as const
     expect(() => updateSettings(file, { ai: { ...claude, cloudConsent: null } })).toThrow()
     expect(() => updateSettings(file, { ai: { ...claude, cloudConsent: 'codex-cli' } })).toThrow()
     expect(updateSettings(file, { ai: { ...claude, cloudConsent: 'claude-cli' } }).ai.provider).toBe(

@@ -39,7 +39,43 @@ export {
   validateSplit,
 } from './split'
 export { billsToCalendarItems, type BillCalendarItem } from './calendar'
-export { applySuggestions, noAdvisor, type MatchAdvisor, type MatchSuggestion } from './advisor'
+export {
+  applySuggestions,
+  noAdvisor,
+  senderKey,
+  unlinkedHints,
+  type MatchAdvisor,
+  type MatchSuggestion,
+} from './advisor'
+export { amountBand, scrubDescription } from './ai-data'
+export {
+  MONEY_SYSTEM_PROMPT,
+  aiCategoriseTransactions,
+  applyCategoryOverrides,
+  buildMoneyPrompt,
+  merchantFacts,
+  merchantsNeedingCategory,
+  needsCategory,
+  type CategoriseOptions,
+  type CategoriseResult,
+  type MoneyAiCategoryCache,
+  type MoneyAiCategoryRecord,
+  type MoneyAiProgress,
+  type SpendingCategory,
+} from './ai-categories'
+export {
+  MATCH_SYSTEM_PROMPT,
+  aiMatchBills,
+  buildMatchPrompt,
+  cachedMatchAdvisor,
+  matchPairs,
+  pairFacts,
+  plausiblePair,
+  type MatchOptions,
+  type MatchResult,
+  type MoneyAiMatchCache,
+  type MoneyAiMatchRecord,
+} from './ai-match'
 export {
   filterTransactions,
   summarise,

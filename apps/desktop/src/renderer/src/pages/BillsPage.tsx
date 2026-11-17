@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Clock, Mail, Plus, Receipt, TrendingUp, Users } from 'lucide-react'
+import { Clock, Mail, Plus, Receipt, Sparkles, TrendingUp, Users } from 'lucide-react'
 import { ME, formatPence, type DetectedBill } from '@ordo/money-core'
 import type { BillView, MoneyOverview } from '@ordo/shared'
 import { Button } from '../components/Button'
@@ -211,6 +211,16 @@ function ReviewRow({
           {trial && (
             <span className="text-[11px]" style={{ color: 'var(--promotions)' }}>
               Trial ending
+            </span>
+          )}
+          {d.matchedBy === 'ai' && (
+            <span
+              className="flex shrink-0 items-center gap-1 text-[11px] text-ink-3"
+              title={`A model matched these payments to emails from ${d.hints[0]?.merchant ?? 'this sender'}${
+                d.matchConfidence !== undefined ? ` (${Math.round(d.matchConfidence * 100)}% sure)` : ''
+              }. Check it before you confirm.`}
+            >
+              <Sparkles size={11} aria-hidden="true" /> Matched by AI
             </span>
           )}
         </div>

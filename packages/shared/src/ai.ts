@@ -19,7 +19,12 @@ export const AiSettingsSchema = z
     model: z.string().max(200).nullable(),
     /** Sort senders the rules aren't sure about with the chosen model. */
     sortSenders: z.boolean(),
-    /** The cloud provider the user agreed may receive sender names and subject lines. */
+    /**
+     * Use the chosen model for Money: categories for merchants the rules left in Other, and
+     * matching bank payments to email senders. Off by default, and for files saved before it existed.
+     */
+    money: z.boolean().default(false),
+    /** The cloud provider the user agreed may receive sender names and subject lines (and, with `money`, merchant names). */
     cloudConsent: z.enum(PROVIDER_IDS).nullable(),
   })
   .strict()
@@ -33,6 +38,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   provider: 'none',
   model: null,
   sortSenders: false,
+  money: false,
   cloudConsent: null,
 }
 

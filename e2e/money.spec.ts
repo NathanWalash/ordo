@@ -50,12 +50,12 @@ test('imports a statement and lists its transactions', async () => {
   await page.getByRole('button', { name: 'Import statement' }).click()
   const sheet = page.getByRole('dialog', { name: 'Import statement' })
   await expect(sheet.getByText('Recognised as a Monzo export')).toBeVisible()
-  await expect(sheet.getByText(/24 transactions from 28 Jul 2026 to 15 Nov 2026/)).toBeVisible()
+  await expect(sheet.getByText(/25 transactions from 28 Jul 2026 to 15 Nov 2026/)).toBeVisible()
   await expect(sheet.getByLabel('Account name')).toHaveValue('Monzo')
   await sheet.getByRole('button', { name: 'Import', exact: true }).click()
   await expect(sheet).toBeHidden()
 
-  await expect(page.getByText('Imported 24 transactions into Monzo.')).toBeVisible()
+  await expect(page.getByText('Imported 25 transactions into Monzo.')).toBeVisible()
   const table = page.getByRole('table', { name: 'Transactions' })
   await expect(table.getByRole('row', { name: /Netflix/ })).toHaveCount(4)
   await expect(table.getByRole('row').filter({ hasText: 'Acme Ltd' }).first()).toContainText('+£2,450.00')
@@ -67,7 +67,7 @@ test('imports a statement and lists its transactions', async () => {
     .getByRole('dialog', { name: 'Import statement' })
     .getByRole('button', { name: 'Import', exact: true })
     .click()
-  await expect(page.getByText('Imported 0 transactions into Monzo. 24 were already here')).toBeVisible()
+  await expect(page.getByText('Imported 0 transactions into Monzo. 25 were already here')).toBeVisible()
 })
 
 test('detected subscriptions can be confirmed', async () => {

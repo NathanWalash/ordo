@@ -78,10 +78,10 @@ test.describe('without an account', () => {
   test('money import reads a CSV statement, and only a CSV', async () => {
     const r = await ordo(['money', 'import', FIXTURE, '--allow-changes', '--confirm', '--json'], profile)
     expect(r.code).toBe(0)
-    expect(json(r)).toEqual({ account: 'Monzo', added: 24, duplicates: 0 })
+    expect(json(r)).toEqual({ account: 'Monzo', added: 25, duplicates: 0 })
 
     const again = await ordo(['money', 'import', FIXTURE, '--allow-changes', '--confirm'], profile)
-    expect(again.stdout).toBe('Imported 0 transactions into Monzo (24 already there).\n')
+    expect(again.stdout).toBe('Imported 0 transactions into Monzo (25 already there).\n')
 
     const notCsv = await ordo(['money', 'import', 'package.json', '--allow-changes', '--confirm'], profile)
     expect(notCsv.code).toBe(1)
@@ -90,8 +90,22 @@ test.describe('without an account', () => {
     const t = json<{ total: number; transactions: unknown[] }>(
       await ordo(['money', 'transactions', '--limit', '2', '--json'], profile),
     )
-    expect(t.total).toBe(24)
+    expect(t.total).toBe(25)
     expect(t.transactions).toHaveLength(2)
+  })
+
+  test('money sort is gated like ai sort, and refuses while AI for Money is off', async () => {
+    const without = await ordo(['money', 'sort', '--confirm', '--json'], profile)
+    expect(without.code).toBe(3)
+    expect(json(without)).toMatchObject({ error: { code: 'changes_not_allowed' } })
+    const unconfirmed = await ordo(['money', 'sort', '--allow-changes', '--json'], profile)
+    expect(unconfirmed.code).toBe(3)
+    expect(json(unconfirmed)).toMatchObject({ error: { code: 'confirm_required' } })
+    const off = await ordo(['money', 'sort', '--allow-changes', '--confirm', '--json'], profile)
+    expect(off.code).toBe(1)
+    expect(json(off)).toEqual({
+      error: { code: 'failed', message: 'Choose a model in Settings → AI first.' },
+    })
   })
 
   test('a write waits for another live Ordo process holding the lock (exit 4)', async () => {
@@ -134,8 +148,9 @@ test.describe('without an account', () => {
       expect(names).toContain('ordo_cleanup_plan')
       expect(names).not.toContain('ordo_cleanup_run')
       expect(names).not.toContain('ordo_import_statement')
+      expect(names).not.toContain('ordo_money_sort')
       const status = toolText(await readOnly.callTool({ name: 'ordo_status', arguments: {} }))
-      expect(status).toMatchObject({ account: { connected: false }, counts: { transactions: 24 } })
+      expect(status).toMatchObject({ account: { connected: false }, counts: { transactions: 25 } })
     } finally {
       await readOnly.close()
     }
@@ -144,7 +159,13 @@ test.describe('without an account', () => {
     try {
       const names = (await changes.listTools()).tools.map((t) => t.name)
       expect(names).toEqual(
-        expect.arrayContaining(['ordo_cleanup_run', 'ordo_undo', 'ordo_import_statement', 'ordo_ai_sort']),
+        expect.arrayContaining([
+          'ordo_cleanup_run',
+          'ordo_undo',
+          'ordo_import_statement',
+          'ordo_ai_sort',
+          'ordo_money_sort',
+        ]),
       )
       const refused = await changes.callTool({ name: 'ordo_import_statement', arguments: { path: FIXTURE } })
       expect(refused.isError).toBe(true)

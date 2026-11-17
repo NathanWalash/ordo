@@ -1,6 +1,7 @@
 import type { CalendarOverlayItem, DateRange } from './calendar'
 import { z } from 'zod'
 import {
+  SPENDING_CATEGORIES,
   isISODate,
   type Allocation,
   type Bill,
@@ -46,6 +47,10 @@ export const MONEY_IPC = {
   settle: 'money:settle',
   deleteSettlement: 'money:delete-settlement',
   dueDates: 'money:due-dates',
+  setCategory: 'money:set-category',
+  aiSort: 'money:ai-sort',
+  aiStop: 'money:ai-stop',
+  aiProgress: 'money:ai-progress',
 } as const
 
 /** Statements bigger than this are almost certainly not a CSV export. */
@@ -127,7 +132,43 @@ export interface TransactionPage {
   /** Every month with transactions (`YYYY-MM`), newest first, for the filter. */
   months: string[]
   summary: TransactionSummary
+  /** Merchants (in any account or month) still in Other that a model could categorise. */
+  uncategorisedMerchants: number
 }
+
+/** Your own category for a transaction; null goes back to the bank's, the rules' or AI's. */
+export const SetCategorySchema = z.object({
+  transactionId: id,
+  category: z.enum(SPENDING_CATEGORIES).nullable(),
+})
+export type SetCategoryInput = z.input<typeof SetCategorySchema>
+
+/** Progress of Sort with AI on Finances: categories first, then matching bills to email. */
+export interface MoneyAiProgress {
+  phase: 'categories' | 'bills'
+  done: number
+  total: number
+}
+
+export type MoneyAiOutcome =
+  | {
+      ok: true
+      /** Merchants that needed a category. */
+      merchants: number
+      /** Merchants answered by the model or from earlier answers. */
+      checked: number
+      /** Merchants moved out of Other. */
+      changed: number
+      cached: number
+      failed: number
+      /** Bank and email pairs the rules couldn't link, and how many the model matched. */
+      billPairs: number
+      billsMatched: number
+      /** Fixed, Ordo-written messages; never text from a model. */
+      errors: string[]
+    }
+  /** `locked`: another Ordo process is writing. */
+  | { ok: false; message: string; error?: 'locked' }
 
 /** A bill plus its split and each person's share of the current amount. */
 export type BillView = Bill & { split?: Split; shares?: Allocation[] }
@@ -210,4 +251,14 @@ export interface MoneyApi {
   deleteSettlement(id: string): Promise<void>
   /** Active bills' due dates, renewals and trial ends in `range`, for the Calendar. */
   dueDates(range: DateRange): Promise<CalendarOverlayItem[]>
+  /** Choose a transaction's category yourself (null to undo). Wins over the bank, rules and AI. */
+  setCategory(input: SetCategoryInput): Promise<MoneyResult>
+  /**
+   * Sort with AI: ask the model chosen in Settings → AI to categorise merchants in Other, then to
+   * match bank payments to email senders the rules couldn't. Needs AI for Money turned on.
+   */
+  aiSort(): Promise<MoneyAiOutcome>
+  aiStop(): Promise<void>
+  /** Subscribe to Sort with AI progress; returns an unsubscribe function. */
+  onAiProgress(listener: (p: MoneyAiProgress) => void): () => void
 }

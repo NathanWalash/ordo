@@ -3,8 +3,13 @@ import { basename, extname, join, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import {
   ME,
+  aiCategoriseTransactions,
+  aiMatchBills,
   allocate,
+  applyCategoryOverrides,
   applySuggestions,
+  cachedMatchAdvisor,
+  merchantsNeedingCategory,
   balances,
   billsToCalendarItems,
   detectRecurring,
@@ -23,6 +28,7 @@ import {
   type DetectedBill,
   type MatchAdvisor,
   type StoredBill,
+  type Transaction,
 } from '@ordo/money-core'
 import { MoneyStore } from '@ordo/money-core/node'
 import {
@@ -31,6 +37,7 @@ import {
   MAX_STATEMENT_BYTES,
   MONEY_IPC,
   PersonInputSchema,
+  SetCategorySchema,
   SettleInputSchema,
   SplitInputSchema,
   StatementInputSchema,
@@ -38,6 +45,8 @@ import {
   type BillView,
   type CalendarOverlayItem,
   type ImportOutcome,
+  type MoneyAiOutcome,
+  type MoneyAiProgress,
   type MoneyOverview,
   type MoneyResult,
   type StatementFile,
@@ -45,14 +54,55 @@ import {
   type StatementPreview,
   type TransactionPage,
 } from '@ordo/shared'
+import { aiSettings, message as aiMessage, resolveModel, usableProvider } from './ai'
 import { cachedInboxHeaders } from './mail'
-import { Locked, withWriteLock } from './writes'
+import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
 const moneyStore = () => (store ??= new MoneyStore(join(app.getPath('userData'), 'money.sqlite')))
 
-/** Rules decide for now; a local-model advisor plugs in here in a later milestone. */
-const advisor: MatchAdvisor = noAdvisor
+/**
+ * The model whose earlier answers apply to Money right now: AI for Money is on, the provider may
+ * be used (cloud consent) and its model is known. Null otherwise, and then rules alone decide.
+ */
+async function moneyAi() {
+  const ai = aiSettings()
+  if (!ai.money) return null
+  const provider = usableProvider(ai)
+  if (!provider) return null
+  try {
+    return { provider, model: await resolveModel(ai) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Transactions with your own category choices on top, then earlier AI answers from the cache.
+ * Never asks a model; if anything goes wrong it falls back to the bank's and the rules' categories.
+ */
+async function categorised(txs: Transaction[]): Promise<Transaction[]> {
+  const s = moneyStore()
+  const mine = applyCategoryOverrides(txs, s.categoryOverrides())
+  const ai = await moneyAi()
+  if (!ai) return mine
+  try {
+    const r = await aiCategoriseTransactions(mine, ai.provider, {
+      model: ai.model,
+      cache: s,
+      cacheOnly: true,
+    })
+    return r.transactions
+  } catch {
+    return mine
+  }
+}
+
+/** Earlier AI bill matches from the cache when AI for Money is on; rules alone otherwise. */
+async function advisor(): Promise<MatchAdvisor> {
+  const ai = await moneyAi()
+  return ai ? cachedMatchAdvisor(ai.provider, { model: ai.model, cache: moneyStore() }) : noAdvisor
+}
 
 const ok: MoneyResult = { ok: true }
 const fail = (message: string): MoneyResult => ({ ok: false, message })
@@ -161,10 +211,10 @@ function saveStatement(input: StatementInput): ImportOutcome {
   return { ok: true, accountName, ...moneyStore().addTransactions(r.transactions) }
 }
 
-export function transactions(raw: unknown): TransactionPage {
+export async function transactions(raw: unknown): Promise<TransactionPage> {
   const q = TransactionQuerySchema.parse(raw ?? {})
   const s = moneyStore()
-  const all = s.transactions()
+  const all = await categorised(s.transactions())
   const inAccount = filterTransactions(all, { account: q.account })
   const shown = filterTransactions(inAccount, { month: q.month })
   return {
@@ -172,19 +222,107 @@ export function transactions(raw: unknown): TransactionPage {
     accounts: s.accounts(),
     months: [...new Set(inAccount.map((t) => monthOf(t.date)))],
     summary: summarise(shown),
+    uncategorisedMerchants: merchantsNeedingCategory(all),
   }
+}
+
+/** Choose a transaction's category yourself, or (null) go back to the automatic one. */
+function setCategory(raw: unknown): MoneyResult {
+  const parsed = SetCategorySchema.safeParse(raw)
+  if (!parsed.success) return fail(firstIssue(parsed.error))
+  const { transactionId, category } = parsed.data
+  return moneyStore().setCategoryOverride(transactionId, category)
+    ? ok
+    : fail('That transaction is no longer there.')
+}
+
+// Sort with AI
+
+let aiRunning: AbortController | null = null
+
+/**
+ * Ask the model chosen in Settings → AI to categorise the merchants left in Other, then to match
+ * bank payments to email senders the rules couldn't link. Same provider, model, cloud-consent
+ * checks and write lock as sorting senders. Answers are cached; listing applies them without
+ * asking again. A match only ever becomes a suggestion in Bills → Detected.
+ */
+export async function aiSort(onProgress?: (p: MoneyAiProgress) => void): Promise<MoneyAiOutcome> {
+  const ai = aiSettings()
+  if (ai.provider === 'none') return { ok: false, message: 'Choose a model in Settings → AI first.' }
+  if (!ai.money) return { ok: false, message: 'Turn on AI for Money in Settings → AI first.' }
+  const provider = usableProvider(ai)
+  if (!provider) return { ok: false, message: 'Confirm that Ordo may use this provider first.' }
+  if (aiRunning) return { ok: false, message: 'Sorting is already running.' }
+
+  const ctrl = (aiRunning = new AbortController())
+  try {
+    const result = await withWriteLock('sorting money with AI', async () => {
+      const s = moneyStore()
+      const common = {
+        model: await resolveModel(ai),
+        cache: s,
+        // A local model answers one request at a time anyway.
+        concurrency: provider.kind === 'local' ? 1 : 2,
+        timeoutMs: 180_000,
+        signal: ctrl.signal,
+      }
+      const txs = s.transactions()
+      const categories = await aiCategoriseTransactions(
+        applyCategoryOverrides(txs, s.categoryOverrides()),
+        provider,
+        { ...common, onProgress: (p) => onProgress?.({ phase: 'categories', ...p }) },
+      )
+      const { hints, linked } = billEvidence(txs, toISODate())
+      const bills = hints.length
+        ? await aiMatchBills(linked, hints, provider, {
+            ...common,
+            onProgress: (p) => onProgress?.({ phase: 'bills', ...p }),
+          })
+        : null
+      return { categories, bills }
+    })
+    if (result instanceof Locked) return { ok: false, error: 'locked', message: result.message }
+    const { categories: c, bills: b } = result
+    return {
+      ok: true,
+      merchants: c.merchants,
+      checked: c.checked,
+      changed: c.changed,
+      cached: c.cached,
+      failed: c.failed,
+      billPairs: b?.pairs ?? 0,
+      billsMatched: b?.matched ?? 0,
+      errors: [...c.errors, ...(b?.errors ?? [])],
+    }
+  } catch (err) {
+    return { ok: false, message: aiMessage(err) }
+  } finally {
+    aiRunning = null
+  }
+}
+
+export function stopAiSort(): void {
+  aiRunning?.abort()
 }
 
 // Bills
 
-/** Everything detected from statements and (if Mail is connected) cached email headers. */
-async function detect(today: string) {
-  const s = moneyStore()
-  const txs = s.transactions()
+/** Recurring payments joined to email hints by the rules alone. */
+function billEvidence(txs: Transaction[], today: string) {
   const headers = cachedInboxHeaders()
   const hints = headers ? emailHints(headers) : []
-  const linked = linkBills(detectRecurring(txs, today), hints)
-  const detected = applySuggestions(linked, await advisor.suggest(linked))
+  return { headers, hints, linked: linkBills(detectRecurring(txs, today), hints) }
+}
+
+/**
+ * Everything detected from statements and (if Mail is connected) cached email headers, plus any
+ * earlier AI matches for what the rules couldn't link.
+ */
+async function detect(today: string) {
+  const txs = moneyStore().transactions()
+  const { headers, hints, linked } = billEvidence(txs, today)
+  const suggestions = await (await advisor()).suggest(linked, hints).catch(() => [])
+  const detected = applySuggestions(linked, hints, suggestions)
   return { txs, hints, detected, mailConnected: headers !== null }
 }
 
@@ -395,9 +533,13 @@ export function registerMoneyIpc(): void {
   ipcMain.handle(MONEY_IPC.settle, (_e, input: unknown) => settle(input))
   ipcMain.handle(MONEY_IPC.dueDates, (_e, range: unknown) => dueDates(range))
   ipcMain.handle(MONEY_IPC.deleteSettlement, (_e, id: unknown) => moneyStore().deleteSettlement(String(id)))
+  ipcMain.handle(MONEY_IPC.setCategory, (_e, input: unknown) => setCategory(input))
+  ipcMain.handle(MONEY_IPC.aiSort, (e) => aiSort(toRenderer(e.sender, MONEY_IPC.aiProgress)))
+  ipcMain.handle(MONEY_IPC.aiStop, () => stopAiSort())
 }
 
 export function closeMoney(): void {
+  stopAiSort()
   store?.close()
   store = null
 }

@@ -292,6 +292,22 @@ export function createMcpServer(
   )
 
   server.registerTool(
+    'ordo_money_sort',
+    {
+      description:
+        'Ask the model chosen in Ordo’s Settings → AI to categorise the merchants left in Other and to match ' +
+        'bank payments to email senders the rules couldn’t. Needs AI for Money turned on in Ordo. Only merchant ' +
+        'names, a description without numbers and a rough amount go to that model, never balances, accounts or ' +
+        'dates; a cloud provider is only used if the user agreed to it in Ordo. Matches only become bills to ' +
+        'review in the app. ' +
+        CHANGE,
+      inputSchema: { confirm },
+      annotations: changes,
+    },
+    ({ confirm: yes }) => call('money sort', { confirm: yes }),
+  )
+
+  server.registerTool(
     'ordo_ai_sort',
     {
       description:

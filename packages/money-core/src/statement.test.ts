@@ -37,8 +37,8 @@ describe('parseStatement', () => {
     const r = parsed('monzo.csv', 'Monzo')
     expect(r.layout).toBe('Monzo')
     expect(r.mapping.amount).toBeDefined()
-    // 25 rows, one is a £0 card check.
-    expect(r.transactions).toHaveLength(24)
+    // 26 rows, one is a £0 card check.
+    expect(r.transactions).toHaveLength(25)
     expect(r.skipped).toBe(1)
     const netflix = r.transactions.find((t) => t.date === '2026-08-03')!
     expect(netflix).toMatchObject({
@@ -48,6 +48,8 @@ describe('parseStatement', () => {
       amount: -1099,
       category: 'Entertainment',
     })
+    // Monzo's "general" says nothing, and no rule knows Zorblax: it's left in Other for AI or you.
+    expect(r.transactions.find((t) => t.merchant === 'Zorblax Studio')).toMatchObject({ category: 'Other' })
     expect(r.transactions.find((t) => t.date === '2026-07-28')!.amount).toBe(245000)
   })
 

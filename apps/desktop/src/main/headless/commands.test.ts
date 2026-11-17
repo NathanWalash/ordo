@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseInvocation, type Command } from './args'
 import { runCli, type CliIo } from './cli'
 import { exitCodeFor, gate, runCommand } from './commands'
@@ -32,6 +32,7 @@ describe('the change gate', () => {
     ['undo', '1', '--confirm'],
     ['money', 'import', 'x.csv', '--confirm'],
     ['ai', 'sort', '--confirm'],
+    ['money', 'sort', '--confirm'],
   ])('%s %s is refused without --allow-changes and nothing is called', async (...args) => {
     const services = fakeServices()
     const r = await cli(services, ...args)
@@ -41,6 +42,7 @@ describe('the change gate', () => {
     expect(services.cleanup.undo).not.toHaveBeenCalled()
     expect(services.money.importFile).not.toHaveBeenCalled()
     expect(services.ai.sort).not.toHaveBeenCalled()
+    expect(services.money.aiSort).not.toHaveBeenCalled()
   })
 
   it('is refused without --confirm even when changes are allowed', async () => {
@@ -175,6 +177,81 @@ describe('commands', () => {
     )
     expect(services.money.importFile).toHaveBeenCalledWith('../x.csv', 'Joint')
     expect(r).toEqual({ ok: true, data: { account: 'Monzo', added: 3, duplicates: 0 } })
+  })
+
+  it('money sort needs --confirm, works without a mail account and reports refusals as failures', async () => {
+    const services = fakeServices({ account: () => ({ connected: false }) })
+    const unconfirmed = await cli(services, 'money', 'sort', '--allow-changes')
+    expect(unconfirmed.code).toBe(3)
+    expect(services.money.aiSort).not.toHaveBeenCalled()
+    const r = await cli(services, 'money', 'sort', '--allow-changes', '--confirm', '--json')
+    expect(r.code).toBe(1)
+    expect(JSON.parse(r.stdout)).toEqual({
+      error: { code: 'failed', message: 'Turn on AI for Money in Settings → AI first.' },
+    })
+    expect(services.money.aiSort).toHaveBeenCalledTimes(1)
+  })
+
+  it('money sort summarises what the model did, and locked exits 4', async () => {
+    const services = fakeServices()
+    services.money.aiSort = vi.fn(async (onProgress) => {
+      onProgress?.({ phase: 'categories', done: 1, total: 1 })
+      return {
+        ok: true as const,
+        merchants: 3,
+        checked: 3,
+        changed: 2,
+        cached: 1,
+        failed: 0,
+        billPairs: 1,
+        billsMatched: 1,
+        errors: [],
+      }
+    })
+    const r = await cli(services, 'money', 'sort', '--allow-changes', '--confirm')
+    expect(r.code).toBe(0)
+    expect(r.stdout).toBe(
+      'Checked 3 merchants of 3 in Other: 2 categorised, 1 from earlier answers, 0 failed. Matched 1 bill to email, to confirm in the app.\n',
+    )
+    expect(r.stderr).toContain('Sorting merchants: 1 of 1')
+
+    services.money.aiSort = vi.fn(async () => ({
+      ok: false as const,
+      error: 'locked' as const,
+      message: 'Ordo is busy in another Ordo window (sorting senders with AI). Try again when it finishes.',
+    }))
+    expect((await cli(services, 'money', 'sort', '--allow-changes', '--confirm')).code).toBe(4)
+  })
+
+  it('money transactions shows who chose a category', async () => {
+    const tx = { accountName: 'Monzo', date: '2026-11-06', description: 'ZORBLAX', amount: -1450 }
+    const services = fakeServices()
+    services.money.transactions = async () => ({
+      transactions: [
+        { ...tx, id: 'a', merchant: 'Zorblax', category: 'Shopping', categorisedBy: 'ai', confidence: 0.85 },
+        { ...tx, id: 'b', merchant: 'Mine', category: 'Health', categorisedBy: 'you' },
+        { ...tx, id: 'c', merchant: 'Tesco', category: 'Groceries' },
+      ],
+      accounts: ['Monzo'],
+      months: ['2026-11'],
+      summary: { moneyIn: 0, moneyOut: 4350, byCategory: [], byMonth: [] },
+      uncategorisedMerchants: 0,
+    })
+    const json = JSON.parse((await cli(services, 'money', 'transactions', '--json')).stdout)
+    expect(
+      json.transactions.map((t: Record<string, unknown>) => [
+        t['category'],
+        t['categorisedBy'],
+        t['confidence'],
+      ]),
+    ).toEqual([
+      ['Shopping', 'ai', 0.85],
+      ['Health', 'you', undefined],
+      ['Groceries', undefined, undefined],
+    ])
+    const human = (await cli(services, 'money', 'transactions')).stdout
+    expect(human).toContain('Shopping*')
+    expect(human).toContain('* categorised by AI')
   })
 
   it('ai sort reports the consent refusal as a failure', async () => {

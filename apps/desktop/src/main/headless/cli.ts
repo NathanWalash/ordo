@@ -41,6 +41,7 @@ function progressPrinter(io: CliIo) {
       ),
     calendar: (p) => show('Syncing calendars', p.done, p.total),
     ai: (p) => show('Sorting senders', p.done, p.total),
+    money: (p) => show(p.phase === 'bills' ? 'Matching bills' : 'Sorting merchants', p.done, p.total),
   }
   return {
     progress,

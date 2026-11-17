@@ -69,6 +69,7 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]`       | Imported transactions, newest first                            |
 | `money balances`                                                              | Who owes whom for shared bills                                 |
 | `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                 |
+| `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \* |
 | `ai status`                                                                   | Model providers and the saved choice                           |
 | `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \* |
 | `help`, `--help`, `-h`                                                        | The command list                                               |
@@ -85,6 +86,11 @@ Trash only). A sender whose unsubscribe is a web page is opened in your browser,
 
 `money import` accepts a regular `.csv` file under 5 MB (symlinks are resolved first), then reads
 it with the same statement parser and limits as an import in the app.
+
+`money sort` is Sort with AI from Finances: it needs a model and **Use AI for Money** in Settings →
+AI, and doesn't need a mail account (bill matching is skipped without one). `money transactions
+--json` marks categories a model chose with `"categorisedBy": "ai"` and its `confidence`, and ones
+you chose with `"categorisedBy": "you"`; the human output adds a `*` to AI categories.
 
 ### Exit codes
 
@@ -161,7 +167,7 @@ flooded. `ordo_scan` and `ordo_calendar_sync` refresh Ordo's local cache; they c
 the server.
 
 **Change tools** (only with `--allow-changes`): `ordo_cleanup_run`, `ordo_undo`,
-`ordo_import_statement`, `ordo_ai_sort`. Each also needs `confirm: true` in its arguments, or it
+`ordo_import_statement`, `ordo_ai_sort`, `ordo_money_sort`. Each also needs `confirm: true` in its arguments, or it
 is refused with `confirm_required` and nothing happens.
 
 Tool descriptions tell the agent that names, addresses, subjects, URLs, merchant names and event

@@ -15,6 +15,8 @@ import type {
   CleanupRequest,
   CleanupSummary,
   ImportOutcome,
+  MoneyAiOutcome,
+  MoneyAiProgress,
   MoneyOverview,
   ScanOutcome,
   ScanProgress,
@@ -52,9 +54,11 @@ export interface OrdoServices {
   }
   money: {
     overview(): Promise<MoneyOverview>
-    transactions(query: TransactionQuery): TransactionPage
+    transactions(query: TransactionQuery): Promise<TransactionPage>
     importFile(path: string, accountName?: string): Promise<ImportOutcome>
     counts(): { transactions: number; accounts: number; bills: number }
+    /** Sort with AI: categories for merchants in Other, then bill matching. Needs AI for Money on. */
+    aiSort(onProgress?: (p: MoneyAiProgress) => void): Promise<MoneyAiOutcome>
   }
   ai: {
     settings(): AiSettings
@@ -71,6 +75,7 @@ export interface Progress {
   cleanup?: (p: CleanupProgress) => void
   calendar?: (p: CalendarSyncProgress) => void
   ai?: (p: AiSortProgress) => void
+  money?: (p: MoneyAiProgress) => void
 }
 
 export type ErrorCode =
@@ -282,6 +287,7 @@ export async function runCommand(
             provider: ai.provider,
             model: ai.model,
             sortSenders: ai.sortSenders,
+            money: ai.money,
             cloudConsent: ai.cloudConsent,
           },
           counts: {
@@ -422,7 +428,7 @@ export async function runCommand(
     }
 
     case 'money transactions': {
-      const t = services.money.transactions({ month: command.month, account: command.account })
+      const t = await services.money.transactions({ month: command.month, account: command.account })
       // Newest first, like the app.
       const all = [...t.transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
       const p = page(all, command.limit, offset)
@@ -443,6 +449,9 @@ export async function runCommand(
             description: x.description,
             merchant: x.merchant ?? null,
             category: x.category ?? null,
+            // Who chose the category when it wasn't the bank or the rules.
+            ...(x.categorisedBy === 'ai' && { categorisedBy: 'ai', confidence: x.confidence ?? null }),
+            ...(x.categorisedBy === 'you' && { categorisedBy: 'you' }),
             amountPence: x.amount,
           })),
         },
@@ -470,6 +479,24 @@ export async function runCommand(
       const r = await services.money.importFile(command.file, command.account)
       if (!r.ok) return fromService(r)
       return { ok: true, data: { account: r.accountName, added: r.added, duplicates: r.duplicates } }
+    }
+
+    case 'money sort': {
+      const r = await services.money.aiSort(options.progress?.money)
+      if (!r.ok) return fromService({ error: r.error, message: r.message })
+      return {
+        ok: true,
+        data: {
+          merchants: r.merchants,
+          checked: r.checked,
+          changed: r.changed,
+          cached: r.cached,
+          failed: r.failed,
+          billPairs: r.billPairs,
+          billsMatched: r.billsMatched,
+          errors: r.errors,
+        },
+      }
     }
 
     case 'ai status': {

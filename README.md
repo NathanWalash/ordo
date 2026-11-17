@@ -53,7 +53,8 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: find bills and subscriptions in statements and email receipts   | Done    |
 | Money: split bills with flatmates, balances and settling up            | Done    |
 | Money: bill due dates, renewals and trial ends on the Calendar         | Done    |
-| Money: local-model help matching bills to receipts                     | Planned |
+| Money: Sort with AI for categories and matching bills to email         | Done    |
+| Money: change a transaction's category yourself                        | Done    |
 | Headless mode: a CLI and an MCP server for scripts and AI agents       | Done    |
 
 ## Headless mode and MCP

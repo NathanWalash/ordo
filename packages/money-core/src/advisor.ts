@@ -1,40 +1,80 @@
-import type { DetectedBill } from './types'
+import { merchantKey } from './merchant'
+import type { DetectedBill, EmailHint } from './types'
 
-/** A model's opinion on one detected bill. */
+/** An email sender, as Money groups subscription emails: display name plus domain. */
+export const senderKey = (h: Pick<EmailHint, 'merchant' | 'domain'>) =>
+  `${merchantKey(h.merchant)}|${h.domain.toLowerCase()}`
+
+/** A model's opinion that a bank payment run and an email sender are the same business. */
 export interface MatchSuggestion {
-  /** `DetectedBill.key` this is about. */
+  /** `DetectedBill.key` of a bank-only bill. */
   key: string
-  /** Is this really a bill or subscription (not, say, a weekly supermarket shop)? */
-  isBill?: boolean
-  /** A friendlier name, e.g. `Thames Water` for `THAMES WATER UTILITIE`. */
-  name?: string
+  /** `senderKey()` of the email sender it matches. */
+  sender: string
   confidence: number
-  reason?: string
 }
 
 /**
- * Seam for a local model to review rule-based detection: confirm likely bills, rename
- * merchants and link emails the rules missed. Only merchant names, amounts, dates and
- * subject lines would be shared, never full statements.
+ * Seam for a model to link what the rules couldn't: a bank merchant (`AMZN MKTP`) and an email
+ * sender (`Amazon`, amazon.co.uk). Only merchant and sender names, domains, the kind of email
+ * and a rough amount are shared, never statements or subject lines.
  *
- * The local-model adapter (LM Studio / Ollama / Claude CLI) arrives in a later
- * milestone. Until then Ordo uses `noAdvisor` and rules alone decide.
+ * A suggestion only adds the email to a detected bill waiting for review; nothing is confirmed.
  */
 export interface MatchAdvisor {
-  suggest(candidates: DetectedBill[]): Promise<MatchSuggestion[]>
+  suggest(detected: DetectedBill[], hints: EmailHint[]): Promise<MatchSuggestion[]>
 }
 
 export const noAdvisor: MatchAdvisor = {
   suggest: async () => [],
 }
 
-/** Apply suggestions: drop what the model says isn't a bill, adopt better names. */
-export function applySuggestions(candidates: DetectedBill[], suggestions: MatchSuggestion[]): DetectedBill[] {
-  const byKey = new Map(suggestions.map((s) => [s.key, s]))
-  return candidates
-    .filter((c) => byKey.get(c.key)?.isBill !== false)
-    .map((c) => {
-      const s = byKey.get(c.key)
-      return s?.name ? { ...c, name: s.name } : c
-    })
+/** Hints the rules didn't link to any bank payment run. */
+export function unlinkedHints(detected: DetectedBill[], hints: EmailHint[]): EmailHint[] {
+  const linked = new Set(detected.filter((d) => d.source === 'both').flatMap((d) => d.hints))
+  return hints.filter((h) => !linked.has(h))
+}
+
+/**
+ * Apply match suggestions: each matched bank-only bill takes the sender's emails and becomes
+ * `both`, marked as matched by AI. An email-only suggestion for the same sender is folded in.
+ * Suggestions about anything else (bills that already have email, unknown keys or senders) are
+ * ignored. Every bill stays a detected bill for you to confirm or dismiss.
+ */
+export function applySuggestions(
+  detected: DetectedBill[],
+  hints: EmailHint[],
+  suggestions: MatchSuggestion[],
+): DetectedBill[] {
+  if (!suggestions.length) return detected
+  const free = unlinkedHints(detected, hints)
+  const bySender = new Map<string, EmailHint[]>()
+  for (const h of free) bySender.set(senderKey(h), [...(bySender.get(senderKey(h)) ?? []), h])
+
+  // The most confident suggestion wins, one sender per bill and one bill per sender.
+  const bankOnly = new Set(detected.filter((d) => d.source === 'bank').map((d) => d.key))
+  const best = new Map<string, MatchSuggestion>()
+  const taken = new Set<string>()
+  for (const s of [...suggestions].sort((a, b) => b.confidence - a.confidence)) {
+    if (!bankOnly.has(s.key) || best.has(s.key) || taken.has(s.sender) || !bySender.has(s.sender)) continue
+    best.set(s.key, s)
+    taken.add(s.sender)
+  }
+
+  const used = new Set<EmailHint>()
+  const out = detected.map((d) => {
+    const s = best.get(d.key)
+    if (!s) return d
+    const linked = bySender.get(s.sender)!
+    linked.forEach((h) => used.add(h))
+    return {
+      ...d,
+      source: 'both' as const,
+      hints: linked,
+      matchedBy: 'ai' as const,
+      matchConfidence: s.confidence,
+    }
+  })
+  // An email-only suggestion whose emails now belong to a bank bill would be a duplicate.
+  return out.filter((d) => d.source !== 'email' || !d.hints.every((h) => used.has(h)))
 }

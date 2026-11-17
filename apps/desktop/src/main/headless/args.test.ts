@@ -140,5 +140,11 @@ describe('commandFrom', () => {
 })
 
 it('marks exactly the commands that change data', () => {
-  expect([...CHANGE_COMMANDS].sort()).toEqual(['ai sort', 'cleanup run', 'money import', 'undo'])
+  expect([...CHANGE_COMMANDS].sort()).toEqual([
+    'ai sort',
+    'cleanup run',
+    'money import',
+    'money sort',
+    'undo',
+  ])
 })

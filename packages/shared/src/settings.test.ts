@@ -25,13 +25,25 @@ describe('settings contract', () => {
 })
 
 describe('AI settings contract', () => {
-  it('defaults to no provider and sorting off', () => {
+  it('defaults to no provider, sorting off and Money off', () => {
     expect(DEFAULT_SETTINGS.ai).toEqual({
       provider: 'none',
       model: null,
       sortSenders: false,
+      money: false,
       cloudConsent: null,
     })
+  })
+
+  it('treats AI for Money as off when a saved file predates it, and only accepts a boolean', () => {
+    const old = { provider: 'lmstudio', model: 'm', sortSenders: true, cloudConsent: null }
+    expect(SettingsPatchSchema.parse({ ai: old })).toEqual({ ai: { ...old, money: false } })
+    expect(SettingsPatchSchema.parse({ ai: { ...old, money: true } }).ai?.money).toBe(true)
+    expect(SettingsPatchSchema.safeParse({ ai: { ...old, money: 'yes' } }).success).toBe(false)
+    // Money doesn't loosen the cloud rule: consent for that provider is still required.
+    expect(
+      SettingsPatchSchema.safeParse({ ai: { ...old, provider: 'claude-cli', money: true } }).success,
+    ).toBe(false)
   })
 
   it('only accepts a cloud provider with consent for that provider', () => {

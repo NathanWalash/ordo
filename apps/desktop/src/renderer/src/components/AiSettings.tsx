@@ -188,6 +188,17 @@ export function AiSettings({ ai, onSave }: Props) {
               />
             }
           />
+          <Row
+            label="Use AI for Money (categories and bill matching)"
+            detail="For merchants left in Other and bank payments the rules couldn't match to an email: the merchant's name, a short description without numbers and a rough amount like £10–£20. Never balances, account details or dates. Categories you choose yourself always win."
+            control={
+              <Switch
+                label="Use AI for Money (categories and bill matching)"
+                checked={ai.money}
+                onChange={(on) => void save({ ...ai, money: on })}
+              />
+            }
+          />
           <div className="flex items-start gap-2 px-4 py-2.5 text-[12px] leading-snug text-ink-2">
             {cloud ? (
               <Cloud size={14} className="mt-px shrink-0" />
@@ -195,7 +206,7 @@ export function AiSettings({ ai, onSave }: Props) {
               <Cpu size={14} className="mt-px shrink-0" />
             )}
             {cloud
-              ? `Sender names, addresses and subject lines are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
+              ? `Sender names, addresses and subject lines${ai.money ? ', and merchant names with rough amounts,' : ''} are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
               : 'Stays on this computer.'}
           </div>
         </>
@@ -305,6 +316,10 @@ function CloudConfirm({
           <p>
             Sender names, addresses and subject lines will be sent to {info.vendor} under your own account,
             through {info.label}. Message bodies are never sent. Your account's terms and data settings apply.
+          </p>
+          <p>
+            If you also turn on AI for Money, merchant names, short descriptions and rough amounts go too,
+            never balances, account details or dates.
           </p>
           <p>Local models through LM Studio or Ollama keep everything on this computer.</p>
         </div>
