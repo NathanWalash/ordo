@@ -18,7 +18,8 @@ export interface CalendarListItem extends CalendarInfo {
 export type CalendarStatus =
   { connected: false } | { connected: true; email: string; lastSync: string | null; syncing: boolean }
 
-export type CalendarSyncError = 'auth' | 'network' | 'busy' | 'unknown'
+/** `busy`: already syncing in this process; `locked`: another Ordo process is writing. */
+export type CalendarSyncError = 'auth' | 'network' | 'busy' | 'locked' | 'unknown'
 export type CalendarSyncOutcome =
   ({ ok: true } & CalendarSyncResult) | { ok: false; error: CalendarSyncError; message: string }
 

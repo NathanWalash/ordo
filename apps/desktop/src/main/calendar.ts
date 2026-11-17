@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, ipcMain, type WebContents } from 'electron'
+import { app, ipcMain } from 'electron'
 import { syncWindow } from '@ordo/calendar-core'
 import {
   CalDavProvider,
@@ -17,9 +17,11 @@ import {
   type CalendarListItem,
   type CalendarStatus,
   type CalendarSyncError,
+  type CalendarSyncProgress,
   type CalendarSyncOutcome,
 } from '@ordo/shared'
 import { loadAccount } from './account'
+import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: CalendarStore | null = null
 let running: AbortController | null = null
@@ -73,26 +75,45 @@ export function status(): CalendarStatus {
   }
 }
 
-export async function sync(sender: WebContents, options?: { force?: boolean }): Promise<CalendarSyncOutcome> {
+/** Fetch calendars changed since the last sync (all of them with `force`) into the cache. */
+export async function sync(
+  options?: { force?: boolean },
+  onProgress?: (p: CalendarSyncProgress) => void,
+): Promise<CalendarSyncOutcome> {
   const a = account()
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
   if (running) return { ok: false, error: 'busy', message: 'Your calendars are already syncing.' }
   const ctrl = (running = new AbortController())
+  try {
+    const result = await withWriteLock('syncing calendars', () =>
+      fetchCalendars(a, ctrl.signal, options, onProgress),
+    )
+    return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
+  } finally {
+    if (running === ctrl) running = null
+  }
+}
+
+async function fetchCalendars(
+  a: { email: string; password: string },
+  signal: AbortSignal,
+  options?: { force?: boolean },
+  onProgress?: (p: CalendarSyncProgress) => void,
+): Promise<CalendarSyncOutcome> {
   const provider = new CalDavProvider({ serverUrl: caldavUrl(), username: a.email, password: a.password })
   try {
     await provider.connect()
     const result = await syncCalendars(provider, openStore(), {
       window: syncWindow(),
-      signal: ctrl.signal,
+      signal,
       force: options?.force === true,
-      onProgress: (p) => !sender.isDestroyed() && sender.send(IPC.calendarSyncProgress, p),
+      onProgress,
     })
     if (!result.stopped) openStore().setMeta('lastSync', new Date().toISOString())
     return { ok: true, ...result }
   } catch (err) {
     return { ok: false, ...explain(err) }
   } finally {
-    if (running === ctrl) running = null
     await provider.close().catch(() => {})
   }
 }
@@ -126,7 +147,9 @@ export function closeCalendar(): void {
 
 export function registerCalendarIpc(): void {
   ipcMain.handle(IPC.calendarStatus, () => status())
-  ipcMain.handle(IPC.calendarSync, (e, options?: { force?: boolean }) => sync(e.sender, options))
+  ipcMain.handle(IPC.calendarSync, (e, options?: { force?: boolean }) =>
+    sync(options, toRenderer(e.sender, IPC.calendarSyncProgress)),
+  )
   ipcMain.handle(IPC.calendarList, () => calendars())
   ipcMain.handle(IPC.calendarEvents, (_e, range: unknown) => events(range))
   ipcMain.handle(IPC.calendarSetVisible, (_e, input: unknown) => setVisible(input))

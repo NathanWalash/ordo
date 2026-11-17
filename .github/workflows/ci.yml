@@ -59,6 +59,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The windowed tests need the virtual display. The headless tests (e2e/headless.spec.ts) run
+      # here too but don't need it: headless Ordo works with no display at all.
       - name: End-to-end tests (Linux, virtual display, with a local IMAP server)
         if: runner.os == 'Linux'
         run: |

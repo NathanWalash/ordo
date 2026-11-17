@@ -107,7 +107,9 @@ export type StatementPreview =
     }
 
 export type ImportOutcome =
-  { ok: true; accountName: string; added: number; duplicates: number } | { ok: false; message: string }
+  | { ok: true; accountName: string; added: number; duplicates: number }
+  /** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
+  | { ok: false; message: string; error?: 'locked' }
 
 export const TransactionQuerySchema = z.object({
   account: z.string().max(60).optional(),

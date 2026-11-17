@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, type WebContents } from 'electron'
+import { app } from 'electron'
 import { analyseSenders } from '@ordo/mail-core'
 import {
   ICLOUD_IMAP,
@@ -13,14 +13,15 @@ import {
 } from '@ordo/mail-core/node'
 import {
   ConnectInputSchema,
-  IPC,
   type AccountStatus,
   type ConnectError,
   type ConnectInput,
   type ConnectResult,
   type ScanOutcome,
+  type ScanProgress,
 } from '@ordo/shared'
 import { canStoreSecrets, deleteAccount, loadAccount, recordScan, saveAccount } from './account'
+import { Locked, withWriteLock } from './writes'
 
 export const INBOX = 'INBOX'
 let store: MailStore | null = null
@@ -120,26 +121,35 @@ export async function disconnect(): Promise<void> {
   mailStore().clear()
 }
 
-export async function startScan(sender: WebContents): Promise<ScanOutcome> {
+/** Fetch new inbox headers into the cache. `onProgress` streams how far it has got. */
+export async function scan(onProgress?: (p: ScanProgress) => void): Promise<ScanOutcome> {
   const a = loadAccount()
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
   if (running) return { ok: false, error: 'unknown', message: 'A scan is already running.' }
   if (changing) return { ok: false, error: 'unknown', message: 'Wait for the clean-up to finish.' }
-  running = new AbortController()
+  const ctrl = (running = new AbortController())
+  try {
+    const result = await withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress))
+    return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
+  } finally {
+    running = null
+  }
+}
+
+async function fetchHeaders(
+  a: { email: string; password: string },
+  signal: AbortSignal,
+  onProgress?: (p: ScanProgress) => void,
+): Promise<ScanOutcome> {
   const provider = new ImapMailProvider(imapConfig(a.email, a.password))
   try {
     await provider.connect()
-    const result = await scanMailbox(provider, mailStore(), {
-      mailbox: INBOX,
-      signal: running.signal,
-      onProgress: (p) => !sender.isDestroyed() && sender.send(IPC.scanProgress, p),
-    })
+    const result = await scanMailbox(provider, mailStore(), { mailbox: INBOX, signal, onProgress })
     if (!result.stopped) recordScan(new Date())
     return { ok: true, ...result }
   } catch (err) {
     return { ok: false, ...explain(err) }
   } finally {
-    running = null
     await provider.close().catch(() => {})
   }
 }
