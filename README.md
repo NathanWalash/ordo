@@ -38,6 +38,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | ---------------------------------------------------------------------- | ------- |
 | Home screen and module sidebar                                         | Done    |
 | Unclutter preview with sample data                                     | Done    |
+| Light, dark or system theme, with frosted glass surfaces               | Done    |
 | Connect iCloud (app-specific password in the Keychain)                 | Next    |
 | Scan inbox headers and group by sender                                 | Planned |
 | Sort senders with rules, then a local or cloud model                   | Planned |
