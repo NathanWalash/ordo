@@ -26,7 +26,7 @@ const INBOX = 'INBOX'
 let store: MailStore | null = null
 let running: AbortController | null = null
 
-const mailStore = () => (store ??= new MailStore(join(app.getPath('userData'), 'mail.sqlite')))
+export const mailStore = () => (store ??= new MailStore(join(app.getPath('userData'), 'mail.sqlite')))
 
 /** iCloud by default. Tests can point an unpackaged build at a local IMAP server. */
 function imapConfig(user: string, pass: string): ImapConfig {
