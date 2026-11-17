@@ -40,6 +40,17 @@ To run the unpackaged app against other servers, set `ORDO_IMAP_HOST` / `ORDO_IM
 (and `ORDO_SMTP_HOST` / `ORDO_SMTP_PORT`, plus `ORDO_SMTP_REQUIRE_TLS=1` if the server
 offers STARTTLS). Packaged builds ignore all of these.
 
+The CalDAV tests run against [Radicale](https://radicale.org) on port 5232. It accepts any
+username and password, and each run creates its own calendar:
+
+```bash
+pnpm caldav:start
+CALDAV_TEST_PORT=5232 pnpm test:integration
+pnpm caldav:stop
+```
+
+Both servers can run at once; `pnpm test:integration` runs whichever tests have a port set.
+
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, for example `feat(mail-core): parse List-Id`.

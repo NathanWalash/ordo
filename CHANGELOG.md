@@ -20,6 +20,9 @@ All notable changes to Ordo are recorded here. The format follows
 - Settings page, opened from the gear at the bottom of the sidebar. Appearance lets you choose System, Light or Dark; the choice is saved and applied to the whole window, including the native sidebar material and the Windows title bar buttons.
 - Frosted glass on the toolbar, the Unclutter table header and footer, and the connect sheet. Content scrolls under the toolbar. Surfaces turn solid when Reduce transparency is on, or where blur isn't supported.
 - Solid sidebar on Windows 10, which has no Mica.
+- Calendar: your iCloud calendars in Month, Week and Agenda views, using the same account and app-specific password as Mail (CalDAV). Read-only for now. Recurring events, all-day and multi-day events and time zones are handled; calendars can be shown or hidden, and events open a detail popover.
+- Calendar keeps a local cache (one month back, twelve ahead) in its own SQLite database and only refetches calendars that changed. Before you connect, it previews sample data.
+- `calendar-core` package with unit tests, and CalDAV integration tests against a local Radicale server, in CI.
 - Connect an iCloud account with an app-specific password. It's checked before saving and stored encrypted with the system keychain (Electron `safeStorage`).
 - Scan your inbox: headers only, cached in a local SQLite database so later scans only fetch new mail. You can stop a scan and resume it.
 - Unclutter shows your real senders, sorted by rules into Promotions, Newsletters, Notifications, Receipts, People and Other. Anyone you've written to counts as a person and can't be selected for clean-up.

@@ -61,12 +61,29 @@ apps/desktop          Electron app: main, preload, renderer (React)
 packages/shared       Module registry types, IPC contract (zod schemas)
 packages/mail-core    Mail domain logic: provider interface, sender grouping,
                       classification rules, unsubscribe planning (no Electron)
+packages/calendar-core Calendar domain logic: provider interface, CalDAV (tsdav),
+                      iCalendar parsing and recurrence (ical.js), SQLite cache,
+                      month/week layout helpers (no Electron)
 docs/                 This document
 ```
 
 Rule: `packages/*` never import Electron. The renderer only talks to the main
 process through the typed `window.ordo` API exposed by the preload script
 (`contextIsolation`, `sandbox`, no Node in the renderer).
+
+## Calendar module
+
+- One iCloud account powers Mail and Calendar: Calendar signs in to CalDAV
+  (`caldav.icloud.com`) with the same Apple ID email and app-specific password.
+- `CalendarProvider` (connect, list calendars, fetch events in a range) leaves room
+  for Google and Outlook later.
+- Recurring events are expanded locally (RRULE, RDATE, EXDATE, RECURRENCE-ID) and
+  stored as one row per occurrence in `calendar.sqlite`, covering one month back to
+  twelve ahead. Calendars whose CTag hasn't changed are skipped on re-sync.
+- Times with a TZID are converted with the runtime's IANA database, falling back to
+  the event's VTIMEZONE; all-day events stay on their date whatever the time zone.
+- Read-only in the first version. Other modules can show items on the calendar
+  (bill due dates, renewals, trial ends) through `OVERLAY_SOURCES` in the renderer.
 
 ## Mail module
 

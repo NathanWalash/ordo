@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancePage } from './pages/FinancePage'
+import { CalendarPage } from './pages/CalendarPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
@@ -76,6 +77,7 @@ export function App() {
             />
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
+          {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
           {route === 'finance' && <FinancePage />}
           {route === 'settings' && <SettingsPage />}
         </div>
@@ -85,7 +87,8 @@ export function App() {
             onConnected={() => {
               setConnecting(false)
               void refreshAccount()
-              setRoute('mail/unclutter')
+              // Stay on Calendar if that's where you connected from.
+              if (route !== 'calendar') setRoute('mail/unclutter')
             }}
           />
         )}

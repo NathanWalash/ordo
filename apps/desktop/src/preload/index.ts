@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type OrdoApi, type ScanProgress } from '@ordo/shared'
+import type { CalendarSyncProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
@@ -46,6 +47,18 @@ const api: OrdoApi = {
   },
   senders: {
     list: () => ipcRenderer.invoke(IPC.sendersList),
+  },
+  calendar: {
+    status: () => ipcRenderer.invoke(IPC.calendarStatus),
+    sync: (options) => ipcRenderer.invoke(IPC.calendarSync, options),
+    onSyncProgress: (listener) => {
+      const handler = (_e: IpcRendererEvent, p: CalendarSyncProgress) => listener(p)
+      ipcRenderer.on(IPC.calendarSyncProgress, handler)
+      return () => ipcRenderer.removeListener(IPC.calendarSyncProgress, handler)
+    },
+    calendars: () => ipcRenderer.invoke(IPC.calendarList),
+    events: (range) => ipcRenderer.invoke(IPC.calendarEvents, range),
+    setVisible: (input) => ipcRenderer.invoke(IPC.calendarSetVisible, input),
   },
   cleanup: {
     run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),

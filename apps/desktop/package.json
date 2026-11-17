@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@ordo/ai": "workspace:*",
+    "@ordo/calendar-core": "workspace:*",
     "@ordo/mail-core": "workspace:*",
     "@ordo/shared": "workspace:*",
     "@tailwindcss/vite": "^4.3.5",

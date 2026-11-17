@@ -5,6 +5,7 @@ describe('routeFromHash', () => {
   it('reads known routes', () => {
     expect(routeFromHash('#/mail/unclutter')).toBe('mail/unclutter')
     expect(routeFromHash('#mail/inbox')).toBe('mail/inbox')
+    expect(routeFromHash('#/calendar')).toBe('calendar')
     expect(routeFromHash('#/settings')).toBe('settings')
     expect(routeFromHash('#/mail/history')).toBe('mail/history')
   })

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { History, House, Inbox, Sparkles, Wallet, Settings } from 'lucide-react'
+import { CalendarDays, History, House, Inbox, Sparkles, Wallet, Settings } from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import type { Route } from '../routes'
 
@@ -20,6 +20,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           label="Home"
           active={route === 'home'}
           onClick={() => onNavigate('home')}
+        />
+        <Item
+          icon={<CalendarDays size={15} />}
+          label="Calendar"
+          active={route === 'calendar'}
+          onClick={() => onNavigate('calendar')}
         />
       </div>
 
