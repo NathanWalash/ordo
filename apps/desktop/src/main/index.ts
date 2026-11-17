@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
+import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 
 app.setName('Ordo')
@@ -86,6 +87,7 @@ ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect())
 ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
+registerCleanupIpc()
 
 app.on('before-quit', () => mail.closeMail())
 
