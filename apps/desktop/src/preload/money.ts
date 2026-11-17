@@ -1,5 +1,5 @@
-import { ipcRenderer } from 'electron'
-import { MONEY_IPC, type MoneyApi } from '@ordo/shared'
+import { ipcRenderer, type IpcRendererEvent } from 'electron'
+import { MONEY_IPC, type MoneyAiProgress, type MoneyApi } from '@ordo/shared'
 
 /** `window.ordo.money`: one ipcRenderer.invoke per Money channel. */
 export const moneyApi: MoneyApi = {
@@ -20,4 +20,12 @@ export const moneyApi: MoneyApi = {
   settle: (input) => ipcRenderer.invoke(MONEY_IPC.settle, input),
   deleteSettlement: (id) => ipcRenderer.invoke(MONEY_IPC.deleteSettlement, id),
   dueDates: (range) => ipcRenderer.invoke(MONEY_IPC.dueDates, range),
+  setCategory: (input) => ipcRenderer.invoke(MONEY_IPC.setCategory, input),
+  aiSort: () => ipcRenderer.invoke(MONEY_IPC.aiSort),
+  aiStop: () => ipcRenderer.invoke(MONEY_IPC.aiStop),
+  onAiProgress: (listener) => {
+    const handler = (_e: IpcRendererEvent, p: MoneyAiProgress) => listener(p)
+    ipcRenderer.on(MONEY_IPC.aiProgress, handler)
+    return () => ipcRenderer.removeListener(MONEY_IPC.aiProgress, handler)
+  },
 }

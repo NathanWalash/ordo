@@ -54,6 +54,7 @@ export {
   applyCategoryOverrides,
   buildMoneyPrompt,
   merchantFacts,
+  merchantsNeedingCategory,
   needsCategory,
   type CategoriseOptions,
   type CategoriseResult,

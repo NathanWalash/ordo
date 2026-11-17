@@ -45,12 +45,22 @@ function makeProviders() {
   })
 }
 
-const message = (err: unknown) =>
+/** A message fit to show for a failed AI call: an AiError's own fixed text, or a generic one. */
+export const message = (err: unknown) =>
   err instanceof AiError ? err.message : 'Something went wrong talking to the model. Try again.'
 
 /** A cloud provider may only be used once the user has agreed to it in Settings, and it's saved. */
 function allowed(ai: AiSettings, id: ProviderId): boolean {
   return !isCloudProvider(id) || (ai.provider === id && ai.cloudConsent === id)
+}
+
+/**
+ * The provider the saved settings choose, if it may be used: not off, and a cloud provider only
+ * with saved consent. Every AI feature (senders, Money) goes through this.
+ */
+export function usableProvider(ai: AiSettings): ModelProvider | null {
+  if (ai.provider === 'none' || !allowed(ai, ai.provider)) return null
+  return providers[ai.provider]
 }
 
 export async function status(refresh = false): Promise<AiProviderStatus[]> {
@@ -99,7 +109,7 @@ export async function test(input: AiTestInput): Promise<AiTestResult> {
 let running: AbortController | null = null
 
 /** The model a sort uses: the saved one, or the provider's recommended one. Cache keys depend on it. */
-async function resolveModel(ai: AiSettings): Promise<string | undefined> {
+export async function resolveModel(ai: AiSettings): Promise<string | undefined> {
   if (ai.provider === 'none') return undefined
   if (ai.model) return ai.model
   return recommendedModel(ai.provider, await providers[ai.provider].listModels()) ?? undefined

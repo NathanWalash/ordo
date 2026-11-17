@@ -52,7 +52,7 @@ export interface OrdoServices {
   }
   money: {
     overview(): Promise<MoneyOverview>
-    transactions(query: TransactionQuery): TransactionPage
+    transactions(query: TransactionQuery): Promise<TransactionPage>
     importFile(path: string, accountName?: string): Promise<ImportOutcome>
     counts(): { transactions: number; accounts: number; bills: number }
   }
@@ -422,7 +422,7 @@ export async function runCommand(
     }
 
     case 'money transactions': {
-      const t = services.money.transactions({ month: command.month, account: command.account })
+      const t = await services.money.transactions({ month: command.month, account: command.account })
       // Newest first, like the app.
       const all = [...t.transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
       const p = page(all, command.limit, offset)

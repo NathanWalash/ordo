@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { IPC, MODULES } from './index'
-import { BillInputSchema, MONEY_IPC, PersonInputSchema, SettleInputSchema, SplitInputSchema } from './money'
+import {
+  BillInputSchema,
+  MONEY_IPC,
+  PersonInputSchema,
+  SetCategorySchema,
+  SettleInputSchema,
+  SplitInputSchema,
+} from './money'
 
 describe('Money IPC contract', () => {
   it('uses unique channel names that do not clash with the rest of the app', () => {
@@ -8,6 +15,16 @@ describe('Money IPC contract', () => {
     expect(new Set(money).size).toBe(money.length)
     const others = new Set<string>(Object.values(IPC))
     expect(money.filter((c) => others.has(c))).toEqual([])
+  })
+
+  it('only accepts a category from the list, or null to undo', () => {
+    expect(SetCategorySchema.parse({ transactionId: 'abc', category: 'Groceries' })).toEqual({
+      transactionId: 'abc',
+      category: 'Groceries',
+    })
+    expect(SetCategorySchema.parse({ transactionId: 'abc', category: null }).category).toBeNull()
+    expect(SetCategorySchema.safeParse({ transactionId: 'abc', category: 'Gambling' }).success).toBe(false)
+    expect(SetCategorySchema.safeParse({ transactionId: '', category: 'Other' }).success).toBe(false)
   })
 
   it('registers Money as a live module', () => {

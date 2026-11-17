@@ -65,11 +65,12 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         hasTransactions: false,
         mailConnected: true,
       }),
-      transactions: () => ({
+      transactions: async () => ({
         transactions: [],
         accounts: [],
         months: [],
         summary: { moneyIn: 0, moneyOut: 0, byCategory: [], byMonth: [] },
+        uncategorisedMerchants: 0,
       }),
       importFile: vi.fn(async () => ({ ok: true as const, accountName: 'Monzo', added: 3, duplicates: 0 })),
       counts: () => ({ transactions: 0, accounts: 0, bills: 0 }),

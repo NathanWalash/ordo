@@ -133,6 +133,10 @@ function groupByMerchant(txs: Transaction[]): MerchantGroup[] {
   return [...groups.values()]
 }
 
+/** How many merchants are waiting for a category: what Sort with AI would ask about. */
+export const merchantsNeedingCategory = (txs: Transaction[]) =>
+  groupByMerchant(txs.filter(needsCategory)).length
+
 /**
  * Everything a model sees about a merchant: its cleaned name, one description with every number
  * scrubbed out (truncated to 80 characters), whether money went in or out, and a rounded typical
