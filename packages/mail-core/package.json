@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "imapflow": "^2.12.1",
+    "nodemailer": "^10.3.1",
     "undici": "^7.30.2"
   }
 }
