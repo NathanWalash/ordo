@@ -5,8 +5,9 @@ import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
-import { sendersWithAi, setupAi } from './ai'
+import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
+import { toRenderer } from './writes'
 
 app.setName('Ordo')
 
@@ -87,7 +88,7 @@ ipcMain.handle(IPC.accountStatus, () => mail.status())
 ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
 ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
 ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
-ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
+ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => sendersWithAi())
 registerCalendarIpc()
@@ -103,7 +104,8 @@ app.whenReady().then(() => {
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
   setupAppearance()
-  setupAi()
+  initAi()
+  registerAiIpc()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

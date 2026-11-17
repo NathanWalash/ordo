@@ -81,7 +81,7 @@ function accountNameFor(layout: string | null, fileName: string): string {
   return base ? base.charAt(0).toUpperCase() + base.slice(1) : 'Bank account'
 }
 
-function previewStatement(raw: unknown): StatementPreview {
+export function previewStatement(raw: unknown): StatementPreview {
   const input = StatementInputSchema.parse(raw)
   const r = parseStatement(input.text, { accountName: 'preview', mapping: input.mapping })
   if (!r.ok) return { ...r, suggestedAccount: accountNameFor(null, input.fileName) }
@@ -100,7 +100,7 @@ function previewStatement(raw: unknown): StatementPreview {
   }
 }
 
-function importStatement(raw: unknown): ImportOutcome {
+export function importStatement(raw: unknown): ImportOutcome {
   const parsed = StatementInputSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
   const input = parsed.data
@@ -112,7 +112,7 @@ function importStatement(raw: unknown): ImportOutcome {
   return { ok: true, accountName, ...moneyStore().addTransactions(r.transactions) }
 }
 
-function transactions(raw: unknown): TransactionPage {
+export function transactions(raw: unknown): TransactionPage {
   const q = TransactionQuerySchema.parse(raw ?? {})
   const s = moneyStore()
   const all = s.transactions()
@@ -159,7 +159,7 @@ async function current() {
   return { today, stored, ...found, ...resolved }
 }
 
-async function overview(): Promise<MoneyOverview> {
+export async function overview(): Promise<MoneyOverview> {
   const s = moneyStore()
   const c = await current()
   const splits = s.splits()
@@ -188,7 +188,7 @@ const DAY_MS = 86_400_000
 const isDate = (d: unknown): d is Date => d instanceof Date && !Number.isNaN(d.getTime())
 
 /** Bills, renewals and trial ends in `[start, end)` as Calendar overlay items. Amounts are GBP. */
-async function dueDates(raw: unknown): Promise<CalendarOverlayItem[]> {
+export async function dueDates(raw: unknown): Promise<CalendarOverlayItem[]> {
   const r = raw as { start?: unknown; end?: unknown } | null
   if (!isDate(r?.start) || !isDate(r?.end)) return []
   const { start, end } = r as { start: Date; end: Date }

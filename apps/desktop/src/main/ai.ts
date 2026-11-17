@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { app, ipcMain, type WebContents } from 'electron'
+import { app, ipcMain } from 'electron'
 import { AiError, PROVIDERS, recommendedModel, type ModelProvider, type ProviderId } from '@ordo/ai'
 import { CommandResolver, createProviders } from '@ordo/ai/node'
 import { aiCategorise } from '@ordo/mail-core'
@@ -12,11 +12,13 @@ import {
   type AiSettings,
   type AiSortInput,
   type AiSortOutcome,
+  type AiSortProgress,
   type AiTestInput,
   type AiTestResult,
 } from '@ordo/shared'
 import { mailStore, senders } from './mail'
 import { readSettings } from './settings'
+import { toRenderer } from './writes'
 
 const settingsFile = () => join(app.getPath('userData'), 'settings.json')
 
@@ -123,9 +125,13 @@ export async function sendersWithAi() {
   }
 }
 
+/** The saved AI preferences (provider, model, consent). */
+export const aiSettings = (): AiSettings => readSettings(settingsFile()).ai
+
+/** Ask the saved model about the senders. Cloud providers need saved consent, as everywhere. */
 export async function categoriseSenders(
-  sender: WebContents,
   input: AiSortInput = {},
+  onProgress?: (p: AiSortProgress) => void,
 ): Promise<AiSortOutcome> {
   const parsed = AiSortInputSchema.safeParse(input ?? {})
   if (!parsed.success) return { ok: false, message: 'Invalid request.' }
@@ -147,7 +153,7 @@ export async function categoriseSenders(
       concurrency: provider.kind === 'local' ? 1 : 2,
       timeoutMs: 180_000,
       signal: running.signal,
-      onProgress: (p) => !sender.isDestroyed() && sender.send(AI_IPC.aiProgress, p),
+      onProgress,
     })
     return { ok: true, ...result }
   } catch (err) {
@@ -161,12 +167,18 @@ export function stop(): void {
   running?.abort()
 }
 
-/** Serve the AI IPC channels. Call once, before the first window opens. */
-export function setupAi(): void {
+/** Find the model providers. Call once at start-up, in the app and in headless mode. */
+export function initAi(): void {
   makeProviders()
+  app.on('before-quit', stop)
+}
+
+/** Serve the AI IPC channels. Call once, after `initAi` and before the first window opens. */
+export function registerAiIpc(): void {
   ipcMain.handle(AI_IPC.aiStatus, (_e, refresh?: boolean) => status(refresh === true))
   ipcMain.handle(AI_IPC.aiTest, (_e, input: AiTestInput) => test(input))
-  ipcMain.handle(AI_IPC.aiCategorise, (e, input?: AiSortInput) => categoriseSenders(e.sender, input))
+  ipcMain.handle(AI_IPC.aiCategorise, (e, input?: AiSortInput) =>
+    categoriseSenders(input, toRenderer(e.sender, AI_IPC.aiProgress)),
+  )
   ipcMain.handle(AI_IPC.aiStop, () => stop())
-  app.on('before-quit', stop)
 }
