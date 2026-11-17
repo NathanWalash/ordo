@@ -49,7 +49,7 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       d.calendar.connected
         ? `Calendar:  ${plural(d.calendar.calendars, 'calendar')} · last sync ${when(d.calendar.lastSync)}`
         : 'Calendar:  not connected',
-      `AI:        ${d.ai.provider === 'none' ? 'off' : `${d.ai.provider}${d.ai.model ? ` (${clean(d.ai.model)})` : ''}${d.ai.sortSenders ? ', sorting senders' : ''}`}`,
+      `AI:        ${d.ai.provider === 'none' ? 'off' : `${d.ai.provider}${d.ai.model ? ` (${clean(d.ai.model)})` : ''}${d.ai.sortSenders ? ', sorting senders' : ''}${d.ai.money ? ', Money' : ''}`}`,
       `Senders:   ${d.counts.senders}  ·  Clean-ups: ${d.counts.cleanups}`,
       `Money:     ${plural(d.counts.transactions, 'transaction')} in ${plural(d.counts.accounts, 'account')} · ${plural(d.counts.bills, 'bill')}`,
       d.writeLock
@@ -184,10 +184,14 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
               t.date,
               pounds(t.amountPence),
               clean(t.merchant ?? t.description, 50),
+              clean(t.category ?? '', 30) + (t.categorisedBy === 'ai' ? '*' : ''),
               clean(t.account, 30),
             ]),
           ),
-        ].join('\n') + more(d, 'transactions'),
+          d.transactions.some((t: any) => t.categorisedBy === 'ai') ? '* categorised by AI' : '',
+        ]
+          .filter(Boolean)
+          .join('\n') + more(d, 'transactions'),
 
   'money balances': (d) =>
     d.debts.length === 0
@@ -199,6 +203,13 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   'money import': (d) =>
     `Imported ${plural(d.added, 'transaction')} into ${clean(d.account, 60)}` +
     (d.duplicates ? ` (${d.duplicates} already there).` : '.'),
+
+  'money sort': (d) =>
+    (d.merchants === 0
+      ? 'Nothing was left in Other.'
+      : `Checked ${plural(d.checked, 'merchant')} of ${d.merchants} in Other: ${d.changed} categorised, ${d.cached} from earlier answers, ${d.failed} failed.`) +
+    (d.billPairs ? ` Matched ${plural(d.billsMatched, 'bill')} to email, to confirm in the app.` : '') +
+    (d.errors.length ? `\n${d.errors.map((e: string) => clean(e, 200)).join('\n')}` : ''),
 
   'ai status': (d) =>
     [
@@ -260,6 +271,8 @@ Money:
   money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]
   money balances                                Who owes whom
   money import <file.csv> [--account <name>] --confirm   Import a bank statement *
+  money sort --confirm                          Categorise merchants in Other and match bills
+                                                to email with the saved model (AI for Money) *
 
 AI:
   ai status                                     Providers and the saved choice

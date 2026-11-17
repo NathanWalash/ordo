@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -17,7 +17,13 @@ const READ_TOOLS = [
   'ordo_status',
   'ordo_transactions',
 ]
-const CHANGE_TOOLS = ['ordo_ai_sort', 'ordo_cleanup_run', 'ordo_import_statement', 'ordo_undo']
+const CHANGE_TOOLS = [
+  'ordo_ai_sort',
+  'ordo_cleanup_run',
+  'ordo_import_statement',
+  'ordo_money_sort',
+  'ordo_undo',
+]
 
 let close: (() => Promise<void>) | null = null
 afterEach(async () => {
@@ -113,6 +119,36 @@ describe('MCP server', () => {
     expect(json(no).error.code).toBe('confirm_required')
     expect(services.cleanup.run).not.toHaveBeenCalled()
     expect(services.cleanup.undo).not.toHaveBeenCalled()
+  })
+
+  it('ordo_money_sort needs confirm: true, then runs Sort with AI for Money', async () => {
+    const services = fakeServices()
+    services.money.aiSort = vi.fn(async () => ({
+      ok: true as const,
+      merchants: 2,
+      checked: 2,
+      changed: 1,
+      cached: 0,
+      failed: 0,
+      billPairs: 1,
+      billsMatched: 1,
+      errors: [],
+    }))
+    const { client } = await connect(true, services)
+    const refused = await client.callTool({ name: 'ordo_money_sort', arguments: {} })
+    expect(json(refused).error.code).toBe('confirm_required')
+    expect(services.money.aiSort).not.toHaveBeenCalled()
+    const r = await client.callTool({ name: 'ordo_money_sort', arguments: { confirm: true } })
+    expect(json(r)).toEqual({
+      merchants: 2,
+      checked: 2,
+      changed: 1,
+      cached: 0,
+      failed: 0,
+      billPairs: 1,
+      billsMatched: 1,
+      errors: [],
+    })
   })
 
   it('runs a confirmed change', async () => {

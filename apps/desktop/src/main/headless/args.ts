@@ -119,6 +119,7 @@ const COMMANDS = {
       confirm: z.boolean().default(false),
     }),
   },
+  'money sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
   'ai status': { args: [], flags: z.object({}) },
   'ai sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
 } as const
@@ -140,6 +141,7 @@ export const CHANGE_COMMANDS: ReadonlySet<CommandName> = new Set([
   'cleanup run',
   'undo',
   'money import',
+  'money sort',
   'ai sort',
 ])
 

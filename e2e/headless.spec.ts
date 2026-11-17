@@ -94,6 +94,20 @@ test.describe('without an account', () => {
     expect(t.transactions).toHaveLength(2)
   })
 
+  test('money sort is gated like ai sort, and refuses while AI for Money is off', async () => {
+    const without = await ordo(['money', 'sort', '--confirm', '--json'], profile)
+    expect(without.code).toBe(3)
+    expect(json(without)).toMatchObject({ error: { code: 'changes_not_allowed' } })
+    const unconfirmed = await ordo(['money', 'sort', '--allow-changes', '--json'], profile)
+    expect(unconfirmed.code).toBe(3)
+    expect(json(unconfirmed)).toMatchObject({ error: { code: 'confirm_required' } })
+    const off = await ordo(['money', 'sort', '--allow-changes', '--confirm', '--json'], profile)
+    expect(off.code).toBe(1)
+    expect(json(off)).toEqual({
+      error: { code: 'failed', message: 'Choose a model in Settings → AI first.' },
+    })
+  })
+
   test('a write waits for another live Ordo process holding the lock (exit 4)', async () => {
     const lock = join(profile, 'ordo-write.lock')
     // This test runner is alive and isn't the Ordo process: it stands in for the app.
@@ -134,6 +148,7 @@ test.describe('without an account', () => {
       expect(names).toContain('ordo_cleanup_plan')
       expect(names).not.toContain('ordo_cleanup_run')
       expect(names).not.toContain('ordo_import_statement')
+      expect(names).not.toContain('ordo_money_sort')
       const status = toolText(await readOnly.callTool({ name: 'ordo_status', arguments: {} }))
       expect(status).toMatchObject({ account: { connected: false }, counts: { transactions: 25 } })
     } finally {
@@ -144,7 +159,13 @@ test.describe('without an account', () => {
     try {
       const names = (await changes.listTools()).tools.map((t) => t.name)
       expect(names).toEqual(
-        expect.arrayContaining(['ordo_cleanup_run', 'ordo_undo', 'ordo_import_statement', 'ordo_ai_sort']),
+        expect.arrayContaining([
+          'ordo_cleanup_run',
+          'ordo_undo',
+          'ordo_import_statement',
+          'ordo_ai_sort',
+          'ordo_money_sort',
+        ]),
       )
       const refused = await changes.callTool({ name: 'ordo_import_statement', arguments: { path: FIXTURE } })
       expect(refused.isError).toBe(true)
