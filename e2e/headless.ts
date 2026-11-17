@@ -38,6 +38,7 @@ export function headlessEnv(userData: string, env: Record<string, string> = {}):
 const normalise = (text: string) =>
   text
     .replace(/\r\n/g, '\n')
+    .replace(/^\s*\n/, '')
     .replace(/\n\s*$/, '\n')
     .replace(/^\s*$/, '')
 
@@ -59,8 +60,8 @@ export function ordo(args: string[], userData: string, env: Record<string, strin
     child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
     child.on('error', reject)
-    // Electron on Windows can add a line break (or a blank line) to stdout when it exits:
-    // compare line endings as \n and at most one trailing newline, like a JSON reader would.
+    // Electron on Windows can add a blank line to stdout, before or after the output: compare
+    // with \n line endings and no blank lines at either end, like a JSON or line reader would.
     child.on('close', (code) => resolve({ code, stdout: normalise(stdout), stderr }))
   })
 }
