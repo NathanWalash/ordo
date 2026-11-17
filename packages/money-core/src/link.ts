@@ -110,7 +110,10 @@ export function resolveBills(input: {
       name: s.name,
       amount: run?.amount ?? s.amount,
       cadence: run?.cadence ?? s.cadence,
-      nextDue: run?.nextDue ?? nextOnOrAfter(s.anchorDate, s.cadence, today),
+      // A first due date still to come is the next one; otherwise roll the anchor forward.
+      nextDue:
+        run?.nextDue ??
+        (s.anchorDate >= today ? s.anchorDate : nextOnOrAfter(s.anchorDate, s.cadence, today)),
       source: s.source,
       status: s.status,
       ...(s.merchantKey && { merchantKey: s.merchantKey }),

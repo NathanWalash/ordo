@@ -118,6 +118,14 @@ describe('resolveBills', () => {
     })
     expect(r.bills[0]!.nextDue).toBe('2026-12-03')
     expect(r.review).toEqual([])
+    const later = resolveBills({
+      stored: [{ ...manual, anchorDate: '2027-06-01' }],
+      detected: [],
+      hints: [],
+      dismissed: new Set(),
+      today: '2026-11-17',
+    })
+    expect(later.bills[0]!.nextDue).toBe('2027-06-01')
   })
 
   it('flags trials ending and price-change emails on saved bills', () => {
@@ -182,6 +190,8 @@ describe('billsToCalendarItems', () => {
       kind: 'trial',
     })
     expect(items.some((i) => i.title === 'Gym')).toBe(false)
+    // Nothing before the next due date.
+    expect(items.some((i) => i.title === 'TV Licence' && i.date < '2027-03-10')).toBe(false)
   })
 })
 

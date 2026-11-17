@@ -21,7 +21,8 @@ export function billsToCalendarItems(
   const items: BillCalendarItem[] = []
   for (const b of bills) {
     if (b.status !== 'active') continue
-    for (const date of cyclesBetween(b.nextDue, b.cadence, range.from, range.to))
+    const from = b.nextDue > range.from ? b.nextDue : range.from
+    for (const date of cyclesBetween(b.nextDue, b.cadence, from, range.to))
       items.push({
         id: `${b.id}:${date}`,
         date,
