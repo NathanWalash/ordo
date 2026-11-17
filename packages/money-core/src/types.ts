@@ -13,6 +13,12 @@ export interface Transaction {
   category?: string
   /** Cleaned-up merchant name, e.g. `Netflix` for `CARD PAYMENT TO NETFLIX.COM ON 03-11`. */
   merchant?: string
+  /**
+   * Who chose `category` when it wasn't the bank or Ordo's rules: a model (`ai`, with its
+   * `confidence` from 0 to 1) or the person (`you`, which always wins). Not stored; added when listed.
+   */
+  categorisedBy?: 'ai' | 'you'
+  confidence?: number
 }
 
 /** A run of similar payments to the same merchant on a regular schedule. */
@@ -103,6 +109,10 @@ export interface DetectedBill {
   transactionIds: string[]
   hints: EmailHint[]
   priceIncrease?: { from: number; to: number; date: ISODate }
+  /** Set when a model matched the bank payments to the email `hints` (the rules couldn't). */
+  matchedBy?: 'ai'
+  /** The model's confidence in that match, 0 to 1. */
+  matchConfidence?: number
 }
 
 /** Someone you split bills with. "Me" always exists with id `me`. */

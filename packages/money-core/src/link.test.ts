@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { billsToCalendarItems } from './calendar'
-import { applySuggestions, noAdvisor } from './advisor'
+import { applySuggestions, noAdvisor, senderKey } from './advisor'
 import { linkBills, monthlyCost, resolveBills } from './link'
 import type { Bill, EmailHint, RecurringCandidate, StoredBill } from './types'
 
@@ -198,16 +198,51 @@ describe('billsToCalendarItems', () => {
 describe('MatchAdvisor', () => {
   it('has a no-op default that suggests nothing', async () => {
     const detected = linkBills([candidate('Netflix', 1099)], [])
-    const suggestions = await noAdvisor.suggest(detected)
-    expect(applySuggestions(detected, suggestions)).toEqual(detected)
+    const suggestions = await noAdvisor.suggest(detected, [])
+    expect(applySuggestions(detected, [], suggestions)).toEqual(detected)
   })
 
-  it('applies renames and drops what a model says is not a bill', () => {
-    const detected = linkBills([candidate('Thames Wtr', 3800), candidate('Tesco', 2000)], [])
-    const out = applySuggestions(detected, [
-      { key: 'thameswtr', name: 'Thames Water', confidence: 0.9 },
-      { key: 'tesco', isBill: false, confidence: 0.9 },
+  it('links a bank-only bill to an email sender the rules missed, and folds in its email-only twin', () => {
+    const hints = [hint('Amazon', 'amazon.co.uk', 'renewal', 'Your Prime membership renews soon')]
+    const detected = linkBills([candidate('Amzn Mktp', 2349)], hints)
+    expect(detected.map((d) => [d.key, d.source])).toEqual([
+      ['amznmktp', 'bank'],
+      ['email:amazon', 'email'],
     ])
-    expect(out.map((d) => d.name)).toEqual(['Thames Water'])
+    const out = applySuggestions(detected, hints, [
+      { key: 'amznmktp', sender: senderKey(hints[0]!), confidence: 0.8 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      key: 'amznmktp',
+      source: 'both',
+      hints,
+      matchedBy: 'ai',
+      matchConfidence: 0.8,
+    })
+  })
+
+  it('ignores suggestions about bills that already have email, unknown bills and unknown senders', () => {
+    const hints = [hint('Netflix', 'netflix.com', 'receipt'), hint('Gym Co', 'gym.example', 'receipt')]
+    const detected = linkBills([candidate('Netflix', 1099), candidate('Zorb', 999)], hints)
+    const out = applySuggestions(detected, hints, [
+      { key: 'netflix', sender: senderKey(hints[1]!), confidence: 1 },
+      { key: 'nope', sender: senderKey(hints[1]!), confidence: 1 },
+      { key: 'zorb', sender: 'someone|else.example', confidence: 1 },
+    ])
+    expect(out).toEqual(detected)
+  })
+
+  it('uses each sender for one bill only, the most confident', () => {
+    const hints = [hint('Sky', 'sky.com', 'receipt')]
+    const detected = linkBills([candidate('Sky Digital', 3500), candidate('Sky Mobile', 1200)], hints)
+    const out = applySuggestions(detected, hints, [
+      { key: 'skydigital', sender: senderKey(hints[0]!), confidence: 0.6 },
+      { key: 'skymobile', sender: senderKey(hints[0]!), confidence: 0.9 },
+    ])
+    expect(out.map((d) => [d.key, d.source, d.matchedBy ?? null])).toEqual([
+      ['skydigital', 'bank', null],
+      ['skymobile', 'both', 'ai'],
+    ])
   })
 })

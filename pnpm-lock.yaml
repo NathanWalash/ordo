@@ -161,9 +161,15 @@ importers:
 
   packages/money-core:
     dependencies:
+      '@ordo/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@ordo/mail-core':
         specifier: workspace:*
         version: link:../mail-core
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/shared:
     dependencies:

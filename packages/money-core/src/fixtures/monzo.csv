@@ -22,5 +22,6 @@ tx_0020,18/10/2026,17:31:00,Card payment,Tesco,🛒,groceries,-55.04,GBP,-55.04,
 tx_0021,28/10/2026,09:00:00,Faster payment,ACME LTD,,income,2450.00,GBP,2450.00,GBP,Salary,,,ACME LTD SALARY,,,2450.00
 tx_0022,01/11/2026,10:00:00,Active card check,Amazon,,shopping,0.00,GBP,0.00,GBP,,,,AMAZON CARD CHECK,,,
 tx_0023,03/11/2026,08:11:20,Card payment,Netflix,🎬,entertainment,-10.99,GBP,-10.99,GBP,,,,NETFLIX.COM          Amsterdam     NLD,,-10.99,
+tx_0026,06/11/2026,14:02:00,Card payment,Zorblax Studio,,general,-14.50,GBP,-14.50,GBP,,,,ZORBLAX STUDIO 4471 LONDON GBR,,-14.50,
 tx_0024,12/11/2026,07:00:00,Card payment,Spotify,🎵,entertainment,-12.99,GBP,-12.99,GBP,,,,SPOTIFY P2B4C6D8E0 STOCKHOLM SWE,,-12.99,
 tx_0025,15/11/2026,10:00:00,Direct Debit,Thames Water,💧,bills,-38.00,GBP,-38.00,GBP,,,,THAMES WATER,,-38.00,

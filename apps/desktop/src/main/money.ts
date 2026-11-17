@@ -184,7 +184,7 @@ async function detect(today: string) {
   const headers = cachedInboxHeaders()
   const hints = headers ? emailHints(headers) : []
   const linked = linkBills(detectRecurring(txs, today), hints)
-  const detected = applySuggestions(linked, await advisor.suggest(linked))
+  const detected = applySuggestions(linked, hints, await advisor.suggest(linked, hints))
   return { txs, hints, detected, mailConnected: headers !== null }
 }
 

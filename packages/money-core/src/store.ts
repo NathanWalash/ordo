@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import type { MoneyAiCategoryCache, MoneyAiCategoryRecord, SpendingCategory } from './ai-categories'
+import type { MoneyAiMatchCache, MoneyAiMatchRecord } from './ai-match'
 import type { Cadence, ISODate } from './dates'
 import {
   ME,
@@ -54,6 +56,23 @@ CREATE TABLE IF NOT EXISTS settlements (
   date TEXT NOT NULL,
   note TEXT
 );
+CREATE TABLE IF NOT EXISTS category_overrides (transaction_id TEXT PRIMARY KEY, category TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ai_categories (
+  model TEXT NOT NULL,
+  merchant_key TEXT NOT NULL,
+  category TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  fingerprint TEXT NOT NULL,
+  PRIMARY KEY (model, merchant_key)
+);
+CREATE TABLE IF NOT EXISTS ai_matches (
+  model TEXT NOT NULL,
+  pair TEXT NOT NULL,
+  is_match INTEGER NOT NULL,
+  confidence REAL NOT NULL,
+  fingerprint TEXT NOT NULL,
+  PRIMARY KEY (model, pair)
+);
 `
 
 type TxRow = {
@@ -81,7 +100,7 @@ type BillRow = {
  * Money data in its own local SQLite file: imported statement lines, bills, flatmates,
  * splits and settlements. Nothing here leaves the computer.
  */
-export class MoneyStore {
+export class MoneyStore implements MoneyAiCategoryCache, MoneyAiMatchCache {
   private db: DatabaseSync
 
   constructor(path: string) {
@@ -143,7 +162,87 @@ export class MoneyStore {
   }
 
   removeAccount(name: string): void {
-    this.db.prepare('DELETE FROM transactions WHERE account_name = ?').run(name)
+    this.transaction(() => {
+      this.db
+        .prepare(
+          'DELETE FROM category_overrides WHERE transaction_id IN (SELECT id FROM transactions WHERE account_name = ?)',
+        )
+        .run(name)
+      this.db.prepare('DELETE FROM transactions WHERE account_name = ?').run(name)
+    })
+  }
+
+  /** Categories you chose yourself, by transaction id. They win over the bank, the rules and AI. */
+  categoryOverrides(): Map<string, string> {
+    const rows = this.db.prepare('SELECT transaction_id AS id, category FROM category_overrides').all() as {
+      id: string
+      category: string
+    }[]
+    return new Map(rows.map((r) => [r.id, r.category]))
+  }
+
+  /** Set your own category for a transaction, or clear it with null. False if there's no such transaction. */
+  setCategoryOverride(transactionId: string, category: string | null): boolean {
+    const exists = this.db.prepare('SELECT 1 FROM transactions WHERE id = ?').get(transactionId)
+    if (!exists) return false
+    if (category === null)
+      this.db.prepare('DELETE FROM category_overrides WHERE transaction_id = ?').run(transactionId)
+    else
+      this.db
+        .prepare('INSERT OR REPLACE INTO category_overrides (transaction_id, category) VALUES (?, ?)')
+        .run(transactionId, category)
+    return true
+  }
+
+  // AI answers, cached by model so a second run only asks about what's new or changed.
+
+  getAiCategories(model: string, keys: string[]): Map<string, MoneyAiCategoryRecord> {
+    const out = new Map<string, MoneyAiCategoryRecord>()
+    const get = this.db.prepare(
+      'SELECT category, confidence, fingerprint FROM ai_categories WHERE model = ? AND merchant_key = ?',
+    )
+    for (const key of keys) {
+      const r = get.get(model, key) as
+        { category: string; confidence: number; fingerprint: string } | undefined
+      if (r)
+        out.set(key, {
+          category: r.category as SpendingCategory,
+          confidence: r.confidence,
+          fingerprint: r.fingerprint,
+        })
+    }
+    return out
+  }
+
+  saveAiCategories(model: string, records: Map<string, MoneyAiCategoryRecord>): void {
+    const put = this.db.prepare(
+      'INSERT OR REPLACE INTO ai_categories (model, merchant_key, category, confidence, fingerprint) VALUES (?, ?, ?, ?, ?)',
+    )
+    this.transaction(() => {
+      for (const [key, r] of records) put.run(model, key, r.category, r.confidence, r.fingerprint)
+    })
+  }
+
+  getAiMatches(model: string, pairs: string[]): Map<string, MoneyAiMatchRecord> {
+    const out = new Map<string, MoneyAiMatchRecord>()
+    const get = this.db.prepare(
+      'SELECT is_match, confidence, fingerprint FROM ai_matches WHERE model = ? AND pair = ?',
+    )
+    for (const pair of pairs) {
+      const r = get.get(model, pair) as
+        { is_match: number; confidence: number; fingerprint: string } | undefined
+      if (r) out.set(pair, { match: r.is_match === 1, confidence: r.confidence, fingerprint: r.fingerprint })
+    }
+    return out
+  }
+
+  saveAiMatches(model: string, records: Map<string, MoneyAiMatchRecord>): void {
+    const put = this.db.prepare(
+      'INSERT OR REPLACE INTO ai_matches (model, pair, is_match, confidence, fingerprint) VALUES (?, ?, ?, ?, ?)',
+    )
+    this.transaction(() => {
+      for (const [pair, r] of records) put.run(model, pair, r.match ? 1 : 0, r.confidence, r.fingerprint)
+    })
   }
 
   // Bills
@@ -294,7 +393,8 @@ export class MoneyStore {
   /** Forget everything except "Me". */
   clear(): void {
     this.db.exec(
-      "DELETE FROM transactions; DELETE FROM bills; DELETE FROM dismissed; DELETE FROM splits; DELETE FROM settlements; DELETE FROM people WHERE id <> 'me';",
+      "DELETE FROM transactions; DELETE FROM bills; DELETE FROM dismissed; DELETE FROM splits; DELETE FROM settlements; DELETE FROM people WHERE id <> 'me'; " +
+        'DELETE FROM category_overrides; DELETE FROM ai_categories; DELETE FROM ai_matches;',
     )
   }
 
