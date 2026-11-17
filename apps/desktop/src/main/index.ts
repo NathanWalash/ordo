@@ -1,8 +1,13 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, nativeTheme, shell, systemPreferences } from 'electron'
-import { IPC, type AppInfo } from '@ordo/shared'
+import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
+import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
+import * as mail from './mail'
 
 app.setName('Ordo')
+
+// Tests run the unpackaged app against a throwaway profile.
+const userData = !app.isPackaged ? process.env['ORDO_USER_DATA'] : undefined
+if (userData) app.setPath('userData', userData)
 
 const isMac = process.platform === 'darwin'
 const isWin = process.platform === 'win32'
@@ -73,7 +78,20 @@ ipcMain.handle(IPC.appInfo, (): AppInfo => {
   }
 })
 
+ipcMain.handle(IPC.accountStatus, () => mail.status())
+ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
+ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
+ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect())
+ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
+ipcMain.handle(IPC.scanStop, () => mail.stopScan())
+ipcMain.handle(IPC.sendersList, () => mail.senders())
+
+app.on('before-quit', () => mail.closeMail())
+
 app.whenReady().then(() => {
+  // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
+  if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
+    safeStorage.setUsePlainTextEncryption(true)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -20,6 +20,17 @@ pnpm check      # format check, lint, typecheck, unit tests
 pnpm test:e2e   # builds the app and runs the Playwright tests
 ```
 
+To run the IMAP tests (and the full connect-and-scan e2e test) you need Docker:
+
+```bash
+pnpm imap:start
+IMAP_TEST_PORT=3143 pnpm test:integration
+IMAP_TEST_PORT=3143 pnpm test:e2e
+pnpm imap:stop
+```
+
+The test server accepts `test@ordo.test` with the password `abcd-efgh-ijkl-mnop`.
+
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, for example `feat(mail-core): parse List-Id`.
