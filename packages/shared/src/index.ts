@@ -80,7 +80,8 @@ export interface OrdoApi {
     onProgress(listener: (p: ScanProgress) => void): () => void
   }
   senders: {
-    list(): Promise<CategorisedSender[]>
+    /** Senders sorted by the rules, plus any earlier AI answers when AI sorting is on. */
+    list(): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
   }
   money: MoneyApi
   calendar: CalendarApi

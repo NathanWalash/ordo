@@ -47,6 +47,8 @@ export interface AiSortOptions {
   scope?: 'uncategorised' | 'all'
   /** Below this confidence a sender stays where the rules put it. Default 0.5. */
   minConfidence?: number
+  /** Apply earlier answers from `cache` without asking the model about anyone. */
+  cacheOnly?: boolean
   cache?: AiCategoryCache
   signal?: AbortSignal
   /** Per request. */
@@ -178,7 +180,7 @@ export async function aiCategorise(
     if (rec.fingerprint === prints.get(address) && isAiCategory(rec.category)) answers.set(address, rec)
   const cached = answers.size
 
-  const todo = eligible.filter((s) => !answers.has(s.address))
+  const todo = opts.cacheOnly ? [] : eligible.filter((s) => !answers.has(s.address))
   const batches: CategorisedSender[][] = []
   for (let i = 0; i < todo.length; i += batchSize) batches.push(todo.slice(i, i + batchSize))
 

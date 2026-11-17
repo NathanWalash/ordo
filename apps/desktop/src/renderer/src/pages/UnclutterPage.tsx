@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Cpu, RefreshCw, ScanSearch } from 'lucide-react'
+import { Cpu, RefreshCw, ScanSearch, Sparkles } from 'lucide-react'
 import { analyseSenders, type CategorisedSender } from '@ordo/mail-core'
-import type { AccountStatus, ScanProgress } from '@ordo/shared'
+import {
+  AI_PROVIDERS,
+  type AccountStatus,
+  type AiSettings,
+  type AiSortProgress,
+  type ScanProgress,
+} from '@ordo/shared'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
 import { ReviewSheet } from '../components/ReviewSheet'
@@ -12,11 +18,13 @@ interface Props {
   account: AccountStatus | null
   onConnect: () => void
   onScanned: () => void
+  /** Open Settings, where AI sorting is set up. */
+  onOpenSettings?: () => void
 }
 
-export function UnclutterPage({ account, onConnect, onScanned }: Props) {
+export function UnclutterPage({ account, onConnect, onScanned, onOpenSettings }: Props) {
   if (!account?.connected) return <SamplePreview onConnect={onConnect} />
-  return <LiveUnclutter account={account} onScanned={onScanned} />
+  return <LiveUnclutter account={account} onScanned={onScanned} onOpenSettings={onOpenSettings} />
 }
 
 function SamplePreview({ onConnect }: { onConnect: () => void }) {
@@ -46,13 +54,18 @@ function SamplePreview({ onConnect }: { onConnect: () => void }) {
 function LiveUnclutter({
   account,
   onScanned,
+  onOpenSettings,
 }: {
   account: Extract<AccountStatus, { connected: true }>
   onScanned: () => void
+  onOpenSettings?: () => void
 }) {
   const [senders, setSenders] = useState<CategorisedSender[] | null>(null)
   const [progress, setProgress] = useState<ScanProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [ai, setAi] = useState<AiSettings | null>(null)
+  const [sorting, setSorting] = useState<AiSortProgress | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState<CategorisedSender[] | null>(null)
   // Bumped after a clean-up so the table starts with nothing selected.
   const [generation, setGeneration] = useState(0)
@@ -61,6 +74,7 @@ function LiveUnclutter({
   useEffect(() => {
     let live = true
     void window.ordo.senders.list().then((s) => live && setSenders(s))
+    void window.ordo.settings.get().then((s) => live && setAi(s.ai))
     return () => {
       live = false
     }
@@ -78,6 +92,35 @@ function LiveUnclutter({
     } finally {
       off()
       setProgress(null)
+    }
+  }
+
+  const aiReady = ai !== null && ai.provider !== 'none' && ai.sortSenders
+  const aiName = AI_PROVIDERS.find((p) => p.id === ai?.provider)?.label ?? 'AI'
+  const unsure = senders?.filter((s) => s.category === 'uncategorised').length ?? 0
+
+  const sortWithAi = async () => {
+    if (!aiReady) return onOpenSettings?.()
+    setError(null)
+    setNotice(null)
+    setSorting({ done: 0, total: unsure })
+    const off = window.ordo.ai.onProgress(setSorting)
+    try {
+      const res = await window.ordo.ai.categoriseSenders()
+      if (!res.ok) setError(res.message)
+      else {
+        const parts = [
+          res.changed
+            ? `${aiName} sorted ${res.changed} ${res.changed === 1 ? 'sender' : 'senders'} out of Other.`
+            : `${aiName} left everything in Other where it was.`,
+        ]
+        if (res.failed) parts.push(`${res.failed} couldn't be sorted.`)
+        setNotice([...parts, ...res.errors].join(' '))
+      }
+      await load()
+    } finally {
+      off()
+      setSorting(null)
     }
   }
 
@@ -117,15 +160,49 @@ function LiveUnclutter({
         key={generation}
         senders={senders}
         onReview={setReviewing}
-        banner={error && <div className="mb-3 rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
+        banner={
+          sorting ? (
+            <div
+              className="mb-3 flex items-center justify-between gap-3 rounded-md bg-hover px-3 py-2 text-ink-2"
+              aria-live="polite"
+            >
+              <span className="flex items-center gap-1.5">
+                <Sparkles size={13} /> Sorting with {aiName}… {sorting.done} of {sorting.total}
+              </span>
+              <Button onClick={() => void window.ordo.ai.stop()}>Stop</Button>
+            </div>
+          ) : error ? (
+            <div className="mb-3 rounded-md bg-hover px-3 py-2 text-danger">{error}</div>
+          ) : notice ? (
+            <div className="mb-3 rounded-md bg-hover px-3 py-2 text-ink-2" role="status">
+              {notice}
+            </div>
+          ) : null
+        }
         actions={
-          <Button
-            icon={<RefreshCw size={13} />}
-            onClick={() => void scan()}
-            title={lastScanned(account.lastScan)}
-          >
-            Scan again
-          </Button>
+          <>
+            {(unsure > 0 || aiReady) && (
+              <Button
+                icon={<Sparkles size={13} />}
+                disabled={Boolean(sorting) || (aiReady && unsure === 0)}
+                onClick={() => void sortWithAi()}
+                title={
+                  aiReady
+                    ? `Ask ${aiName} to sort the ${unsure} ${unsure === 1 ? 'sender' : 'senders'} in Other. It sees names, addresses and subject lines, never message bodies.`
+                    : 'Set up a model in Settings → AI'
+                }
+              >
+                Sort with AI
+              </Button>
+            )}
+            <Button
+              icon={<RefreshCw size={13} />}
+              onClick={() => void scan()}
+              title={lastScanned(account.lastScan)}
+            >
+              Scan again
+            </Button>
+          </>
         }
       />
     )

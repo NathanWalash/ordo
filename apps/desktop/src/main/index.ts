@@ -5,7 +5,7 @@ import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
-import { setupAi } from './ai'
+import { sendersWithAi, setupAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
 
 app.setName('Ordo')
@@ -89,7 +89,7 @@ ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(inp
 ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
 ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
-ipcMain.handle(IPC.sendersList, () => mail.senders())
+ipcMain.handle(IPC.sendersList, () => sendersWithAi())
 registerCalendarIpc()
 registerCleanupIpc()
 registerMoneyIpc()
