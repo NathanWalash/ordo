@@ -6,6 +6,7 @@ import { initAi } from '../ai'
 import { releaseWriteLock, setWriteOwner } from '../writes'
 import { parseInvocation, UsageError, type Invocation } from './args'
 import { runCli, usageError, type CliIo } from './cli'
+import { serveMcp } from './mcp'
 import { mainServices } from './services'
 
 /** Write to stdout and wait until it has been handed to the OS, so nothing is lost on exit. */
@@ -51,7 +52,11 @@ export async function runHeadless(args: string[], setup: () => void): Promise<vo
       setWriteOwner(invocation.kind === 'mcp' ? 'mcp' : 'headless')
       initAi()
       const services = mainServices()
-      if (invocation.kind === 'mcp') code = usageError(io, false, 'The MCP server is not available yet.')
+      if (invocation.kind === 'mcp')
+        await serveMcp(services, {
+          allowChanges: invocation.allowChanges,
+          log: (line) => process.stderr.write(`${line}\n`),
+        })
       else code = await runCli(invocation, services, io)
     }
   } catch (err) {
