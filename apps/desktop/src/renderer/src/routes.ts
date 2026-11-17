@@ -4,7 +4,8 @@ export const ROUTES = [
   'mail/unclutter',
   'mail/history',
   'calendar',
-  'finance',
+  'money/finances',
+  'money/bills',
   'settings',
 ] as const
 export type Route = (typeof ROUTES)[number]
@@ -15,7 +16,8 @@ export const TITLES: Record<Route, string> = {
   'mail/unclutter': 'Unclutter',
   'mail/history': 'Clean-up history',
   calendar: 'Calendar',
-  finance: 'Finance',
+  'money/finances': 'Finances',
+  'money/bills': 'Bills & Subscriptions',
   settings: 'Settings',
 }
 

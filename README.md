@@ -49,7 +49,11 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Full mail client: read, search, compose                                | Planned |
 | Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
 | Create and edit calendar events                                        | Planned |
-| Finance module                                                         | Later   |
+| Money: import bank statement CSVs, spending by category and month      | Done    |
+| Money: find bills and subscriptions in statements and email receipts   | Done    |
+| Money: split bills with flatmates, balances and settling up            | Done    |
+| Money: bill due dates on the Calendar                                  | Next    |
+| Money: local-model help matching bills to receipts                     | Planned |
 
 ## Install
 

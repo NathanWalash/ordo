@@ -13,6 +13,7 @@
     "@ordo/ai": "workspace:*",
     "@ordo/calendar-core": "workspace:*",
     "@ordo/mail-core": "workspace:*",
+    "@ordo/money-core": "workspace:*",
     "zod": "^4.6.7"
   }
 }

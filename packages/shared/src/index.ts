@@ -6,6 +6,9 @@ import type { CleanupApi } from './cleanup'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
 export * from './calendar'
+import type { MoneyApi } from './money'
+
+export * from './money'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -18,7 +21,7 @@ export interface ModuleInfo {
 export const MODULES: readonly ModuleInfo[] = [
   { id: 'mail', name: 'Mail' },
   { id: 'calendar', name: 'Calendar' },
-  { id: 'finance', name: 'Finance', comingSoon: true },
+  { id: 'money', name: 'Money' },
 ]
 
 export const AppInfoSchema = z.object({
@@ -79,6 +82,7 @@ export interface OrdoApi {
   senders: {
     list(): Promise<CategorisedSender[]>
   }
+  money: MoneyApi
   calendar: CalendarApi
   cleanup: CleanupApi
 }

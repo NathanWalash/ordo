@@ -6,6 +6,7 @@ import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 import { setupAi } from './ai'
+import { closeMoney, registerMoneyIpc } from './money'
 
 app.setName('Ordo')
 
@@ -91,9 +92,11 @@ ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
 registerCalendarIpc()
 registerCleanupIpc()
+registerMoneyIpc()
 
 app.on('before-quit', () => mail.closeMail())
 app.on('before-quit', () => closeCalendar())
+app.on('before-quit', () => closeMoney())
 
 app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.

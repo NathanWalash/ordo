@@ -6,7 +6,8 @@ import { Toolbar } from './components/Toolbar'
 import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
-import { FinancePage } from './pages/FinancePage'
+import { FinancesPage } from './pages/FinancesPage'
+import { BillsPage } from './pages/BillsPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -78,7 +79,8 @@ export function App() {
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
           {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
-          {route === 'finance' && <FinancePage />}
+          {route === 'money/finances' && <FinancesPage />}
+          {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
           {route === 'settings' && <SettingsPage />}
         </div>
         {connecting && (

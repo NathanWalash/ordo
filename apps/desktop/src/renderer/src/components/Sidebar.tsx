@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { CalendarDays, History, House, Inbox, Sparkles, Wallet, Settings } from 'lucide-react'
+import { CalendarDays, History, House, Inbox, Receipt, Sparkles, Wallet, Settings } from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import type { Route } from '../routes'
 
@@ -50,13 +50,18 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
         />
       </Section>
 
-      <Section label="Finance">
+      <Section label="Money">
         <Item
           icon={<Wallet size={15} />}
-          label="Overview"
-          badge="Soon"
-          active={route === 'finance'}
-          onClick={() => onNavigate('finance')}
+          label="Finances"
+          active={route === 'money/finances'}
+          onClick={() => onNavigate('money/finances')}
+        />
+        <Item
+          icon={<Receipt size={15} />}
+          label="Bills & Subscriptions"
+          active={route === 'money/bills'}
+          onClick={() => onNavigate('money/bills')}
         />
       </Section>
 
