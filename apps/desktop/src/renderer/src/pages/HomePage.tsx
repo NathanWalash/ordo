@@ -33,11 +33,10 @@ export function HomePage({ onNavigate }: { onNavigate: (r: Route) => void }) {
         />
         <Row
           icon={<Wallet size={18} />}
-          tint="var(--receipts)"
-          title="Finance"
-          detail="Coming later."
-          muted
-          onClick={() => onNavigate('finance')}
+          tint="var(--success)"
+          title="Money"
+          detail="Import bank statements, keep track of bills and split them with flatmates."
+          onClick={() => onNavigate('money/finances')}
         />
       </div>
     </div>
