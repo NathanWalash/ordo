@@ -1,5 +1,11 @@
 import { z } from 'zod'
 import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-core'
+import type { SettingsApi } from './settings'
+import type { AiApi } from './ai'
+import type { CleanupApi } from './cleanup'
+import { CALENDAR_IPC, type CalendarApi } from './calendar'
+
+export * from './calendar'
 import type { MoneyApi } from './money'
 
 export * from './money'
@@ -14,6 +20,7 @@ export interface ModuleInfo {
 
 export const MODULES: readonly ModuleInfo[] = [
   { id: 'mail', name: 'Mail' },
+  { id: 'calendar', name: 'Calendar' },
   { id: 'money', name: 'Money' },
 ]
 
@@ -43,6 +50,9 @@ export type AccountStatus =
 export type ScanOutcome = ({ ok: true } & ScanResult) | { ok: false; error: ConnectError; message: string }
 
 export type { CategorisedSender, ScanProgress }
+export * from './settings'
+export * from './ai'
+export * from './cleanup'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -52,6 +62,8 @@ export interface OrdoApi {
   app: {
     info(): Promise<AppInfo>
   }
+  settings: SettingsApi
+  ai: AiApi
   account: {
     status(): Promise<AccountStatus>
     /** Check the credentials without saving them. */
@@ -71,6 +83,8 @@ export interface OrdoApi {
     list(): Promise<CategorisedSender[]>
   }
   money: MoneyApi
+  calendar: CalendarApi
+  cleanup: CleanupApi
 }
 
 export const IPC = {
@@ -83,4 +97,5 @@ export const IPC = {
   scanStop: 'scan:stop',
   scanProgress: 'scan:progress',
   sendersList: 'senders:list',
+  ...CALENDAR_IPC,
 } as const

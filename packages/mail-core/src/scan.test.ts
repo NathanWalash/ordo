@@ -35,7 +35,12 @@ class FakeProvider implements MailProvider {
   async fetchRecipients() {
     return this.sent
   }
-  async moveToTrash() {}
+  async moveMessages() {
+    return { uidValidity: null, uidMap: new Map<number, number>() }
+  }
+  async existingUids() {
+    return []
+  }
   async close() {}
 }
 

@@ -19,8 +19,8 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** You can connect iCloud, scan your inbox and see who's filling it.
-> Unsubscribing and clearing mail is next. See the [roadmap](#roadmap).
+> **Early days.** You can connect iCloud, scan your inbox, see who's filling it, and
+> unsubscribe and clear senders with a review step and undo. See the [roadmap](#roadmap).
 
 ## Why Ordo
 
@@ -38,11 +38,17 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | ---------------------------------------------------------------------- | ------- |
 | Home screen and module sidebar                                         | Done    |
 | Unclutter preview with sample data                                     | Done    |
-| Connect iCloud (app-specific password in the Keychain)                 | Next    |
-| Scan inbox headers and group by sender                                 | Planned |
-| Sort senders with rules, then a local or cloud model                   | Planned |
-| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Next    |
+| Light, dark or system theme, with frosted glass surfaces               | Done    |
+| Connect iCloud (app-specific password in the Keychain)                 | Done    |
+| Scan inbox headers and group by sender                                 | Done    |
+| Sort senders with rules                                                | Done    |
+| AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test  | Done    |
+| Sort unsure senders with a model (engine and IPC; Unclutter UI next)   | Next    |
+| One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Done    |
+| Unclutter clean-up history with undo                                   | Done    |
 | Full mail client: read, search, compose                                | Planned |
+| Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
+| Create and edit calendar events                                        | Planned |
 | Money: import bank statement CSVs, spending by category and month      | Done    |
 | Money: find bills and subscriptions in statements and email receipts   | Done    |
 | Money: split bills with flatmates, balances and settling up            | Done    |
@@ -68,6 +74,8 @@ pnpm check        # format check, lint, typecheck, unit tests
 pnpm test:e2e     # build and run Playwright tests against the real app
 pnpm imap:start   # local IMAP test server (Docker), then:
 IMAP_TEST_PORT=3143 pnpm test:integration
+pnpm caldav:start # local CalDAV test server (Docker), then:
+CALDAV_TEST_PORT=5232 pnpm test:integration
 pnpm package      # build an installer for your OS into apps/desktop/release
 ```
 
@@ -80,6 +88,8 @@ apps/desktop          Electron app
   src/renderer        React UI (Tailwind CSS)
 packages/shared       Module registry and the typed IPC contract
 packages/mail-core    Mail logic with no Electron dependency, fully unit-tested
+packages/ai           Model providers (LM Studio, Ollama, Claude Code and Codex CLIs)
+packages/calendar-core  CalDAV, iCalendar parsing and recurrence, calendar cache and layout
 e2e/                  Playwright tests that launch the built app
 docs/design.md        Design decisions and roadmap
 ```
@@ -98,7 +108,7 @@ Playwright, electron-builder, pnpm workspaces.
 3. **Writing mail:** compose, reply, drafts, attachments.
 4. **Finance** and other modules.
 
-More detail in [docs/design.md](docs/design.md).
+More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md).
 
 ## Contributing
 

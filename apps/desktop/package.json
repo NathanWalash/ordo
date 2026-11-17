@@ -16,6 +16,8 @@
     "release": "electron-vite build && electron-builder --publish always"
   },
   "devDependencies": {
+    "@ordo/ai": "workspace:*",
+    "@ordo/calendar-core": "workspace:*",
     "@ordo/mail-core": "workspace:*",
     "@ordo/money-core": "workspace:*",
     "@ordo/shared": "workspace:*",
@@ -30,10 +32,13 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.5",
+    "tldts": "~7.4.19",
     "vite": "^8.3.8"
   },
   "homepage": "https://github.com/NathanWalash/ordo",
   "dependencies": {
-    "imapflow": "^2.12.1"
+    "imapflow": "^2.12.1",
+    "nodemailer": "^10.3.1",
+    "undici": "^7.30.2"
   }
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { House, Inbox, Sparkles, Wallet, Settings, Receipt } from 'lucide-react'
+import { CalendarDays, History, House, Inbox, Receipt, Sparkles, Wallet, Settings } from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import type { Route } from '../routes'
 
@@ -21,6 +21,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           active={route === 'home'}
           onClick={() => onNavigate('home')}
         />
+        <Item
+          icon={<CalendarDays size={15} />}
+          label="Calendar"
+          active={route === 'calendar'}
+          onClick={() => onNavigate('calendar')}
+        />
       </div>
 
       <Section label="Mail">
@@ -35,6 +41,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           label="Unclutter"
           active={route === 'mail/unclutter'}
           onClick={() => onNavigate('mail/unclutter')}
+        />
+        <Item
+          icon={<History size={15} />}
+          label="History"
+          active={route === 'mail/history'}
+          onClick={() => onNavigate('mail/history')}
         />
       </Section>
 
@@ -53,8 +65,13 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
         />
       </Section>
 
-      <div className="no-drag mt-auto">
-        <Item icon={<Settings size={15} />} label="Settings" active={false} onClick={() => {}} />
+      <div className="no-drag mt-auto flex flex-col">
+        <Item
+          icon={<Settings size={15} />}
+          label="Settings"
+          active={route === 'settings'}
+          onClick={() => onNavigate('settings')}
+        />
       </div>
     </nav>
   )

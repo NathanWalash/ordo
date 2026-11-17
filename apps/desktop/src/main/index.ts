@@ -2,6 +2,10 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
+import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
+import { registerCleanupIpc } from './cleanup'
+import { hasMica, setupAppearance } from './appearance'
+import { setupAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
 
 app.setName('Ordo')
@@ -40,7 +44,7 @@ function createWindow(): BrowserWindow {
     ...(isWin && {
       titleBarStyle: 'hidden',
       titleBarOverlay: winOverlay(),
-      backgroundMaterial: 'mica',
+      backgroundMaterial: hasMica() ? 'mica' : 'none',
     }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -82,19 +86,24 @@ ipcMain.handle(IPC.appInfo, (): AppInfo => {
 ipcMain.handle(IPC.accountStatus, () => mail.status())
 ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
 ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect())
+ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
 ipcMain.handle(IPC.scanStart, (e) => mail.startScan(e.sender))
 ipcMain.handle(IPC.scanStop, () => mail.stopScan())
 ipcMain.handle(IPC.sendersList, () => mail.senders())
+registerCalendarIpc()
+registerCleanupIpc()
 registerMoneyIpc()
 
 app.on('before-quit', () => mail.closeMail())
+app.on('before-quit', () => closeCalendar())
 app.on('before-quit', () => closeMoney())
 
 app.whenReady().then(() => {
   // Linux CI has no keyring; tests opt in to Electron's built-in key so the connect flow can run.
   if (!app.isPackaged && process.platform === 'linux' && process.env['ORDO_TEST_PLAINTEXT_SECRETS'] === '1')
     safeStorage.setUsePlainTextEncryption(true)
+  setupAppearance()
+  setupAi()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

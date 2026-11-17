@@ -47,4 +47,62 @@ describe('MailStore', () => {
     store.setRepliedTo(['Sam@iCloud.com ', 'sam@icloud.com'])
     expect(store.repliedTo()).toEqual(new Set(['sam@icloud.com']))
   })
+
+  it('finds cached UIDs by sender and forgets moved messages', () => {
+    store.saveHeaders([h(1), h(2, { from: { address: 'B@Y.example ' } }), h(3)])
+    expect(store.uidsFrom('INBOX', ['a@x.example', 'b@y.example', 'none@z.example'])).toEqual(
+      new Map([
+        ['a@x.example', [1, 3]],
+        ['b@y.example', [2]],
+        ['none@z.example', []],
+      ]),
+    )
+    store.deleteMessages('INBOX', [1, 2])
+    expect(store.headers('INBOX').map((m) => m.uid)).toEqual([3])
+  })
+})
+
+describe('MailStore clean-up history', () => {
+  const cleanup = (at: number) => ({
+    at: new Date(at),
+    mailbox: 'INBOX',
+    trashMailbox: 'Deleted Messages',
+    trashUidValidity: '42',
+    moved: 2,
+    senders: [
+      {
+        address: 'a@x.example',
+        name: 'A',
+        category: 'promotions' as const,
+        trash: true,
+        moved: 2,
+        unsubscribe: { status: 'done' as const, method: 'one-click' as const },
+      },
+    ],
+    uidMap: [
+      [1, 101],
+      [2, 102],
+    ] as [number, number][],
+    error: null,
+  })
+
+  it('stores clean-ups newest first, with their UID map', () => {
+    const older = store.addCleanup(cleanup(1000))
+    const newer = store.addCleanup({ ...cleanup(2000), uidMap: null, error: 'Connection lost' })
+    expect(older).toEqual({ ...cleanup(1000), id: older.id, canUndo: true, undoneAt: null, restored: null })
+    expect(newer).toMatchObject({ uidMap: null, canUndo: false, error: 'Connection lost' })
+    expect(store.cleanups().map((c) => c.id)).toEqual([newer.id, older.id])
+  })
+
+  it('marks a clean-up undone', () => {
+    const { id } = store.addCleanup(cleanup(1000))
+    store.markUndone(id, 2, new Date(5000))
+    expect(store.cleanup(id)).toMatchObject({ undoneAt: new Date(5000), restored: 2, canUndo: false })
+  })
+
+  it('forgets history with the rest of the account', () => {
+    store.addCleanup(cleanup(1000))
+    store.clear()
+    expect(store.cleanups()).toEqual([])
+  })
 })

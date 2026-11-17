@@ -19,10 +19,12 @@ interface Props {
   banner?: ReactNode
   /** Right side of the summary line, e.g. a "Scan again" button. */
   actions?: ReactNode
+  /** Open the review sheet for the selected senders. Without it (sample data) clearing is off. */
+  onReview?: (chosen: CategorisedSender[]) => void
 }
 
 /** Inbox makeup, category filters and a selectable sender list. People can never be selected. */
-export function SenderTable({ senders, banner, actions }: Props) {
+export function SenderTable({ senders, banner, actions, onReview }: Props) {
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -35,7 +37,8 @@ export function SenderTable({ senders, banner, actions }: Props) {
     .filter((c) => c.id === 'people' || c.id === 'uncategorised')
     .reduce((n, c) => n + c.count, 0)
   const visible = senders.filter((s) => filter === 'all' || s.category === filter)
-  const chosen = senders.filter((s) => selected.has(s.address))
+  // People can't be selected, but never pass one on even if the state says so.
+  const chosen = senders.filter((s) => selected.has(s.address) && s.category !== 'people')
   const chosenCount = chosen.reduce((n, s) => n + s.count, 0)
 
   const toggle = (address: string) =>
@@ -47,7 +50,7 @@ export function SenderTable({ senders, banner, actions }: Props) {
     })
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-1 flex-col">
       <div className="px-6 pt-5">
         {banner}
         <div className="flex items-baseline justify-between gap-3">
@@ -81,10 +84,11 @@ export function SenderTable({ senders, banner, actions }: Props) {
         </div>
       </div>
 
-      <div className="mt-4 min-h-0 flex-1 overflow-auto border-t border-sep">
+      <div className="mt-4 flex-1 border-t border-sep">
         <table className="w-full table-fixed border-collapse">
-          <thead className="sticky top-0 bg-content text-left text-[11px] text-ink-3">
-            <tr className="border-b border-sep">
+          {/* Collapsed table borders don't stick, so the header's hairline is a shadow on its cells. */}
+          <thead className="glass-bar sticky top-0 z-[1] text-left text-[11px] text-ink-3 [&_th]:shadow-[inset_0_-1px_0_var(--sep)]">
+            <tr>
               <th className="w-10" />
               <th className="py-1.5 font-medium">Sender</th>
               <th className="w-20 pr-4 text-right font-medium">Emails</th>
@@ -139,18 +143,19 @@ export function SenderTable({ senders, banner, actions }: Props) {
         </table>
       </div>
 
-      <footer className="flex items-center justify-between gap-3 border-t border-sep px-5 py-2.5">
+      <footer className="glass-bar sticky bottom-0 z-[1] flex items-center justify-between gap-3 border-t border-sep px-5 py-2.5">
         <span className="flex items-center gap-1.5 text-ink-2">
           <ShieldCheck size={14} />
           {chosen.length
-            ? `${chosen.length} senders, ${chosenCount.toLocaleString()} emails. They'll go to Trash, recoverable for 30 days.`
+            ? `${chosen.length} ${chosen.length === 1 ? 'sender' : 'senders'}, ${chosenCount.toLocaleString()} ${chosenCount === 1 ? 'email' : 'emails'}. They'll go to Trash, recoverable for 30 days.`
             : 'Select senders to clear. Emails go to Trash, not deleted.'}
         </span>
         <Button
           variant="primary"
           icon={<Trash2 size={14} />}
-          disabled
-          title="Review and clean-up arrive in the next update"
+          disabled={!chosen.length || !onReview}
+          title={onReview ? undefined : 'Connect iCloud to clear your own mail'}
+          onClick={() => onReview?.(chosen)}
         >
           Review and clear
         </Button>

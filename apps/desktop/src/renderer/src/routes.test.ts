@@ -7,6 +7,9 @@ describe('routeFromHash', () => {
     expect(routeFromHash('#mail/inbox')).toBe('mail/inbox')
     expect(routeFromHash('#/money/finances')).toBe('money/finances')
     expect(routeFromHash('#/money/bills')).toBe('money/bills')
+    expect(routeFromHash('#/calendar')).toBe('calendar')
+    expect(routeFromHash('#/settings')).toBe('settings')
+    expect(routeFromHash('#/mail/history')).toBe('mail/history')
   })
   it('falls back to home for empty or unknown hashes', () => {
     expect(routeFromHash('')).toBe('home')

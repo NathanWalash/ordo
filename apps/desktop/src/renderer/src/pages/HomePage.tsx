@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Inbox, Sparkles, Wallet, ChevronRight } from 'lucide-react'
+import { Inbox, Sparkles, Wallet, ChevronRight, CalendarDays } from 'lucide-react'
 import type { Route } from '../routes'
 
 function greeting(d = new Date()) {
@@ -12,7 +12,7 @@ function greeting(d = new Date()) {
 export function HomePage({ onNavigate }: { onNavigate: (r: Route) => void }) {
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
   return (
-    <div className="mx-auto max-w-3xl px-8 py-8">
+    <div className="mx-auto w-full max-w-3xl px-8 py-8">
       <p className="text-ink-2">{today}</p>
       <h2 className="mt-1 text-[26px] font-semibold tracking-tight">{greeting()}</h2>
 
@@ -30,6 +30,13 @@ export function HomePage({ onNavigate }: { onNavigate: (r: Route) => void }) {
           title="Unclutter"
           detail="Find the senders filling your inbox, unsubscribe and clear them out."
           onClick={() => onNavigate('mail/unclutter')}
+        />
+        <Row
+          icon={<CalendarDays size={18} />}
+          tint="var(--danger)"
+          title="Calendar"
+          detail="Your iCloud calendars by month, week or as an agenda."
+          onClick={() => onNavigate('calendar')}
         />
         <Row
           icon={<Wallet size={18} />}
