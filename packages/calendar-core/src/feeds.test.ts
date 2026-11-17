@@ -62,10 +62,11 @@ describe('checkFeedUrl', () => {
     expect(checkFeedUrl('')).toMatchObject({ ok: false })
   })
 
-  it('allows plain http only to this computer', () => {
-    expect(checkFeedUrl('http://127.0.0.1:5555/cal.ics')).toMatchObject({ ok: true })
-    expect(checkFeedUrl('http://localhost/cal.ics')).toMatchObject({ ok: true })
-    expect(checkFeedUrl('http://192.168.1.10/cal.ics')).toMatchObject({ ok: false })
+  it('allows plain http only to this computer, and only in tests', () => {
+    expect(checkFeedUrl('http://127.0.0.1:5555/cal.ics')).toMatchObject({ ok: false })
+    expect(checkFeedUrl('http://127.0.0.1:5555/cal.ics', { allowLoopback: true })).toMatchObject({ ok: true })
+    expect(checkFeedUrl('http://localhost/cal.ics', { allowLoopback: true })).toMatchObject({ ok: true })
+    expect(checkFeedUrl('http://192.168.1.10/cal.ics', { allowLoopback: true })).toMatchObject({ ok: false })
   })
 })
 
@@ -98,6 +99,31 @@ describe('fetchFeed', () => {
         new Response(null, { status: 301, headers: { location: 'http://10.0.0.1/c.ics' } }),
     })
     await expect(fetchFeed('https://a.test/cal', { fetch: f })).rejects.toMatchObject({ kind: 'url' })
+  })
+
+  it('checks every redirect hop with the same rules as the first link', async () => {
+    const refuse = (u: string) => (new URL(u).hostname === '10.0.0.1' ? 'IP address' : null)
+    const f = fakeFetch({
+      'https://a.test/cal': () =>
+        new Response(null, { status: 302, headers: { location: 'https://10.0.0.1/admin' } }),
+    })
+    await expect(fetchFeed('https://a.test/cal', { fetch: f, refuse })).rejects.toMatchObject({ kind: 'url' })
+    expect(f.calls).toEqual(['https://a.test/cal'])
+    await expect(fetchFeed('https://10.0.0.1/cal.ics', { fetch: f, refuse })).rejects.toMatchObject({
+      kind: 'url',
+      message: /only subscribes to calendars on the internet/,
+    })
+  })
+
+  it('explains a name that turns out to point at the local network', async () => {
+    const blocked = Object.assign(new Error('a.test points to 192.168.1.1'), { name: 'BlockedAddressError' })
+    const f = (async () => {
+      throw new TypeError('fetch failed', { cause: blocked })
+    }) as typeof fetch
+    await expect(fetchFeed('https://a.test/cal', { fetch: f })).rejects.toMatchObject({
+      kind: 'url',
+      message: /not on this computer or your local network/,
+    })
   })
 
   it('explains refused, missing and unreachable links', async () => {

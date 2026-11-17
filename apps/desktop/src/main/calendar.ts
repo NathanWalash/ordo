@@ -18,7 +18,9 @@ import {
   ICLOUD,
   ICLOUD_CALDAV_URL,
   syncCalendars,
+  LOCAL_ADDRESS_MESSAGE,
   type Feed,
+  type FetchFeedOptions,
   type StoredFeed,
 } from '@ordo/calendar-core/node'
 import {
@@ -34,7 +36,10 @@ import {
   type CalendarSyncProgress,
   type CalendarSyncOutcome,
 } from '@ordo/shared'
+import { createGuardedFetch } from '@ordo/mail-core/node'
+import { hostRefusal } from '@ordo/mail-core'
 import { canStoreSecrets, loadAccount } from './account'
+import { allowLoopbackHttp } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: CalendarStore | null = null
@@ -118,7 +123,7 @@ export async function sync(
       }
       if (feeds.length && !ctrl.signal.aborted) {
         const r = await syncCalendars(
-          new FeedProvider(feeds.map(unseal), { signal: ctrl.signal }),
+          new FeedProvider(feeds.map(unseal), feedFetch(ctrl.signal)),
           openStore(),
           {
             window: syncWindow(),
@@ -190,6 +195,20 @@ export function events(range: unknown): CalendarEvent[] {
 
 // ---- Calendars added by link or file --------------------------------------------------------
 
+/**
+ * A feed link, or anything it redirects to, may only reach the public internet: never this
+ * computer or the local network (checked when connecting, so DNS can't be used to slip past).
+ */
+function feedFetch(signal?: AbortSignal): Omit<FetchFeedOptions, 'maxBytes'> {
+  const allowLoopback = allowLoopbackHttp()
+  return {
+    signal,
+    allowLoopback,
+    fetch: createGuardedFetch({ allowLoopback }) as unknown as typeof fetch,
+    refuse: (url) => hostRefusal(url, { allowLoopback }),
+  }
+}
+
 /** The link is a secret (anyone with it can read the calendar): keep it encrypted at rest. */
 const seal = (url: string) => safeStorage.encryptString(url).toString('base64')
 
@@ -251,8 +270,10 @@ async function addFeed(
 export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
   const parsed = AddCalendarLinkSchema.safeParse(input)
   if (!parsed.success) return { ok: false, error: 'url', message: 'Paste the calendar’s link.' }
-  const check = checkFeedUrl(parsed.data.url)
+  const fetchOptions = feedFetch()
+  const check = checkFeedUrl(parsed.data.url, { allowLoopback: fetchOptions.allowLoopback })
   if (!check.ok) return { ok: false, error: 'url', message: check.message }
+  if (fetchOptions.refuse?.(check.url)) return { ok: false, error: 'url', message: LOCAL_ADDRESS_MESSAGE }
   if (!canStoreSecrets())
     return {
       ok: false,
@@ -269,7 +290,7 @@ export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
 
   let text: string
   try {
-    text = await fetchFeed(check.url)
+    text = await fetchFeed(check.url, fetchOptions)
   } catch (err) {
     return feedFailure(err)
   }

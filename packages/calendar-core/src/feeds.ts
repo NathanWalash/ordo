@@ -39,12 +39,16 @@ export type FeedUrlCheck = { ok: true; url: string; host: string } | { ok: false
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
 
+/** Said when a link (or a redirect) points at this computer or the local network. */
+export const LOCAL_ADDRESS_MESSAGE =
+  'Ordo only subscribes to calendars on the internet, not on this computer or your local network.'
+
 /**
  * Turn what someone pasted into a URL Ordo will fetch: `webcal://` becomes `https://`, and only
- * https is allowed (plain http only to this computer, for tests). The link is often a secret
- * (anyone with it can read the calendar), so it must not travel unencrypted.
+ * https is allowed. The link is often a secret (anyone with it can read the calendar), so it
+ * must not travel unencrypted. `allowLoopback` (tests only) also allows plain http to this computer.
  */
-export function checkFeedUrl(input: string): FeedUrlCheck {
+export function checkFeedUrl(input: string, { allowLoopback = false } = {}): FeedUrlCheck {
   const raw = input.trim().replace(/^webcals?:\/\//i, 'https://')
   if (!raw) return { ok: false, message: 'Paste the calendar’s link.' }
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw))
@@ -55,7 +59,7 @@ export function checkFeedUrl(input: string): FeedUrlCheck {
   } catch {
     return { ok: false, message: 'That doesn’t look like a link.' }
   }
-  if (u.protocol === 'https:' || (u.protocol === 'http:' && LOOPBACK.has(u.hostname)))
+  if (u.protocol === 'https:' || (u.protocol === 'http:' && allowLoopback && LOOPBACK.has(u.hostname)))
     return { ok: true, url: u.href, host: u.host }
   if (u.protocol === 'http:')
     return { ok: false, message: 'Ordo only subscribes over a secure link (https:// or webcal://).' }
@@ -89,15 +93,25 @@ export interface FetchFeedOptions {
   signal?: AbortSignal
   timeoutMs?: number
   maxBytes?: number
+  /** The app passes a fetch that refuses private and local addresses when it connects. */
   fetch?: typeof fetch
+  /** Tests only: allow http to this computer. */
+  allowLoopback?: boolean
+  /** A reason to refuse a URL before connecting (e.g. an IP address), checked on every hop. */
+  refuse?: (url: string) => string | null
 }
 
 /**
- * Download a feed. Follows up to five redirects, each of which must pass checkFeedUrl too,
- * and gives up past `maxBytes`. Errors are FeedErrors with a message for people.
+ * Download a feed. Follows up to five redirects, each of which must pass the same checks as
+ * the first URL, and gives up past `maxBytes`. Errors are FeedErrors with a message for people.
  */
 export async function fetchFeed(start: string, opts: FetchFeedOptions = {}): Promise<string> {
-  const first = checkFeedUrl(start)
+  const check = (u: string) => {
+    const c = checkFeedUrl(u, { allowLoopback: opts.allowLoopback })
+    if (c.ok && opts.refuse?.(c.url)) return { ok: false as const, message: LOCAL_ADDRESS_MESSAGE }
+    return c
+  }
+  const first = check(start)
   if (!first.ok) throw new FeedError('url', first.message)
   const doFetch = opts.fetch ?? fetch
   const maxBytes = opts.maxBytes ?? FEED_MAX_BYTES
@@ -114,11 +128,12 @@ export async function fetchFeed(start: string, opts: FetchFeedOptions = {}): Pro
       })
     } catch (err) {
       if (opts.signal?.aborted) throw err
+      if (blockedAddress(err)) throw new FeedError('url', LOCAL_ADDRESS_MESSAGE)
       throw new FeedError('network', 'Couldn’t reach that calendar. Check your internet connection.')
     }
     const location = res.headers.get('location')
     if (res.status >= 300 && res.status < 400 && location) {
-      const next = checkFeedUrl(new URL(location, url).href)
+      const next = check(new URL(location, url).href)
       if (!next.ok) throw new FeedError('url', 'That calendar link redirects somewhere Ordo won’t follow.')
       url = next.url
       continue
@@ -132,6 +147,13 @@ export async function fetchFeed(start: string, opts: FetchFeedOptions = {}): Pro
     return readLimited(res, maxBytes)
   }
   throw new FeedError('url', 'That calendar link redirects too many times.')
+}
+
+/** The guarded fetch's refusal, wrapped by fetch in a TypeError. */
+function blockedAddress(err: unknown): boolean {
+  for (let e: unknown = err, i = 0; e && i < 4; e = (e as { cause?: unknown }).cause, i++)
+    if ((e as { name?: unknown }).name === 'BlockedAddressError') return true
+  return false
 }
 
 async function readLimited(res: Response, maxBytes: number): Promise<string> {

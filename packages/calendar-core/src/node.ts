@@ -21,6 +21,7 @@ export {
   checkFeedUrl,
   describeIcs,
   FEED_MAX_BYTES,
+  LOCAL_ADDRESS_MESSAGE,
   FeedError,
   FeedProvider,
   fetchFeed,
@@ -28,5 +29,6 @@ export {
   type FeedErrorKind,
   type FeedKind,
   type FeedUrlCheck,
+  type FetchFeedOptions,
 } from './feeds'
 export { syncCalendars, type SyncOptions } from './sync'
