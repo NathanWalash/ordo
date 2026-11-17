@@ -1,9 +1,20 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type OrdoApi, type ScanProgress } from '@ordo/shared'
+import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 
 const api: OrdoApi = {
   app: {
     info: () => ipcRenderer.invoke(IPC.appInfo),
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(SETTINGS_IPC.settingsGet),
+    set: (patch) => ipcRenderer.invoke(SETTINGS_IPC.settingsSet, patch),
+    appearance: () => ipcRenderer.invoke(SETTINGS_IPC.appearanceGet),
+    onAppearance: (listener) => {
+      const handler = (_e: IpcRendererEvent, a: Appearance) => listener(a)
+      ipcRenderer.on(SETTINGS_IPC.appearanceChanged, handler)
+      return () => ipcRenderer.removeListener(SETTINGS_IPC.appearanceChanged, handler)
+    },
   },
   account: {
     status: () => ipcRenderer.invoke(IPC.accountStatus),

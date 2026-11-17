@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-core'
+import type { SettingsApi } from './settings'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -50,6 +51,7 @@ export interface OrdoApi {
   app: {
     info(): Promise<AppInfo>
   }
+  settings: SettingsApi
   account: {
     status(): Promise<AccountStatus>
     /** Check the credentials without saving them. */
