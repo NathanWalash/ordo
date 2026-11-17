@@ -12,9 +12,19 @@ import { mainServices } from './services'
 /** Write to stdout and wait until it has been handed to the OS, so nothing is lost on exit. */
 function writeOut(text: string): Promise<void> {
   return new Promise((resolve) => {
-    if (!process.stdout.write(text)) process.stdout.once('drain', resolve)
-    else process.stdout.write('', () => resolve())
+    if (!text) return resolve()
+    process.stdout.once('error', () => resolve()) // the reader went away (EPIPE)
+    process.stdout.write(text, () => resolve())
   })
+}
+
+/** Close the databases, drop the write lock and exit. */
+function quit(code: number): void {
+  closeMail()
+  closeCalendar()
+  closeMoney()
+  releaseWriteLock()
+  app.exit(code)
 }
 
 /**
@@ -29,6 +39,13 @@ export async function runHeadless(args: string[], setup: () => void): Promise<vo
   if (process.platform === 'darwin') app.dock?.hide()
   // Nothing is drawn. Without this, Linux with no display logs a page of GPU errors to stderr.
   app.disableHardwareAcceleration()
+
+  // Electron shows a dialog for an uncaught error in the main process: never in headless mode.
+  process.on('uncaughtException', (err) => {
+    process.stderr.write(`${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`)
+    quit(1)
+  })
+  process.stdout.on('error', () => {})
 
   const json = args.includes('--json')
   const pending: string[] = []
@@ -71,9 +88,5 @@ export async function runHeadless(args: string[], setup: () => void): Promise<vo
   }
 
   await writeOut(pending.join(''))
-  closeMail()
-  closeCalendar()
-  closeMoney()
-  releaseWriteLock()
-  app.exit(code)
+  quit(code)
 }
