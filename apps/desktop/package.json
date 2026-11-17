@@ -33,6 +33,7 @@
   },
   "homepage": "https://github.com/NathanWalash/ordo",
   "dependencies": {
-    "imapflow": "^2.12.1"
+    "imapflow": "^2.12.1",
+    "undici": "^7.30.2"
   }
 }

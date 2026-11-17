@@ -9,6 +9,7 @@ export {
 } from './unsubscribe'
 export {
   executeUnsubscribe,
+  BLOCKED_ADDRESS,
   ONE_CLICK_BODY,
   type FetchLike,
   type UnsubscribeDeps,
@@ -22,6 +23,7 @@ export {
   type CleanupRequestItem,
   type PlannedSender,
 } from './cleanup-plan'
+export { hostRefusal, isBlockedIp, type GuardOptions } from './url-guard'
 export { groupBySender, isAutomated, isBulk } from './senders'
 export { categorise } from './rules'
 export { analyseSenders, type CategorisedSender } from './analyse'

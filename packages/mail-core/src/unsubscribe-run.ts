@@ -1,5 +1,6 @@
 import type { UnsubscribeMethod } from './types'
 import { isSecureUrl, parseMailto, type MailtoMessage } from './unsubscribe'
+import { hostRefusal } from './url-guard'
 
 export type UnsubscribeStatus = 'done' | 'opened' | 'failed' | 'skipped'
 
@@ -25,6 +26,10 @@ export type FetchLike = (
 ) => Promise<{ status: number; ok: boolean; headers: { get(name: string): string | null }; body?: unknown }>
 
 export interface UnsubscribeDeps {
+  /**
+   * Must refuse to connect to private and local addresses at connect time (see
+   * createGuardedFetch in '@ordo/mail-core/node'); this module only checks the URL.
+   */
   fetch: FetchLike
   /** Open a URL in the user's browser. */
   openExternal(url: string): Promise<void>
@@ -80,6 +85,8 @@ async function oneClick(start: string, deps: UnsubscribeDeps): Promise<Unsubscri
   for (let hop = 0; hop <= maxRedirects; hop++) {
     if (!isSecureUrl(url, deps))
       return fail(hop ? 'Refused a redirect to an address that isn’t https' : 'Not an https address')
+    const refusal = hostRefusal(url, { allowLoopback: deps.allowLoopbackHttp })
+    if (refusal) return fail(hop ? `Refused a redirect. ${refusal}` : refusal)
     let res: Awaited<ReturnType<FetchLike>>
     try {
       res = await deps.fetch(url, {
@@ -95,7 +102,9 @@ async function oneClick(start: string, deps: UnsubscribeDeps): Promise<Unsubscri
       })
     } catch (err) {
       if (signal.aborted) return fail(`No answer within ${Math.round(timeoutMs / 1000)} seconds`)
-      return fail(`Couldn’t reach the server: ${message(err)}`)
+      const blocked = rootCause(err, (e) => e.code === BLOCKED_ADDRESS)
+      if (blocked) return fail(`Refused: ${blocked.message}`)
+      return fail(`Couldn’t reach the server: ${message(rootCause(err) ?? err)}`)
     }
     discard(res.body)
     const location = res.headers.get('location')
@@ -132,6 +141,25 @@ async function mailto(url: string, deps: UnsubscribeDeps): Promise<UnsubscribeOu
   if (!msg) return { status: 'failed', method: 'mailto', detail: 'The unsubscribe address isn’t valid' }
   await deps.sendMail(msg)
   return { status: 'done', method: 'mailto', detail: `Sent an unsubscribe email to ${msg.to.join(', ')}` }
+}
+
+/** Error code the guarded fetch uses when a name resolves to a private or local address. */
+export const BLOCKED_ADDRESS = 'ORDO_BLOCKED_ADDRESS'
+
+type CodedError = Error & { code?: string; cause?: unknown }
+
+/** Walk an error's `cause` chain (fetch wraps socket errors) for the first match, or the deepest error. */
+function rootCause(err: unknown, match?: (e: CodedError) => boolean): CodedError | null {
+  let found: CodedError | null = null
+  for (
+    let e = err as CodedError | undefined, i = 0;
+    e instanceof Error && i < 10;
+    e = e.cause as CodedError, i++
+  ) {
+    if (match?.(e)) return e
+    found = e
+  }
+  return match ? null : found
 }
 
 function discard(body: unknown) {
