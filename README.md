@@ -54,6 +54,28 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: split bills with flatmates, balances and settling up            | Done    |
 | Money: bill due dates, renewals and trial ends on the Calendar         | Done    |
 | Money: local-model help matching bills to receipts                     | Planned |
+| Headless mode: a CLI and an MCP server for scripts and AI agents       | Done    |
+
+## Headless mode and MCP
+
+Ordo also runs without a window, for scripts, tests and AI agents. It uses the same saved account,
+data and safety checks as the app, and is read-only unless you start it with `--allow-changes`
+and confirm each change.
+
+```bash
+/Applications/Ordo.app/Contents/MacOS/Ordo --headless status
+/Applications/Ordo.app/Contents/MacOS/Ordo --headless senders --category promotions --json
+/Applications/Ordo.app/Contents/MacOS/Ordo --headless cleanup plan --sender deals@shop.example
+```
+
+As an MCP server over stdio for Claude Code or Claude Desktop:
+
+```bash
+claude mcp add ordo -- /Applications/Ordo.app/Contents/MacOS/Ordo --headless --mcp
+```
+
+From a checkout, `pnpm build` once, then `pnpm ordo -- status`. Commands, JSON output, MCP setup and
+the safety model are in [docs/headless.md](docs/headless.md).
 
 ## Install
 
@@ -83,7 +105,8 @@ pnpm package      # build an installer for your OS into apps/desktop/release
 
 ```
 apps/desktop          Electron app
-  src/main            Main process: windows, IPC handlers, (soon) IMAP and SQLite
+  src/main            Main process: windows, IPC handlers, IMAP, CalDAV and SQLite
+  src/main/headless   The same services without a window: CLI and MCP server
   src/preload         Exposes a small, typed API to the UI as window.ordo
   src/renderer        React UI (Tailwind CSS)
 packages/shared       Module registry and the typed IPC contract

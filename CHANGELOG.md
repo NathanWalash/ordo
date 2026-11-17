@@ -8,6 +8,10 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Headless mode: `Ordo --headless <command>` runs without a window, for scripts, tests and AI agents. Commands for status, scan, senders, clean-up plan and run, history, undo, calendar sync and events, bills, transactions, balances, statement import and AI sorting. Human-readable by default, `--json` for one JSON document, meaningful exit codes. It calls the same main-process functions as the window, so People are never cleared and every network, mailto and cloud-AI check still applies. Read-only unless started with `--allow-changes`, and each change needs `--confirm`. Connecting an account stays in the app. See [docs/headless.md](docs/headless.md).
+- MCP server: `Ordo --headless --mcp` serves Ordo's read tools to Claude Code, Claude Desktop and other MCP clients over stdio (no network port). Change tools only appear with `--allow-changes` and each needs `confirm: true`. Tool descriptions mark text from emails, statements and calendars as untrusted.
+- `pnpm ordo -- <command>` runs the built app headless from a checkout.
+- The app and headless runs can be open together: the databases wait briefly for each other, and scans, syncs, clean-ups, undo, imports and AI sorting take a shared write lock (`ordo-write.lock`). The window says "Ordo is busy in another window or agent" instead of clashing; a lock left by a crashed process is taken over.
 - Sort with AI in Unclutter: asks the model chosen in Settings → AI about the senders in Other, with progress, Stop and a summary. Sorted rows show a sparkle with the model's confidence, and earlier answers are kept without asking again. Without a model set up, the button opens Settings.
 - Bill due dates, yearly renewals and trial ends from Money appear on the Calendar, drawn so they never look like events.
 - Unclutter clean-up. "Review and clear" opens a review sheet listing the selected senders, with Unsubscribe (one-click, link or email) and Move to Trash for each, a summary and a Clear button. People you've written to are refused again in the main process, whatever the window sends.
