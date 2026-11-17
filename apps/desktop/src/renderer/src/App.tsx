@@ -7,13 +7,16 @@ import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancePage } from './pages/FinancePage'
+import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
+import { useAppearanceClasses } from './appearance'
 
 export function App() {
   const [route, setRouteState] = useState<Route>(() => routeFromHash(window.location.hash))
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
   const [connecting, setConnecting] = useState(false)
+  useAppearanceClasses()
 
   const refreshAccount = useCallback(async () => setAccount(await window.ordo.account.status()), [])
   useEffect(() => {
@@ -50,9 +53,10 @@ export function App() {
   return (
     <div className="flex h-full">
       <Sidebar route={route} onNavigate={setRoute} platform={info?.platform} />
-      <main className="relative flex min-w-0 flex-1 flex-col bg-content border-l border-sep">
+      <main className="relative min-w-0 flex-1 bg-content border-l border-sep">
         <Toolbar title={TITLES[route]} platform={info?.platform} />
-        <div className="min-h-0 flex-1 overflow-auto">
+        {/* Content scrolls under the translucent toolbar, so pages start 52px down. */}
+        <div className="absolute inset-0 flex flex-col overflow-auto pt-[52px]">
           {route === 'home' && <HomePage onNavigate={setRoute} />}
           {route === 'mail/inbox' && (
             <InboxPage
@@ -71,6 +75,7 @@ export function App() {
             />
           )}
           {route === 'finance' && <FinancePage />}
+          {route === 'settings' && <SettingsPage />}
         </div>
         {connecting && (
           <ConnectSheet

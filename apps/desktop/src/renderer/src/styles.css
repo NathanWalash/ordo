@@ -20,6 +20,12 @@
   --field: #ffffff;
   --danger: #ff3b30;
   --success: #34c759;
+  /* Frosted glass: translucent fills, a hairline highlight on the top edge, and soft shadows. */
+  --bar: rgb(255 255 255 / 0.72);
+  --panel: rgb(246 246 246 / 0.75);
+  --glass-highlight: rgb(255 255 255 / 0.7);
+  --glass-edge: rgb(0 0 0 / 0.12);
+  --panel-shadow: 0 24px 60px rgb(0 0 0 / 0.2), 0 2px 8px rgb(0 0 0 / 0.08);
   color-scheme: light dark;
 }
 
@@ -39,7 +45,41 @@
     --field: #323232;
     --danger: #ff453a;
     --success: #30d158;
+    --bar: rgb(30 30 30 / 0.7);
+    --panel: rgb(44 44 46 / 0.72);
+    --glass-highlight: rgb(255 255 255 / 0.1);
+    --glass-edge: rgb(0 0 0 / 0.6);
+    --panel-shadow: 0 24px 60px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.3);
   }
+}
+
+/*
+ * Surfaces start solid and turn to glass only where backdrop-filter works and the user hasn't asked
+ * for less transparency (the media query, or the OS setting the main process reports as a class).
+ */
+:root {
+  --bar-bg: var(--content);
+  --panel-bg: var(--sheet);
+  --glass-filter: none;
+}
+@supports (backdrop-filter: blur(1px)) {
+  :root {
+    --bar-bg: var(--bar);
+    --panel-bg: var(--panel);
+    --glass-filter: blur(24px) saturate(180%);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --bar-bg: var(--content);
+    --panel-bg: var(--sheet);
+    --glass-filter: none;
+  }
+}
+:root.reduce-transparency {
+  --bar-bg: var(--content);
+  --panel-bg: var(--sheet);
+  --glass-filter: none;
 }
 
 @theme inline {
@@ -73,9 +113,32 @@ body,
   cursor: default;
 }
 
-/* Linux has no native material: give the sidebar a solid fill. */
-.platform-linux .sidebar {
+/* Toolbars and table headers that content scrolls under. Edges come from border utilities. */
+.glass-bar {
+  background-color: var(--bar-bg);
+  backdrop-filter: var(--glass-filter);
+}
+
+/* Sheets and popovers floating over the content. */
+.glass-panel {
+  background-color: var(--panel-bg);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--panel-shadow);
+}
+
+/* Paint the sidebar solid where there's no native material behind it (Windows 10, Linux) or
+   the user wants less transparency. */
+.opaque-sidebar .sidebar,
+.reduce-transparency .sidebar {
   background: var(--sidebar-solid);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar {
+    background: var(--sidebar-solid);
+  }
 }
 
 .drag {
