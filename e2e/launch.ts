@@ -8,6 +8,8 @@ export function launchApp(env: Record<string, string> = {}) {
   const userData = mkdtempSync(join(tmpdir(), 'ordo-e2e-'))
   return electron.launch({
     args: ['apps/desktop'],
+    // Playwright emulates a light colour scheme by default; let the app's own theme setting decide.
+    colorScheme: null,
     env: {
       ...(process.env as Record<string, string>),
       ORDO_USER_DATA: userData,
