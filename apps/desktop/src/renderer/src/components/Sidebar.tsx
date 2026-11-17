@@ -49,7 +49,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
       </Section>
 
       <div className="no-drag mt-auto">
-        <Item icon={<Settings size={15} />} label="Settings" active={false} onClick={() => {}} />
+        <Item
+          icon={<Settings size={15} />}
+          label="Settings"
+          active={route === 'settings'}
+          onClick={() => onNavigate('settings')}
+        />
       </div>
     </nav>
   )

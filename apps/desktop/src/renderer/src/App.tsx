@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancePage } from './pages/FinancePage'
+import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
 
 export function App() {
@@ -71,6 +72,7 @@ export function App() {
             />
           )}
           {route === 'finance' && <FinancePage />}
+          {route === 'settings' && <SettingsPage />}
         </div>
         {connecting && (
           <ConnectSheet

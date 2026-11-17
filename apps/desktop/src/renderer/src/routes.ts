@@ -1,4 +1,4 @@
-export const ROUTES = ['home', 'mail/inbox', 'mail/unclutter', 'finance'] as const
+export const ROUTES = ['home', 'mail/inbox', 'mail/unclutter', 'finance', 'settings'] as const
 export type Route = (typeof ROUTES)[number]
 
 export const TITLES: Record<Route, string> = {
@@ -6,6 +6,7 @@ export const TITLES: Record<Route, string> = {
   'mail/inbox': 'Inbox',
   'mail/unclutter': 'Unclutter',
   finance: 'Finance',
+  settings: 'Settings',
 }
 
 /** Routes live in the URL hash (`#/mail/inbox`) so the app can open on any screen. */
