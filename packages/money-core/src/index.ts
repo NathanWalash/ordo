@@ -28,5 +28,22 @@ export {
 export { detectRecurring } from './recurring'
 export { emailHints, hintKind } from './email'
 export { linkBills, monthlyCost, resolveBills } from './link'
+export {
+  WHOLE,
+  allocate,
+  balances,
+  billCharges,
+  netBalances,
+  simplifyDebts,
+  splitStartDate,
+  validateSplit,
+} from './split'
 export { billsToCalendarItems, type BillCalendarItem } from './calendar'
 export { applySuggestions, noAdvisor, type MatchAdvisor, type MatchSuggestion } from './advisor'
+export {
+  filterTransactions,
+  summarise,
+  type MonthTotal,
+  type TransactionFilter,
+  type TransactionSummary,
+} from './summary'
