@@ -306,6 +306,7 @@ export async function ask(raw: unknown, onStep?: (s: AskStep) => void): Promise<
     return {
       ok: true,
       answer: r.answer,
+      parts: r.parts,
       steps: r.steps,
       proposals: r.proposals.map((p) => ({ ...p, summary: describeFact(p.fact, byId, events) })),
       ...(r.clarify && { clarify: r.clarify }),

@@ -202,7 +202,12 @@ test('Ask Ordo answers with Ordo’s own numbers and suggests what to remember',
   await box.fill('How much did Italy cost me?')
   await box.press('Enter')
   const answers = page.getByRole('list', { name: 'Answers' })
-  await expect(answers).toContainText('Italy cost you £423.99 so far. Luca paid you £5.00 on 5 Sept.')
+  // The model's prose, with Ordo's figures drawn as separate chips carrying Ordo's own labels.
+  await expect(answers).toContainText('Italy cost you')
+  await expect(answers).toContainText('so far. Luca paid you')
+  await expect(answers).toContainText('on 5 Sept.')
+  await expect(answers.getByRole('group', { name: 'Net cost of Italy: £423.99' })).toBeVisible()
+  await expect(answers.getByRole('group', { name: 'Luca B, 5 Sept: £5.00' })).toBeVisible()
   await expect(answers).toContainText('Looked at: Worked out an event · Searched transactions')
   const suggestion = answers.getByRole('group', {
     name: /Suggestion: Luca B £5\.00 on 5 Sept paid you back for Italy\./,

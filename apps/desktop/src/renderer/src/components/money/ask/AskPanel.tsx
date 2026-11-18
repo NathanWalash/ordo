@@ -215,7 +215,15 @@ function Answer({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <p className="whitespace-pre-line select-text leading-relaxed">{outcome.answer}</p>
+      <p className="whitespace-pre-line select-text leading-relaxed">
+        {outcome.parts.map((p, i) =>
+          p.kind === 'text' ? (
+            <span key={i}>{p.text}</span>
+          ) : (
+            <Figure key={i} label={p.label} value={p.value} />
+          ),
+        )}
+      </p>
       {outcome.steps.length > 0 && (
         <p className="text-[11px] text-ink-3">
           Looked at: {[...new Set(outcome.steps.map((s) => s.label))].join(' · ')}
@@ -281,5 +289,23 @@ function Answer({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * One of Ordo's figures in an answer: its own label and the value it worked out, drawn apart from
+ * the model's prose so words next to it can't change what it says.
+ */
+function Figure({ label, value }: { label: string; value: string }) {
+  return (
+    <span
+      role="group"
+      aria-label={`${label}: ${value}`}
+      title={`${label}, worked out by Ordo`}
+      className="mx-0.5 inline-flex items-baseline gap-1.5 rounded-md border border-sep bg-hover px-1.5 py-px align-baseline whitespace-nowrap"
+    >
+      <span className="text-[11px] text-ink-2">{label}</span>
+      <span className="font-semibold tabular-nums">{value}</span>
+    </span>
   )
 }

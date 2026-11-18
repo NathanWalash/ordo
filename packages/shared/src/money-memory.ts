@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   MoneyFactInputSchema,
   type AccountCaveat,
+  type AnswerPart,
   type AskStep,
   type Counterpart,
   type EventCost,
@@ -19,6 +20,7 @@ import {
 
 export type {
   AccountCaveat,
+  AnswerPart,
   AskStep,
   Counterpart,
   EventCost,
@@ -131,7 +133,10 @@ export interface AskProposalView {
 export type AskOutcome =
   | {
       ok: true
+      /** The answer as plain text, each figure as `[label: value]`. */
       answer: string
+      /** The answer as the model's prose and Ordo's separate, labelled figures. */
+      parts: AnswerPart[]
       steps: AskStep[]
       proposals: AskProposalView[]
       clarify?: { question: string; options: string[] }
