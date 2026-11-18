@@ -112,7 +112,8 @@ export function BoardView({ view, setView, today, actions }: Props) {
   // column, first straight away and then once the main process has confirmed the move.
   const refocus = useCallback(() => {
     const f = focusAfter.current
-    if (!f) return
+    // Only when focus was lost with the old element; never take it from somewhere you moved it.
+    if (!f || (document.activeElement && document.activeElement !== document.body)) return
     const el = document.querySelector<HTMLElement>(
       f.kind === 'card'
         ? `[data-card-id="${CSS.escape(f.id)}"]`
@@ -121,12 +122,16 @@ export function BoardView({ view, setView, today, actions }: Props) {
     if (el && document.activeElement !== el) el.focus()
   }, [])
   useEffect(refocus)
-  const settle = useCallback(() => {
-    requestAnimationFrame(() => {
-      refocus()
-      focusAfter.current = null
-    })
-  }, [refocus])
+  /** Once a move is confirmed: focus again, and stop unless another move has started since. */
+  const settle = useCallback(
+    (target: { kind: 'card' | 'column'; id: string } | null) => {
+      requestAnimationFrame(() => {
+        refocus()
+        if (focusAfter.current === target) focusAfter.current = null
+      })
+    },
+    [refocus],
+  )
 
   // ⌘F searches the board.
   useEffect(() => {
@@ -164,7 +169,8 @@ export function BoardView({ view, setView, today, actions }: Props) {
       )
       const column = columns.find((c) => c.id === columnId)!
       setView((v) => v && { ...v, cards: moveLocally(v.cards, card.id, columnId, index) })
-      if (how === 'keys') focusAfter.current = { kind: 'card', id: card.id }
+      const target = how === 'keys' ? { kind: 'card' as const, id: card.id } : null
+      if (target) focusAfter.current = target
       const count = otherIds(columnId, card.id, all).length + 1
       actions.announce(
         `Moved “${card.title}” to ${column.name}, position ${index + 1} of ${count}.` +
@@ -174,7 +180,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
       )
       await result(api.moveCard({ id: card.id, columnId, index }))
       await actions.reload()
-      settle()
+      settle(target)
     },
     [actions, all, api, columns, result, setView, settle, shown],
   )
@@ -312,11 +318,12 @@ export function BoardView({ view, setView, today, actions }: Props) {
 
   const moveColumn = async (column: Column, index: number, how: 'drag' | 'keys') => {
     setView((v) => v && { ...v, columns: reorder(v.columns, column.id, index) })
-    if (how === 'keys') focusAfter.current = { kind: 'column', id: column.id }
+    const target = how === 'keys' ? { kind: 'column' as const, id: column.id } : null
+    if (target) focusAfter.current = target
     actions.announce(`Moved ${column.name} to position ${index + 1} of ${columns.length}.`)
     await result(api.moveColumn({ id: column.id, index }))
     await actions.reload()
-    settle()
+    settle(target)
   }
 
   const columnDrag = useDrag<Column, number>({

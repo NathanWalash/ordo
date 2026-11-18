@@ -194,6 +194,21 @@ test('drag and drop moves cards between and within columns, and the order is kep
   await expect.poll(() => titlesIn('Backlog')).toEqual(['Clear the gutters'])
   await expect.poll(() => titlesIn('Up next')).toEqual(['Paint the shed', 'Book boiler service'])
   await expect.poll(() => titlesIn('In progress')).toEqual(['Fix the gate'])
+
+  // Escape puts a card back mid-drag.
+  const a = (await card('Book boiler service').boundingBox())!
+  const b = (await card('Fix the gate').boundingBox())!
+  await page.mouse.move(a.x + 40, a.y + 12)
+  await page.mouse.down()
+  await page.mouse.move(b.x + 60, b.y + b.height + 10, { steps: 12 })
+  // The card is lifted (a copy follows the pointer) and is gone from its column for now.
+  await expect(page.locator('button[aria-label="Book boiler service"][tabindex="-1"]')).toBeVisible()
+  expect(await titlesIn('Up next')).toEqual(['Paint the shed'])
+  await shoot('dragging')
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await expect.poll(() => titlesIn('Up next')).toEqual(['Paint the shed', 'Book boiler service'])
+  await expect.poll(() => titlesIn('In progress')).toEqual(['Fix the gate'])
 })
 
 test('the keyboard moves cards with Option and the arrows', async () => {
@@ -321,6 +336,7 @@ test('search and filters narrow the board', async () => {
   await shoot('filtered')
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
   await expect(card('Paint the shed')).toBeVisible()
+  await shoot('overview')
 })
 
 test('archive and restore, delete and undo', async () => {

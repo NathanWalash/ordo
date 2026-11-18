@@ -59,12 +59,23 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
     }
   }, [])
 
+  // Bumped by every change shown before the main process confirms it. A reload that started
+  // before the latest such change is out of date, so it's dropped; that change reloads anyway.
+  const epoch = useRef(0)
+  const setViewNow: typeof setView = useCallback((update) => {
+    epoch.current++
+    setView(update)
+  }, [])
+
   const reload = useCallback(async () => {
+    const started = epoch.current
     const list = await api.list()
-    setBoards(list)
     const id = list.some((b) => b.id === selectedRef.current) ? selectedRef.current : (list[0]?.id ?? null)
+    const next = id ? await api.board(id) : null
+    if (epoch.current !== started) return
+    setBoards(list)
     if (id !== selectedRef.current) select(id)
-    setView(id ? await api.board(id) : null)
+    setView(next)
   }, [api, select])
 
   const toast = useToast(reload)
@@ -182,7 +193,7 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
       )}
 
       {view ? (
-        <BoardView key={view.board.id} view={view} setView={setView} today={today} actions={actions} />
+        <BoardView key={view.board.id} view={view} setView={setViewNow} today={today} actions={actions} />
       ) : (
         <div className="flex-1">
           <EmptyState
