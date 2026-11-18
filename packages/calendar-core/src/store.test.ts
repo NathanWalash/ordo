@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { CalendarStore } from './store'
 import type { CalendarEvent, RemoteCalendar } from './types'
@@ -198,9 +201,6 @@ describe('subscriptions next to iCloud', () => {
 describe('upgrading an older cache', () => {
   it('adds the provider column and treats existing calendars as iCloud', async () => {
     const { DatabaseSync } = await import('node:sqlite')
-    const { mkdtempSync } = await import('node:fs')
-    const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
     const path = join(mkdtempSync(join(tmpdir(), 'ordo-cal-')), 'calendar.sqlite')
     const old = new DatabaseSync(path)
     old.exec(
@@ -214,5 +214,61 @@ describe('upgrading an older cache', () => {
     upgraded.setCalendars([], 'feeds')
     expect(upgraded.calendars()).toHaveLength(1)
     upgraded.close()
+  })
+
+  it('makes calendars cached before resources were kept sync again, once', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'ordo-cal-')), 'calendar.sqlite')
+    const first = new CalendarStore(path)
+    first.setCalendars([HOME])
+    first.replaceEvents('home', [], WINDOW, 'v1')
+    first.setMeta('schema', null) // as a cache from before this version
+    first.close()
+    const upgraded = new CalendarStore(path)
+    expect(upgraded.syncState('home')!.version).toBeNull()
+    upgraded.replaceEvents('home', [], WINDOW, 'v2')
+    upgraded.close()
+    const again = new CalendarStore(path)
+    expect(again.syncState('home')!.version).toBe('v2')
+    again.close()
+  })
+})
+
+describe('CalendarStore resources', () => {
+  const res = (uid: string, etag = '"1"') => ({
+    href: `https://cal.example/home/${uid}.ics`,
+    etag,
+    uid,
+    ics: `ICS ${uid}`,
+  })
+  const at = (uid: string, day: number) =>
+    ev({ uid, start: new Date(2026, 10, day, 9), end: new Date(2026, 10, day, 10) })
+
+  it('keeps the resources a calendar was fetched with, and swaps one after a change', () => {
+    store.replaceEvents('home', [at('a', 2), at('b', 3)], WINDOW, 'v1', [res('a'), res('b')])
+    expect(store.resources('home', 'a')).toEqual([res('a')])
+
+    store.replaceResource('home', 'a', res('a').href, res('a', '"2"'), [at('a', 5)])
+    expect(store.resources('home', 'a')).toEqual([res('a', '"2"')])
+    expect(store.events(WINDOW).map((e) => [e.uid, e.start.getDate()])).toEqual([
+      ['b', 3],
+      ['a', 5],
+    ])
+
+    store.replaceResource('home', 'b', res('b').href, null, [])
+    expect(store.resources('home', 'b')).toEqual([])
+    expect(store.events(WINDOW).map((e) => e.uid)).toEqual(['a'])
+  })
+
+  it('keeps resources when a provider without them refreshes, and forgets them with the calendar', () => {
+    store.replaceEvents('home', [at('a', 2)], WINDOW, 'v1', [res('a')])
+    store.replaceEvents('home', [at('a', 2)], WINDOW, 'v2')
+    expect(store.resources('home', 'a')).toHaveLength(1)
+    store.setCalendars([WORK])
+    expect(store.resources('home', 'a')).toEqual([])
+  })
+
+  it('says which provider owns a calendar', () => {
+    expect(store.calendar('home')).toMatchObject({ name: 'Home', provider: 'icloud', readOnly: false })
+    expect(store.calendar('nope')).toBeNull()
   })
 })

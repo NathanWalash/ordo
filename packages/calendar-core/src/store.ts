@@ -1,7 +1,14 @@
 import { DatabaseSync } from 'node:sqlite'
 import { overlaps } from './time'
 import type { FeedKind } from './feeds'
-import type { CalendarEvent, CalendarInfo, CalendarSource, DateRange, RemoteCalendar } from './types'
+import type {
+  CalendarEvent,
+  CalendarInfo,
+  CalendarResource,
+  CalendarSource,
+  DateRange,
+  RemoteCalendar,
+} from './types'
 
 /** A cached calendar, with the user's choice of whether to show it. */
 export interface StoredCalendar extends CalendarInfo {
@@ -89,7 +96,22 @@ CREATE TABLE IF NOT EXISTS feeds (
   ics TEXT,
   added INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS resources (
+  calendar_id TEXT NOT NULL,
+  href TEXT NOT NULL,
+  uid TEXT NOT NULL,
+  etag TEXT,
+  ics TEXT NOT NULL,
+  PRIMARY KEY (calendar_id, href)
+);
+CREATE INDEX IF NOT EXISTS resources_uid ON resources (calendar_id, uid);
 `
+
+/**
+ * Bumped when the cache needs a full refetch to fill something new in. 2: CalDAV resources
+ * (href, ETag and iCalendar) are kept, so events can be changed.
+ */
+const SCHEMA_VERSION = '2'
 
 /** Calendars from the iCloud account; subscribed links and files belong to FEEDS. */
 export const ICLOUD = 'icloud'
@@ -120,6 +142,31 @@ export class CalendarStore {
     const cols = this.db.prepare('PRAGMA table_info(calendars)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'provider'))
       this.db.exec(`ALTER TABLE calendars ADD COLUMN provider TEXT NOT NULL DEFAULT '${ICLOUD}'`)
+    if (this.meta('schema') !== SCHEMA_VERSION) {
+      // Calendars cached before resources were kept: make the next sync fetch them again.
+      this.db.exec('UPDATE calendars SET version = NULL')
+      this.setMeta('schema', SCHEMA_VERSION)
+    }
+  }
+
+  /** One calendar, with which provider owns it. */
+  calendar(id: string): (StoredCalendar & { provider: string }) | null {
+    const r = this.db
+      .prepare(
+        `SELECT c.*, COALESCE(f.kind, '${ICLOUD}') AS source FROM calendars c ` +
+          'LEFT JOIN feeds f ON f.id = c.id WHERE c.id = ?',
+      )
+      .get(id) as (CalendarRow & { provider: string }) | undefined
+    if (!r) return null
+    return {
+      id: r.id,
+      name: r.name,
+      color: r.color ?? undefined,
+      readOnly: r.read_only === 1,
+      visible: r.visible === 1,
+      source: r.source as CalendarSource,
+      provider: r.provider,
+    }
   }
 
   /** iCloud calendars first, then subscriptions in the order they were added. */
@@ -223,6 +270,7 @@ export class CalendarStore {
 
   private dropCalendar(id: string): void {
     this.db.prepare('DELETE FROM events WHERE calendar_id = ?').run(id)
+    this.db.prepare('DELETE FROM resources WHERE calendar_id = ?').run(id)
     this.db.prepare('DELETE FROM calendars WHERE id = ?').run(id)
   }
 
@@ -238,31 +286,82 @@ export class CalendarStore {
     return { version: r.version, from: new Date(r.synced_from), to: new Date(r.synced_to) }
   }
 
-  /** Replace every cached occurrence of a calendar with a fresh fetch of `window`. */
-  replaceEvents(calendarId: string, events: CalendarEvent[], window: DateRange, version?: string): void {
-    const insert = this.db.prepare(
-      'INSERT OR REPLACE INTO events (calendar_id, uid, recurrence_id, title, start, end, all_day, location, notes) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    )
+  /**
+   * Replace every cached occurrence of a calendar with a fresh fetch of `window`. CalDAV
+   * calendars also pass the resources the events came from, so they can be changed later.
+   */
+  replaceEvents(
+    calendarId: string,
+    events: CalendarEvent[],
+    window: DateRange,
+    version?: string,
+    resources?: CalendarResource[],
+  ): void {
     this.transaction(() => {
       this.db.prepare('DELETE FROM events WHERE calendar_id = ?').run(calendarId)
-      for (const e of events) {
-        insert.run(
-          calendarId,
-          e.uid,
-          e.recurrenceId ?? '',
-          e.title,
-          e.allDay ? toUtcDate(e.start) : e.start.getTime(),
-          e.allDay ? toUtcDate(e.end) : e.end.getTime(),
-          e.allDay ? 1 : 0,
-          e.location ?? null,
-          e.notes ?? null,
-        )
+      this.insertEvents(calendarId, events)
+      if (resources) {
+        this.db.prepare('DELETE FROM resources WHERE calendar_id = ?').run(calendarId)
+        this.insertResources(calendarId, resources)
       }
       this.db
         .prepare('UPDATE calendars SET version = ?, synced_from = ?, synced_to = ? WHERE id = ?')
         .run(version ?? null, window.start.getTime(), window.end.getTime(), calendarId)
     })
+  }
+
+  /** The cached CalDAV resources holding event `uid` (normally one). */
+  resources(calendarId: string, uid: string): CalendarResource[] {
+    const rows = this.db
+      .prepare('SELECT href, uid, etag, ics FROM resources WHERE calendar_id = ? AND uid = ? ORDER BY href')
+      .all(calendarId, uid) as { href: string; uid: string; etag: string | null; ics: string }[]
+    return rows.map((r) => ({ href: r.href, uid: r.uid, etag: r.etag ?? undefined, ics: r.ics }))
+  }
+
+  /**
+   * After a change Ordo made: the resource at `href` is now `resource` (or gone, with null), and
+   * event `uid`'s cached occurrences are now `events`.
+   */
+  replaceResource(
+    calendarId: string,
+    uid: string,
+    href: string,
+    resource: CalendarResource | null,
+    events: CalendarEvent[],
+  ): void {
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM resources WHERE calendar_id = ? AND href = ?').run(calendarId, href)
+      if (resource) this.insertResources(calendarId, [resource])
+      this.db.prepare('DELETE FROM events WHERE calendar_id = ? AND uid = ?').run(calendarId, uid)
+      this.insertEvents(calendarId, events)
+    })
+  }
+
+  private insertEvents(calendarId: string, events: CalendarEvent[]): void {
+    const insert = this.db.prepare(
+      'INSERT OR REPLACE INTO events (calendar_id, uid, recurrence_id, title, start, end, all_day, location, notes) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    for (const e of events) {
+      insert.run(
+        calendarId,
+        e.uid,
+        e.recurrenceId ?? '',
+        e.title,
+        e.allDay ? toUtcDate(e.start) : e.start.getTime(),
+        e.allDay ? toUtcDate(e.end) : e.end.getTime(),
+        e.allDay ? 1 : 0,
+        e.location ?? null,
+        e.notes ?? null,
+      )
+    }
+  }
+
+  private insertResources(calendarId: string, resources: CalendarResource[]): void {
+    const insert = this.db.prepare(
+      'INSERT OR REPLACE INTO resources (calendar_id, href, uid, etag, ics) VALUES (?, ?, ?, ?, ?)',
+    )
+    for (const r of resources) insert.run(calendarId, r.href, r.uid, r.etag ?? null, r.ics)
   }
 
   /** Occurrences overlapping `range`, earliest first. By default only from visible calendars. */
@@ -312,7 +411,10 @@ export class CalendarStore {
 
   /** Forget everything: every calendar, event, subscription and note. */
   clear(): void {
-    this.db.exec('DELETE FROM events; DELETE FROM calendars; DELETE FROM meta; DELETE FROM feeds;')
+    this.db.exec(
+      'DELETE FROM events; DELETE FROM resources; DELETE FROM calendars; DELETE FROM meta; DELETE FROM feeds;',
+    )
+    this.setMeta('schema', SCHEMA_VERSION)
   }
 
   close(): void {

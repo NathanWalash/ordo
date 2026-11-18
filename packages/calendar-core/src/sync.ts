@@ -53,8 +53,10 @@ export async function syncCalendars(
       continue
     }
     let events
+    let resources
     try {
-      events = await source.fetchEvents(cal.id, window)
+      if (source.fetchResources) ({ events, resources } = await source.fetchResources(cal.id, window))
+      else events = await source.fetchEvents(cal.id, window)
     } catch (err) {
       if (!continueOnError || signal?.aborted) throw err
       ;(result.failed ??= []).push({
@@ -65,7 +67,7 @@ export async function syncCalendars(
       continue
     }
     if (signal?.aborted) return { ...result, stopped: true }
-    store.replaceEvents(cal.id, events, window, cal.version)
+    store.replaceEvents(cal.id, events, window, cal.version, resources)
     result.fetched++
     result.events += events.length
   }
