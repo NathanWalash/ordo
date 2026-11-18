@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountStatus, AppInfo } from '@ordo/shared'
 import { ConnectSheet } from './components/ConnectSheet'
 import { Sidebar } from './components/Sidebar'
@@ -13,12 +13,19 @@ import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
 import { useAppearanceClasses } from './appearance'
+import { AssistantPanel } from './components/assistant/AssistantPanel'
+import { useAssistant } from './components/assistant/useAssistant'
 
 export function App() {
   const [route, setRouteState] = useState<Route>(() => routeFromHash(window.location.hash))
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  /** Bumped when the assistant opens a page or finishes a change, so the page loads fresh data. */
+  const [pageKey, setPageKey] = useState(0)
+  const [financeMonth, setFinanceMonth] = useState<string | undefined>(undefined)
+  const returnFocus = useRef<HTMLElement | null>(null)
   useAppearanceClasses()
 
   const refreshAccount = useCallback(async () => setAccount(await window.ordo.account.status()), [])
@@ -36,8 +43,49 @@ export function App() {
   }
 
   const setRoute = (r: Route) => {
+    setFinanceMonth(undefined)
     window.location.hash = `/${r}`
   }
+
+  const assistantHandlers = useMemo(
+    () => ({
+      onNavigate: (e: { page: string; month?: string }) => {
+        const next = routeFromHash(`#/${e.page}`)
+        setFinanceMonth(next === 'money/finances' ? e.month : undefined)
+        setPageKey((k) => k + 1)
+        window.location.hash = `/${next}`
+      },
+      onChanged: () => setPageKey((k) => k + 1),
+    }),
+    [],
+  )
+  const assistant = useAssistant(assistantHandlers)
+
+  const openAssistant = useCallback(() => {
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setAssistantOpen(true)
+  }, [])
+  const closeAssistant = useCallback(() => {
+    setAssistantOpen(false)
+    returnFocus.current?.focus()
+  }, [])
+
+  // ⌘K or ⌘J (Ctrl on Windows and Linux) opens and closes the assistant from anywhere.
+  const isMac = info?.platform === 'darwin'
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+      if (!mod || e.altKey || e.shiftKey) return
+      const key = e.key.toLowerCase()
+      if (key !== 'k' && key !== 'j') return
+      e.preventDefault()
+      if (assistantOpen) closeAssistant()
+      else openAssistant()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isMac, assistantOpen, openAssistant, closeAssistant])
+  const shortcut = isMac ? '⌘K' : 'Ctrl+K'
 
   useEffect(() => {
     const onHash = () => setRouteState(routeFromHash(window.location.hash))
@@ -57,9 +105,17 @@ export function App() {
     <div className="flex h-full">
       <Sidebar route={route} onNavigate={setRoute} platform={info?.platform} />
       <main className="relative min-w-0 flex-1 bg-content border-l border-sep">
-        <Toolbar title={TITLES[route]} platform={info?.platform} />
+        <Toolbar
+          title={TITLES[route]}
+          platform={info?.platform}
+          assistant={{
+            open: assistantOpen,
+            shortcut,
+            onToggle: () => (assistantOpen ? closeAssistant() : openAssistant()),
+          }}
+        />
         {/* Content scrolls under the translucent toolbar, so pages start 52px down. */}
-        <div className="absolute inset-0 flex flex-col overflow-auto pt-[52px]">
+        <div key={pageKey} className="absolute inset-0 flex flex-col overflow-auto pt-[52px]">
           {route === 'home' && <HomePage onNavigate={setRoute} />}
           {route === 'mail/inbox' && (
             <InboxPage
@@ -80,10 +136,21 @@ export function App() {
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
           {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
-          {route === 'money/finances' && <FinancesPage onOpenSettings={() => setRoute('settings')} />}
+          {route === 'money/finances' && (
+            <FinancesPage onOpenSettings={() => setRoute('settings')} initialMonth={financeMonth} />
+          )}
           {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
           {route === 'settings' && <SettingsPage />}
         </div>
+        {assistantOpen && (
+          <AssistantPanel
+            assistant={assistant}
+            route={route}
+            shortcut={shortcut}
+            onClose={closeAssistant}
+            onOpenSettings={() => setRoute('settings')}
+          />
+        )}
         {connecting && (
           <ConnectSheet
             onClose={() => setConnecting(false)}
