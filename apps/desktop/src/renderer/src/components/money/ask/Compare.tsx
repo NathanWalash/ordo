@@ -18,7 +18,8 @@ export function ComparePanel({
   const [account, setAccount] = useState('')
   const [filtered, setFiltered] = useState<{ key: string; c: MonthComparison } | null>(null)
   const key = `${category}|${account}`
-  const c = !category && !account ? initial : filtered?.key === key ? filtered.c : initial
+  const loading = Boolean(category || account) && filtered?.key !== key
+  const c = !category && !account ? initial : filtered?.key === key ? filtered.c : null
 
   useEffect(() => {
     if (!category && !account) return
@@ -31,7 +32,7 @@ export function ComparePanel({
     }
   }, [category, account, initial])
 
-  const diff = c.difference
+  const diff = c?.difference ?? 0
   const sentence =
     diff === 0
       ? 'The same as last month so far.'
@@ -63,32 +64,40 @@ export function ComparePanel({
         </div>
       }
     >
-      <div className="grid grid-cols-2 gap-3 px-4 pt-3" aria-live="polite">
-        <Figure
-          label={`${formatDate(c.thisMonth.from, true)} – ${formatDate(c.thisMonth.to, true)}`}
-          value={c.thisMonth.net}
-          paidBack={c.thisMonth.paidBack}
-        />
-        <Figure
-          label={`${formatDate(c.lastMonth.from, true)} – ${formatDate(c.lastMonth.to, true)}`}
-          value={c.lastMonth.net}
-          paidBack={c.lastMonth.paidBack}
-          muted
-        />
-      </div>
-      <p className="px-4 pt-2 pb-3 font-medium">{sentence}</p>
-      {c.caveats.length > 0 && (
-        <ul
-          className="flex flex-col gap-1 border-t border-sep px-4 py-2 text-[12px] text-ink-2"
-          aria-label="Caveats"
-        >
-          {c.caveats.map((x) => (
-            <li key={x} className="flex items-start gap-1.5">
-              <Info size={12} className="mt-0.5 shrink-0" />
-              {x}
-            </li>
-          ))}
-        </ul>
+      {loading || !c ? (
+        <p className="px-4 py-3 text-ink-2" role="status">
+          Working it out…
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 px-4 pt-3" aria-live="polite">
+            <Figure
+              label={`${formatDate(c.thisMonth.from, true)} – ${formatDate(c.thisMonth.to, true)}`}
+              value={c.thisMonth.net}
+              paidBack={c.thisMonth.paidBack}
+            />
+            <Figure
+              label={`${formatDate(c.lastMonth.from, true)} – ${formatDate(c.lastMonth.to, true)}`}
+              value={c.lastMonth.net}
+              paidBack={c.lastMonth.paidBack}
+              muted
+            />
+          </div>
+          <p className="px-4 pt-2 pb-3 font-medium">{sentence}</p>
+          {c.caveats.length > 0 && (
+            <ul
+              className="flex flex-col gap-1 border-t border-sep px-4 py-2 text-[12px] text-ink-2"
+              aria-label="Caveats"
+            >
+              {c.caveats.map((x) => (
+                <li key={x} className="flex items-start gap-1.5">
+                  <Info size={12} className="mt-0.5 shrink-0" />
+                  {x}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </Panel>
   )

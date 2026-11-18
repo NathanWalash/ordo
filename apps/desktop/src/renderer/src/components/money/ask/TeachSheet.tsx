@@ -58,12 +58,17 @@ export function TeachSheet({
   const questions = (s: QuestionStep) =>
     view.questions.filter((q) => q.step === s).slice(0, s === 'matches' ? 5 : 8)
 
+  /** Save the note, if there is one. False when it couldn't be saved. */
   const saveNote = async () => {
-    if (!note.trim()) return
+    if (!note.trim()) return true
     const r = await onSave({ fact: { kind: 'note', text: note.trim() }, source: 'onboarding' })
-    if (!r.ok) return setError(r.message)
+    if (!r.ok) {
+      setError(r.message)
+      return false
+    }
     setNote('')
     setSaved((n) => n + 1)
+    return true
   }
 
   const setDates = async (account: string, dates: 'posting' | 'transaction') => {
@@ -79,8 +84,7 @@ export function TeachSheet({
   }
 
   const finish = async () => {
-    await saveNote()
-    onClose()
+    if (await saveNote()) onClose()
   }
 
   return (

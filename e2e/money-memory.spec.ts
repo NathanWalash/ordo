@@ -142,11 +142,12 @@ test('imports two banks, then Ordo asks about Gabe’s regular money', async () 
     "you pay Patrick O about £597.00 a month. Is Gabe S's money for Patrick O?",
   )
   await expect(questions().getByRole('listitem', { name: /H Bennie's £50\.00 on 5 Oct/ })).toBeVisible()
-  // Ryanair didn't split evenly, so Amelie's half is likely rather than exact.
+  // Ryanair didn't split evenly and nothing says it's a payback, so Amelie's "about half" is only
+  // one to check.
   await expect(
     questions()
       .getByRole('listitem', { name: /Amelie R's £148\.80/ })
-      .getByText('Likely'),
+      .getByText('To check'),
   ).toBeVisible()
   // How each bank dates payments.
   await expect(page.getByText('HSBC shows the day a payment cleared', { exact: false }).first()).toBeVisible()
@@ -257,6 +258,25 @@ test('Teach Ordo walks through accounts and keeps a note; anything can be forgot
 
   await knows().getByRole('button', { name: 'Forget: HSBC is my bills account.' }).click()
   await expect(knows()).not.toContainText('HSBC is my bills account.')
+})
+
+test('forgetting an event asks first, and keeps the paybacks for it', async () => {
+  const events = page.getByRole('list', { name: 'Events and trips' })
+  const italy = events.getByRole('button', { name: /^Italy/ })
+  if ((await italy.getAttribute('aria-expanded')) !== 'true') await italy.click()
+  await events.getByRole('button', { name: 'Forget Italy' }).click()
+  const confirm = events.getByRole('group', { name: 'Forget Italy?' })
+  await expect(confirm).toContainText('Paybacks and money owed for it are kept')
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(italy).toBeVisible()
+
+  await events.getByRole('button', { name: 'Forget Italy' }).click()
+  await events.getByRole('group', { name: 'Forget Italy?' }).getByRole('button', { name: 'Forget' }).click()
+  await expect(
+    page.getByText('Forgot Italy. 1 payback for it is kept, now linked to its payments.'),
+  ).toBeVisible()
+  await expect(italy).toBeHidden()
+  await expect(knows()).toContainText('Luca B £5.00 on 5 Sept paid you back for Trenitalia')
 })
 
 test('Settings → AI has the Ask Ordo choices, and a local model needs no extra consent', async () => {

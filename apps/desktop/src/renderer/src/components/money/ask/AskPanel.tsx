@@ -7,8 +7,8 @@ import { Notice } from '../ui'
 interface Turn {
   question: string
   outcome: AskOutcome
-  /** Proposals already saved or skipped, by index. */
-  done: Record<number, 'saved' | 'skipped'>
+  /** Proposals being saved, saved or skipped, by index. */
+  done: Record<number, 'saving' | 'saved' | 'skipped'>
 }
 
 const SUGGESTIONS = [
@@ -68,8 +68,16 @@ export function AskPanel({
     void send(text)
   }
 
-  const mark = (turn: number, i: number, state: 'saved' | 'skipped') =>
-    setTurns((ts) => ts.map((t, n) => (n === turn ? { ...t, done: { ...t.done, [i]: state } } : t)))
+  const mark = (turn: number, i: number, state: Turn['done'][number] | null) =>
+    setTurns((ts) =>
+      ts.map((t, n) => {
+        if (n !== turn) return t
+        const done = { ...t.done }
+        if (state) done[i] = state
+        else delete done[i]
+        return { ...t, done }
+      }),
+    )
 
   const trip = events[0]?.name
   const suggestions = trip ? [`How much did ${trip} cost me?`, ...SUGGESTIONS.slice(0, 2)] : SUGGESTIONS
@@ -110,7 +118,9 @@ export function AskPanel({
                     outcome={t.outcome}
                     done={t.done}
                     onSave={async (p, i) => {
-                      if (await onSaveFact(p)) mark(n, i, 'saved')
+                      // Disable Save straight away: a double click must not save the fact twice.
+                      mark(n, i, 'saving')
+                      mark(n, i, (await onSaveFact(p)) ? 'saved' : null)
                     }}
                     onSkip={(i) => mark(n, i, 'skipped')}
                     onOption={(o) => void send(o)}
@@ -230,11 +240,20 @@ function Answer({
             <span className="text-[12px] text-ink-3">Skipped</span>
           ) : (
             <>
-              <Button className="h-6 px-2.5 text-[12px]" onClick={() => onSkip(i)}>
+              <Button
+                className="h-6 px-2.5 text-[12px]"
+                disabled={done[i] === 'saving'}
+                onClick={() => onSkip(i)}
+              >
                 Not now
               </Button>
-              <Button variant="primary" className="h-6 px-2.5 text-[12px]" onClick={() => onSave(p, i)}>
-                Save
+              <Button
+                variant="primary"
+                className="h-6 px-2.5 text-[12px]"
+                disabled={done[i] === 'saving'}
+                onClick={() => onSave(p, i)}
+              >
+                {done[i] === 'saving' ? 'Saving…' : 'Save'}
               </Button>
             </>
           )}

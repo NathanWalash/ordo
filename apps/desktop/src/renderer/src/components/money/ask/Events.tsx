@@ -75,16 +75,27 @@ export function EventsPanel({
 }
 
 function EventDetail({ event: e, onForget }: { event: EventCost; onForget: () => void }) {
+  const [confirming, setConfirming] = useState(false)
   return (
     <div className="flex flex-col gap-3 px-4 pt-1 pb-3 pl-9">
       <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2">
-        <Breakdown title="By type" rows={e.byCategory.map((c) => [c.category, c.amount])} />
-        <Breakdown title="By account" rows={e.byAccount.map((a) => [a.account, a.amount])} />
+        <Breakdown
+          title="By type"
+          rows={e.byCategory.map((c) => ({ id: c.category, label: c.category, amount: c.amount }))}
+        />
+        <Breakdown
+          title="By account"
+          rows={e.byAccount.map((a) => ({ id: a.account, label: a.account, amount: a.amount }))}
+        />
       </div>
       {e.paybacks.length > 0 && (
         <Breakdown
           title="Paid back"
-          rows={e.paybacks.map((p) => [`${p.person ?? p.name}, ${formatDate(p.date, true)}`, p.amount])}
+          rows={e.paybacks.map((p) => ({
+            id: p.id,
+            label: `${p.person ?? p.name}, ${formatDate(p.date, true)}`,
+            amount: p.amount,
+          }))}
         />
       )}
       <details className="text-[12px]">
@@ -103,22 +114,50 @@ function EventDetail({ event: e, onForget }: { event: EventCost; onForget: () =>
           ))}
         </ul>
       </details>
-      <div>
-        <Button className="h-6 px-2.5 text-[12px]" onClick={onForget} aria-label={`Forget ${e.name}`}>
-          Forget event
-        </Button>
-      </div>
+      {confirming ? (
+        <div
+          role="group"
+          aria-label={`Forget ${e.name}?`}
+          className="flex flex-wrap items-center gap-2 rounded-lg bg-hover px-3 py-2"
+        >
+          <span className="min-w-0 flex-1 text-[12px] text-ink-2">
+            Forget {e.name}? Paybacks and money owed for it are kept, linked to its payments instead.
+          </span>
+          <Button className="h-6 px-2.5 text-[12px]" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" className="h-6 px-2.5 text-[12px]" onClick={onForget}>
+            Forget
+          </Button>
+        </div>
+      ) : (
+        <div>
+          <Button
+            className="h-6 px-2.5 text-[12px]"
+            onClick={() => setConfirming(true)}
+            aria-label={`Forget ${e.name}`}
+          >
+            Forget event
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
 
-function Breakdown({ title, rows }: { title: string; rows: [string, number][] }) {
+function Breakdown({
+  title,
+  rows,
+}: {
+  title: string
+  rows: { id: string; label: string; amount: number }[]
+}) {
   return (
     <div>
       <h4 className="mb-1 text-[11px] font-semibold text-ink-3">{title}</h4>
       <ul className="flex flex-col gap-0.5 text-[12px]">
-        {rows.map(([label, amount]) => (
-          <li key={label} className="flex justify-between gap-2">
+        {rows.map(({ id, label, amount }) => (
+          <li key={id} className="flex justify-between gap-2">
             <span className="truncate text-ink-2">{label}</span>
             <span className="tabular-nums">{formatPence(amount)}</span>
           </li>

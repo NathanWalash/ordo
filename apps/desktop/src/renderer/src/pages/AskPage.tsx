@@ -22,6 +22,7 @@ export function AskPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
   const [version, setVersion] = useState(0)
   const [teaching, setTeaching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -36,6 +37,7 @@ export function AskPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
   const result = useCallback(
     (r: MemoryResult) => {
       setError(r.ok ? null : r.message)
+      setNotice(r.ok && r.message ? r.message : null)
       refresh()
       return r
     },
@@ -87,11 +89,15 @@ export function AskPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
         </Button>
       </div>
 
-      {error && (
+      {error ? (
         <div className="mt-3">
           <Notice tone="error">{error}</Notice>
         </div>
-      )}
+      ) : notice ? (
+        <div className="mt-3">
+          <Notice>{notice}</Notice>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid grid-cols-1 items-start gap-4 @4xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4">
