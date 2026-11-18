@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   forwardBody,
   forwardSubject,
+  ownAddresses,
   parseMailtoLink,
   referencesFor,
   replyBody,
@@ -37,6 +38,35 @@ describe('replyRecipients', () => {
     expect(replyRecipients(original, [me], true)).toEqual({
       to: [original.from, { address: 'pat@friend.example', name: 'Pat' }],
       cc: [{ address: 'jo@friend.example' }],
+    })
+  })
+
+  it('knows your iCloud aliases, and treats a message in Sent as yours', () => {
+    expect(ownAddresses('Me.Person@icloud.com')).toEqual([
+      'me.person@icloud.com',
+      'me.person@me.com',
+      'me.person@mac.com',
+    ])
+    expect(ownAddresses('me@custom.example')).toEqual(['me@custom.example'])
+    const toAlias = {
+      from: { address: 'sam@friend.example' },
+      to: [{ address: 'me.person@me.com' }, { address: 'pat@friend.example' }],
+      cc: [{ address: 'ME.PERSON@mac.com' }],
+      replyTo: [],
+    }
+    expect(replyRecipients(toAlias, ownAddresses('me.person@icloud.com'), true)).toEqual({
+      to: [{ address: 'sam@friend.example' }, { address: 'pat@friend.example' }],
+      cc: [],
+    })
+    // Sent from an address Ordo doesn't know is yours, but it's in Sent.
+    const sent = {
+      ...original,
+      from: { address: 'old-alias@elsewhere.example' },
+      to: [{ address: 'pat@friend.example' }],
+    }
+    expect(replyRecipients(sent, [me], false, { inSent: true })).toEqual({
+      to: [{ address: 'pat@friend.example' }],
+      cc: [],
     })
   })
 
@@ -80,6 +110,12 @@ describe('parseMailtoLink', () => {
       cc: 'c@x.example',
       subject: 'Hi there',
       body: 'Line\nTwo',
+    })
+  })
+
+  it('keeps only the bare address, so a link can’t dress an address up with a name', () => {
+    expect(parseMailtoLink('mailto:Your%20Bank%20%3Cphish@evil.example%3E')).toMatchObject({
+      to: 'phish@evil.example',
     })
   })
 

@@ -80,5 +80,21 @@ export function formatAddress(a: Address): string {
 
 export const formatAddressList = (list: readonly Address[]) => list.map(formatAddress).join(', ')
 
-/** A name to show for an address: the display name, or the address itself. */
-export const displayName = (a: Address | null | undefined) => a?.name?.trim() || a?.address || ''
+/**
+ * A name to show for an address: the display name, or the address itself. A name that is itself
+ * an email address, but not this one (`"boss@company.example" <attacker@evil.example>`), is a
+ * disguise: the real address is shown instead.
+ */
+export function displayName(a: Address | null | undefined): string {
+  const name = a?.name?.trim()
+  if (!a) return ''
+  if (!name) return a.address
+  if (name.includes('@') && name.toLowerCase() !== a.address.toLowerCase()) return a.address
+  return name
+}
+
+/** An address with its name, always showing the real address: `Name <a@b.example>`. */
+export function personLabel(a: Address): string {
+  const name = displayName(a)
+  return name && name.toLowerCase() !== a.address.toLowerCase() ? `${name} <${a.address}>` : a.address
+}

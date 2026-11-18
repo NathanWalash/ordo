@@ -25,6 +25,18 @@ export const forwardSubject = (subject: string) =>
 
 type Original = Pick<MessageContent, 'from' | 'to' | 'cc' | 'replyTo'>
 
+const ICLOUD = /^([^@]+)@(icloud|me|mac)\.com$/i
+
+/**
+ * Every address the account receives mail at, lower-cased. An iCloud address has the same name
+ * at @icloud.com, @me.com and @mac.com.
+ */
+export function ownAddresses(email: string): string[] {
+  const e = email.trim().toLowerCase()
+  const m = ICLOUD.exec(e)
+  return m ? ['icloud', 'me', 'mac'].map((d) => `${m[1]}@${d}.com`) : [e]
+}
+
 /**
  * Who a reply goes to. Reply: the Reply-To address, or the sender. Reply all: also everyone else
  * the message went to, never yourself. Replying to your own message (in Sent) goes to its recipients.
@@ -33,6 +45,7 @@ export function replyRecipients(
   m: Original,
   own: readonly string[],
   all: boolean,
+  opts: { inSent?: boolean } = {},
 ): { to: Address[]; cc: Address[] } {
   const mine = new Set(own.map((a) => a.toLowerCase()))
   const isMine = (a: Address) => mine.has(a.address.toLowerCase())
@@ -45,7 +58,8 @@ export function replyRecipients(
       return true
     })
 
-  const fromMe = m.from ? isMine(m.from) : false
+  // Anything in Sent is yours, whichever of your addresses it went from.
+  const fromMe = opts.inSent || (m.from ? isMine(m.from) : false)
   const base = fromMe ? m.to : m.replyTo.length ? m.replyTo : m.from ? [m.from] : []
   const to = take(base)
   if (!all) return { to: to.length || fromMe ? to : take(m.to), cc: [] }
@@ -141,8 +155,9 @@ export function parseMailtoLink(url: string): MailtoDraft | null {
   if (toList.addresses.length + ccList.addresses.length > MAILTO_LINK_RECIPIENTS) return null
   if (!toList.addresses.length && !ccList.addresses.length) return null
   return {
-    to: formatAddressList(toList.addresses),
-    cc: formatAddressList(ccList.addresses),
+    // RFC 6068 allows bare addresses only: a name in a link could disguise where mail goes.
+    to: toList.addresses.map((a) => a.address).join(', '),
+    cc: ccList.addresses.map((a) => a.address).join(', '),
     // eslint-disable-next-line no-control-regex -- removing control characters is the point
     subject: subject.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, COMPOSE_LIMITS.subject),
     body: body.replace(/\r\n?/g, '\n').slice(0, MAILTO_LINK_BODY),

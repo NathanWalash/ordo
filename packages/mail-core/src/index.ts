@@ -62,12 +62,14 @@ export {
   isEmailAddress,
   parseAddress,
   parseAddressList,
+  personLabel,
   type ParsedAddressList,
 } from './address'
 export {
   COMPOSE_LIMITS,
   forwardBody,
   forwardSubject,
+  ownAddresses,
   parseMailtoLink,
   referencesFor,
   replyBody,

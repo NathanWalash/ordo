@@ -6,6 +6,7 @@ import {
   isEmailAddress,
   parseAddress,
   parseAddressList,
+  personLabel,
 } from './address'
 
 describe('parseAddressList', () => {
@@ -61,5 +62,18 @@ describe('formatAddress', () => {
   it('shows a name or the address', () => {
     expect(displayName({ address: 'a@x.example', name: ' ' })).toBe('a@x.example')
     expect(displayName(null)).toBe('')
+  })
+
+  it('never lets a name that looks like an address stand in for a different one', () => {
+    expect(displayName({ address: 'attacker@evil.example', name: 'boss@company.example' })).toBe(
+      'attacker@evil.example',
+    )
+    expect(displayName({ address: 'boss@company.example', name: 'BOSS@company.example' })).toBe(
+      'BOSS@company.example',
+    )
+    expect(personLabel({ address: 'attacker@evil.example', name: 'Boss' })).toBe(
+      'Boss <attacker@evil.example>',
+    )
+    expect(personLabel({ address: 'a@x.example' })).toBe('a@x.example')
   })
 })
