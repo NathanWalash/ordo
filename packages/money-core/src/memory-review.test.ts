@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { ModelProvider } from '@ordo/ai'
-import { askMoney, fillAmounts } from './ask'
+import { askMoney, fillAmounts, writtenAmount } from './ask'
 import { compareMonthToDate, spendBetween } from './compare'
 import { eventCost } from './events'
 import { GABE_FOR_PATRICK, IGNORE_PARTY, TODAY, TRANSACTIONS, fact } from './fixtures/money-memory'
@@ -404,5 +404,52 @@ describe('security follow-up: names, labels and glue', () => {
     // "one" is plain English; "one pound" is still refused.
     expect((await ask('That’s the one you asked about.')).answer).toBe('That’s the one you asked about.')
     await expect(ask('Just one pound.')).rejects.toMatchObject({ code: 'bad-response' })
+  })
+})
+
+describe('security follow-up 2: decided by value, and an allowlist after numbers', () => {
+  it('a date key holding a name is a name: the combined check sees it', () => {
+    // "One" passes alone and "Pounds Ltd" passes alone, but together they spell an amount. Before,
+    // `from` was blanked as if it were a date, so "One Pounds Ltd" got through.
+    const r = [{ items: [{ name: 'One' }], from: 'Pounds Ltd' }]
+    expect(fillAmounts('{{r1.items.0.name}} {{r1.from}}', r)).toHaveProperty('error')
+    // A real date under `from` is still a date.
+    expect(fillAmounts('Since {{r1.from}}.', [{ from: '2026-08-28' }])).toEqual({ text: 'Since 28 Aug.' })
+  })
+
+  const results = [{ netPence: 500, total: 3, date: '2026-11-02' }]
+  const SCALE = ['trillion', 'm', 'mn', 'bn', 'b', 'mil', 'mill', 'lakh', 'crore', 'score', 'gross']
+
+  for (const word of SCALE) {
+    it(`refuses "${word}" after an amount or a count`, () => {
+      expect(fillAmounts(`It was {{r1.netPence}} ${word}.`, results)).toHaveProperty('error')
+      expect(fillAmounts(`There were {{r1.total}} ${word} of them.`, results)).toHaveProperty('error')
+    })
+  }
+
+  for (const word of ['trillion', 'mn', 'bn', 'mil', 'mill', 'lakh', 'crore', 'score', 'gross'])
+    it(`refuses "${word}" on its own`, () => {
+      expect(writtenAmount(`Roughly a ${word}, I think.`)).not.toBeNull()
+    })
+
+  it('anything after a number that isn’t on the small safe list is refused', () => {
+    for (const text of [
+      'It was {{r1.netPence}} squillion.',
+      'It was {{r1.netPence}} times over.',
+      'It was {{r1.netPence}}—tens of them.',
+      'It was {{r1.total}}x.',
+    ])
+      expect(fillAmounts(text, results)).toHaveProperty('error')
+  })
+
+  it('ordinary sentences after numbers still work', () => {
+    for (const [text, out] of [
+      ['You spent {{r1.netPence}} on {{r1.date}}.', 'You spent £5.00 on 2 Nov.'],
+      ['{{r1.netPence}} back, {{r1.total}} payments in all', '£5.00 back, 3 payments in all'],
+      ['That’s {{r1.netPence}} each, {{r1.netPence}} per month', 'That’s £5.00 each, £5.00 per month'],
+      ['Net {{r1.netPence}}; out {{r1.netPence}} — from {{r1.date}}!', 'Net £5.00; out £5.00 — from 2 Nov!'],
+      ['({{r1.total}}) and {{r1.netPence}} net', '(3) and £5.00 net'],
+    ] as const)
+      expect(fillAmounts(text, results)).toEqual({ text: out })
   })
 })

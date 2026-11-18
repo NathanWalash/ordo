@@ -103,11 +103,11 @@ describe('fillAmounts', () => {
   it('fills pence as pounds, dates as short dates, counts and names', () => {
     expect(
       fillAmounts(
-        'Net {{r1.netPence}} from {{r1.from}}; {{r1.items.0.name}} {{r1.items.0.amountPence}}, {{ r1.total }} rows',
+        'Net {{r1.netPence}} from {{r1.from}}; {{r1.items.0.name}} {{r1.items.0.amountPence}}, {{ r1.total }} in all',
         results,
       ),
     ).toEqual({
-      text: 'Net £418.99 from 28 Aug; Tesco −£25.00, 3 rows',
+      text: 'Net £418.99 from 28 Aug; Tesco −£25.00, 3 in all',
     })
   })
   it('refuses placeholders that point nowhere', () => {
