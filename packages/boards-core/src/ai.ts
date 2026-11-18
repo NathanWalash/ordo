@@ -155,7 +155,14 @@ export function buildSuggestPrompt(input: SuggestInput, picked: Picked): string 
     '</labels>',
     '<candidates>',
     ...[...picked.candidates].map(([id, c]) =>
-      dataLine({ id, kind: c.kind, title: c.title, ...(c.detail && { detail: c.detail }), date: c.date }),
+      // A bill's amount isn't needed to plan a card, so it stays here.
+      dataLine({
+        id,
+        kind: c.kind,
+        title: c.title,
+        ...(c.detail && c.kind !== 'bill' && { detail: c.detail }),
+        date: c.date,
+      }),
     ),
     '</candidates>',
   ].join('\n')

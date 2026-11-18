@@ -62,7 +62,8 @@ export interface CardDetail {
 }
 
 /** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
-export type BoardsFailure = 'not-found' | 'invalid' | 'limit' | 'locked'
+/** `failed`: something unexpected, such as the database staying busy. */
+export type BoardsFailure = 'not-found' | 'invalid' | 'limit' | 'locked' | 'failed'
 export type BoardsResult<T = null> =
   { ok: true; value: T } | { ok: false; error: BoardsFailure; message: string }
 

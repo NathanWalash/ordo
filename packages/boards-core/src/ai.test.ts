@@ -155,6 +155,9 @@ describe('buildSuggestPrompt', () => {
     // Internal ids never go to the model.
     expect(prompt).not.toContain('L-urgent')
     expect(prompt).not.toContain('bill-1')
+    // Bills go without their amount.
+    expect(prompt).toContain('{"id":"b1","kind":"bill","title":"Dental plan","date":"2026-12-01"}')
+    expect(prompt).not.toContain('£15')
   })
 })
 

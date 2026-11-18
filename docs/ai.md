@@ -103,7 +103,7 @@ this is sent, as JSON lines in `<card>`, `<labels>` and `<candidates>` blocks:
 {"title":"Fix the gate","notes":"Latch is loose. - check hinges","due":null,"checklist":["Buy hinges"],"labels":["Blocked"]}
 {"id":"l1","name":"Blocked"}
 {"id":"e1","kind":"event","title":"Locksmith for the gate","detail":"Family · 09:00","date":"2026-11-21"}
-{"id":"b1","kind":"bill","title":"Home insurance","detail":"£24 monthly","date":"2026-12-01"}
+{"id":"b1","kind":"bill","title":"Home insurance","date":"2026-12-01"}
 {"id":"m1","kind":"email","title":"Your locksmith booking","detail":"Lock & Key Ltd","date":"2026-11-15"}
 {"id":"c1","kind":"card","title":"Paint the shed","detail":"Home · Up next","date":null}
 ```
@@ -112,7 +112,7 @@ this is sent, as JSON lines in `<card>`, `<labels>` and `<candidates>` blocks:
   label names.
 - The board's labels, by name.
 - At most 12 upcoming events and 8 bills in the next 60 days, related ones first, then the soonest:
-  title, calendar or amount, and day.
+  an event's title, calendar, time and day; a bill's name and due day (never its amount).
 - At most 8 emails from the last 30 days and 6 other cards, **only** ones that share a distinctive
   word with the card: subject, sender name and day; card title, board and column.
 

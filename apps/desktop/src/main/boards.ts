@@ -95,7 +95,9 @@ async function change<S extends z.ZodType, T>(
     return { ok: true, value: result }
   } catch (err) {
     if (err instanceof BoardsError) return { ok: false, error: err.code, message: err.message }
-    throw err
+    // Unexpected (the database stayed busy, say): the detail goes to the log, never to the window.
+    console.error(err)
+    return { ok: false, error: 'failed', message: 'Ordo couldn’t save that. Try again.' }
   }
 }
 
