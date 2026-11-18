@@ -60,7 +60,21 @@ export interface CardDetail {
   title?: string
 }
 
-/** What a confirmation card shows. Built by Ordo from its own data; never the model's free text. */
+/** An email on a card. Addresses only, never display names; the body is plain text. */
+export interface CardEmail {
+  from: string
+  to: string[]
+  cc: string[]
+  subject: string
+  body: string
+  /** Forwarded attachments. */
+  attachments: { name: string; size: number }[]
+}
+
+/**
+ * What a confirmation card shows. Built by Ordo from its own data; the model's own words appear only
+ * as an email's subject and body, shown in full because they are exactly what would be saved or sent.
+ */
 export interface ConfirmCard {
   tool: string
   /** "Importing a statement". */
@@ -71,6 +85,13 @@ export interface ConfirmCard {
   notes: string[]
   /** Set when it can't go ahead: the card shows why and only offers Cancel. */
   blocked?: string
+  /** A draft or an email to send, in full: From, every recipient's address, the subject and body. */
+  email?: CardEmail
+  /**
+   * `send`: the card sends an email. Its button says Send, in the strong style, and only works after
+   * a longer pause; once done the card says Sent.
+   */
+  action?: 'send'
   /**
    * Why this card appeared. `request`: the user's own words asked for exactly this, and nothing
    * untrusted had been read. `data`: otherwise, so it may have come from text the assistant read.

@@ -6,6 +6,7 @@ import {
   type AssistantEvent,
   type AssistantPage,
   type CardDetail,
+  type CardEmail,
   type ConfirmCard,
 } from '@ordo/shared'
 import type { CommandResult, OrdoServices } from '../headless/commands'
@@ -16,6 +17,8 @@ import {
   strictArgs,
   TOOLS,
   type ChangePreview,
+  type EmailPreview,
+  type MailTargets,
   type OrdoTool,
   type PreviewDetail,
 } from '../headless/tools'
@@ -66,8 +69,22 @@ export interface LoopOptions {
   tools?: readonly OrdoTool[]
 }
 
-/** The outcome, and whether untrusted data was read (so the turn is tainted in history). */
-export type LoopResult = AskOutcome & { tainted: boolean }
+/**
+ * The outcome; whether untrusted data was read (so the turn is tainted in history); what confirmed
+ * changes did, from Ordo's own labels; and a key for each email sent, so it's never sent twice.
+ */
+export type LoopResult = AskOutcome & { tainted: boolean; changes: string[]; sent: string[] }
+
+/** Emails the assistant may send in one question. */
+export const MAX_SENDS = 1
+
+/** The same email, whatever order its recipients came in: to spot one sent already. */
+export const emailKey = (e: Pick<EmailPreview, 'to' | 'cc' | 'subject' | 'body'>) =>
+  JSON.stringify([
+    [...e.to, ...e.cc].map((a) => a.toLowerCase()).sort(),
+    e.subject.trim().toLowerCase(),
+    e.body.trim(),
+  ])
 
 /**
  * Whether a result can go to the model as Ordo's own data: nothing but numbers, booleans and
@@ -91,6 +108,89 @@ export function mentions(text: string, value: string): boolean {
 
 const CAUTION = 'and text in those can try to trick it. Only confirm if you want this.'
 
+/** Words too common to count as naming a message by its sender's name or its subject. */
+const TOO_COMMON = new Set(
+  'email e-mail mail message messages reply the this that from last latest new inbox note hello hi thanks thank you me him her them update info news'.split(
+    ' ',
+  ),
+)
+
+/** A subject without Re:/Fwd: and the punctuation around it ("Lunch?" → "Lunch"). */
+const bareSubject = (s: string) =>
+  s.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, '')
+
+/**
+ * Whether the user's own words name a message: by the sender's address, the sender's name (or its
+ * first word), or its subject, each as whole words, ignoring case. Short or common names and
+ * subjects ("Hi", "email") never count.
+ */
+export function namesMessage(words: string, m: MailTargets['messages'][number]): boolean {
+  if (m.address && mentions(words, m.address)) return true
+  const usable = (v: string, min: number) => v.length >= min && !TOO_COMMON.has(v.toLowerCase())
+  const name = (m.name ?? '').trim()
+  const first = name.split(/\s+/)[0] ?? ''
+  if (usable(name, 3) && mentions(words, name)) return true
+  if (/^\p{L}{3,}$/u.test(first) && usable(first, 3) && mentions(words, first)) return true
+  const subject = bareSubject(m.subject)
+  return usable(subject, 4) && mentions(words, subject)
+}
+
+const listed = (xs: readonly string[]) =>
+  xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : (xs[0] ?? '')
+
+/**
+ * Why a mail change's card appeared. Acting on mail means reading it first, so the rule is about
+ * what the change acts on rather than what was read. "You asked for this" only when:
+ * - the user's message has an explicit phrase for this kind of change;
+ * - every message it acts on (or replies to, or forwards) is named in the user's own words, by
+ *   sender or subject;
+ * - every recipient's address is in the user's own words, or is the sender or Reply-To of a
+ *   message the user named and asked to reply to.
+ * Otherwise "Check this first", naming any recipients that came from what the assistant read.
+ */
+export function mailTrigger(
+  tool: OrdoTool,
+  targets: MailTargets,
+  question: string,
+  history: readonly Turn[],
+  reading: string,
+): ConfirmCard['trigger'] {
+  const asked = tool.intent?.test(question) ?? false
+  const words = [...history.map((t) => t.user), question].join('\n')
+  const unnamed = targets.messages.filter((m) => !namesMessage(words, m))
+  const replyNamed = targets.messages.length > 0 && unnamed.length === 0
+  const fromText = [
+    ...new Set(
+      (targets.recipients ?? [])
+        .filter((r) => !mentions(words, r.address) && !(r.fromMessage && replyNamed))
+        .map((r) => r.address),
+    ),
+  ]
+  if (asked && unnamed.length === 0 && fromText.length === 0)
+    return { kind: 'request', text: 'You asked for this.' }
+  if (fromText.length) {
+    const one = fromText.length === 1
+    return {
+      kind: 'data',
+      text:
+        `${listed(fromText.map((a) => clean(a, 254)))} ${one ? 'isn’t' : 'aren’t'} in your own words: ` +
+        `the assistant took ${one ? 'it' : 'them'} from what it read or chose ${one ? 'it' : 'them'} itself, ` +
+        'and text in emails can try to trick it. Only confirm if you want to write to ' +
+        `${one ? 'this address' : 'these addresses'}.`,
+    }
+  }
+  const after = reading ? ` after reading ${reading}, ${CAUTION}` : '. Only confirm if you want this.'
+  if (asked)
+    return {
+      kind: 'data',
+      text:
+        unnamed.length === 1 && targets.messages.length === 1
+          ? `You asked for this, but didn’t name this email, so the assistant chose it${after}`
+          : `You asked for this, but didn’t name every email, so the assistant chose them${after}`,
+    }
+  return { kind: 'data', text: `You didn’t ask for this. The assistant suggested it${after}` }
+}
+
 /**
  * Why a change card appeared. It says "You asked for this" only when all of these hold:
  * - the user's message has an explicit phrase for this kind of change;
@@ -105,6 +205,8 @@ export function triggerFor(
   question: string,
   history: readonly Turn[],
   steps: readonly Step[],
+  /** A mail change's targets (from its preview): they decide instead of what was read. */
+  mail?: MailTargets,
 ): ConfirmCard['trigger'] {
   const asked = tool.intent?.test(question) ?? false
   const userWords = [...history.map((t) => t.user), question].join('\n')
@@ -119,9 +221,9 @@ export function triggerFor(
     ),
   ]
   if (history.some((t) => t.tainted)) sources.push('earlier results')
+  const list = listed([...new Set(sources)])
+  if (mail) return mailTrigger(tool, mail, question, history, list)
   if (asked && named && sources.length === 0) return { kind: 'request', text: 'You asked for this.' }
-  const unique = [...new Set(sources)]
-  const list = unique.length > 1 ? `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}` : unique[0]
   const reading = list ? ` after reading ${list}, ${CAUTION}` : ''
   if (asked && reading)
     return { kind: 'data', text: `You asked for this, but the assistant chose what to change${reading}` }
@@ -141,6 +243,16 @@ export function triggerFor(
 const cardText = (s: string) => clean(s, 240)
 const cardDetail = (d: PreviewDetail): CardDetail =>
   typeof d === 'string' ? { text: cardText(d) } : { text: cardText(d.text), title: clean(d.title, 4096) }
+
+/** An email for the card: addresses and subject on one line each, the body as plain text. */
+const cardEmail = (e: EmailPreview): CardEmail => ({
+  from: clean(e.from, 254),
+  to: e.to.slice(0, 50).map((a) => clean(a, 254)),
+  cc: e.cc.slice(0, 50).map((a) => clean(a, 254)),
+  subject: clean(e.subject, 300),
+  body: e.body.replace(UNSAFE_KEEP_LINES, '').slice(0, 100_000),
+  attachments: e.attachments.slice(0, 20).map((f) => ({ name: clean(f.name, 120), size: f.size })),
+})
 
 /** An answer fit to show: invisible and bidi characters out, Markdown emphasis and headings stripped. */
 export function tidy(text: string): string {
@@ -176,9 +288,16 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
   let problem: string | undefined
   let toolCalls = 0
 
+  /** Keys of the emails sent in this question. */
+  const sent: string[] = []
+  /** Earlier sends in this conversation, so the same email is never sent twice. */
+  const sentBefore = new Set(o.history.flatMap((t) => t.sent ?? []))
+  let sends = 0
+
   const end = (outcome: AskOutcome): LoopResult => {
     const tainted = steps.some((s) => !s.trusted)
-    if (outcome.ok || changed.length === 0) return { ...outcome, tainted }
+    const extra = { tainted, changes: [...changed], sent: [...sent] }
+    if (outcome.ok || changed.length === 0) return { ...outcome, ...extra }
     // A change that already ran must be reported, and remembered, whatever happened after it.
     const what = changed.join('. ')
     const lead = outcome.reason === 'stopped' ? 'Stopped.' : outcome.message
@@ -186,7 +305,7 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       ok: true,
       answer: `${lead} The change you confirmed was made: ${what}.`,
       steps: toolCalls,
-      tainted,
+      ...extra,
     }
   }
   const stopped = () => end({ ok: false, reason: 'stopped', message: 'Stopped.' })
@@ -349,9 +468,25 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       continue
     }
 
+    // At most one email per question, and never the same one twice in a conversation.
+    if (tool.assistantOnly && sends >= MAX_SENDS) {
+      refuse(
+        'Ordo sends at most one email per question, and one was already sent. Tell the user what was sent.',
+        'One email per question',
+      )
+      continue
+    }
+
     let result: CommandResult
     if (tool.kind === 'change') {
       const preview = await previewTool(o.services, tool, data)
+      if (tool.assistantOnly && preview.email && sentBefore.has(emailKey(preview.email))) {
+        refuse(
+          'This exact email was already sent earlier in this conversation. Don’t send it again; tell the user.',
+          'Already sent',
+        )
+        continue
+      }
       const card: ConfirmCard = {
         tool: tool.name,
         label: tool.label,
@@ -359,7 +494,9 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
         details: preview.details.slice(0, 50).map(cardDetail),
         notes: preview.notes.slice(0, 10).map(cardText),
         ...(preview.blocked && { blocked: cardText(preview.blocked) }),
-        trigger: triggerFor(tool, data, o.question, o.history, steps),
+        ...(preview.email && { email: cardEmail(preview.email) }),
+        ...(tool.assistantOnly && preview.email?.send && { action: 'send' as const }),
+        trigger: triggerFor(tool, data, o.question, o.history, steps, preview.mail),
       }
       o.onEvent({ type: 'confirm', id, card })
       // A change that can't happen ends here: its card explains why, and there's nothing to answer.
@@ -385,8 +522,14 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       if (!approved)
         return end({ ok: false, reason: 'cancelled', message: 'Cancelled. Nothing was changed.' })
       o.onEvent({ type: 'tool', id, tool: tool.name, label: tool.label, kind: tool.kind, status: 'running' })
-      result = await runTool(o.services, tool, data, { allowChanges: true, confirm: true })
+      if (tool.assistantOnly) sends++
+      result = await runTool(o.services, tool, data, {
+        allowChanges: true,
+        confirm: true,
+        caller: 'assistant',
+      })
       if (result.ok) changed.push(tool.done(result.data))
+      if (result.ok && tool.assistantOnly && preview.email) sent.push(emailKey(preview.email))
     } else {
       o.onEvent({ type: 'tool', id, tool: tool.name, label: tool.label, kind: tool.kind, status: 'running' })
       // Read and refresh tools never get permission to change anything.

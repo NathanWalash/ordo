@@ -18,10 +18,12 @@ import {
   Inbox,
   Loader2,
   MessageSquareText,
+  Paperclip,
   Receipt,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  Send,
   Sparkles,
   SquareKanban,
   SquarePen,
@@ -29,7 +31,7 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import type { AssistantInfo } from '@ordo/shared'
+import type { AssistantInfo, CardEmail } from '@ordo/shared'
 import type { Route } from '../../routes'
 import { Button } from '../Button'
 import {
@@ -70,6 +72,8 @@ const SUGGESTION_ICONS: Record<SuggestionIcon, ReactNode> = {
 
 /** Clicks on a card this soon after it appears are ignored, so a double press can't confirm it. */
 const CARD_ARM_MS = 500
+/** A card that sends an email waits longer: there's no unsending it. */
+const SEND_ARM_MS = 1500
 
 /**
  * The assistant: a panel on the right of the content, over or beside whatever page is open. Opened
@@ -190,6 +194,15 @@ export function AssistantPanel({ assistant, route, shortcut, docked, onClose, on
           route={route}
           info={info}
           onPick={send}
+          onFill={(text) => {
+            setDraft(text)
+            requestAnimationFrame(() => {
+              const el = input.current
+              if (!el) return
+              el.focus()
+              el.setSelectionRange(text.length, text.length)
+            })
+          }}
           disabled={busy}
           onStopSharing={() => void assistant.setCloudConsent(false)}
         />
@@ -390,12 +403,15 @@ function Welcome({
   route,
   info,
   onPick,
+  onFill,
   disabled,
   onStopSharing,
 }: {
   route: Route
   info: AssistantInfo
   onPick: (q: string) => void
+  /** Put an unfinished prompt in the question box. */
+  onFill: (q: string) => void
   disabled: boolean
   onStopSharing: () => void
 }) {
@@ -414,7 +430,7 @@ function Welcome({
             <button
               type="button"
               disabled={disabled}
-              onClick={() => onPick(s.text)}
+              onClick={() => (s.fill ? onFill(s.text.replace(/\s*…$/, ' ')) : onPick(s.text))}
               className="group flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-[13px] text-ink shadow-[0_0_0_1px_var(--sep)] enabled:hover:bg-hover disabled:opacity-50"
             >
               <span className="text-ink-3 group-hover:text-accent" aria-hidden>
@@ -592,6 +608,7 @@ function ConfirmationCard({
   const group = useRef<HTMLElement>(null)
   const blocked = state === 'blocked'
   const fromData = !blocked && card.trigger.kind === 'data'
+  const sends = card.action === 'send'
   const [armed, setArmed] = useState(false)
 
   // Take focus (the card itself, never a button) and ignore clicks for a moment, so a key or click
@@ -599,7 +616,7 @@ function ConfirmationCard({
   useEffect(() => {
     if (state !== 'open') return
     group.current?.focus()
-    const t = setTimeout(() => setArmed(true), CARD_ARM_MS)
+    const t = setTimeout(() => setArmed(true), sends ? SEND_ARM_MS : CARD_ARM_MS)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -655,6 +672,8 @@ function ConfirmationCard({
         </p>
       )}
 
+      {card.email && <EmailPreview email={card.email} />}
+
       {card.details.length > 0 && (
         <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-lg bg-hover px-2.5 py-2 text-[11px] leading-snug text-ink select-text">
           {card.details.map((d, i) => (
@@ -693,10 +712,41 @@ function ConfirmationCard({
           <Button disabled={!armed} onClick={() => answer(false)}>
             Cancel
           </Button>
-          <Button variant={fromData ? 'secondary' : 'primary'} disabled={!armed} onClick={() => answer(true)}>
-            {fromData ? 'Confirm anyway' : 'Confirm'}
-          </Button>
+          {sends ? (
+            <Button
+              variant={fromData ? 'destructive' : 'primary'}
+              icon={<Send size={13} aria-hidden />}
+              disabled={!armed}
+              onClick={() => answer(true)}
+            >
+              {fromData ? 'Send anyway' : 'Send'}
+            </Button>
+          ) : (
+            <Button
+              variant={fromData ? 'secondary' : 'primary'}
+              disabled={!armed}
+              onClick={() => answer(true)}
+            >
+              {fromData ? 'Confirm anyway' : 'Confirm'}
+            </Button>
+          )}
         </div>
+      ) : state === 'approved' && sends ? (
+        <p role="status" className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
+          {entry.result === 'done' ? (
+            <>
+              <CircleCheck size={14} className="text-success" aria-hidden /> Sent
+            </>
+          ) : entry.result === 'failed' ? (
+            <>
+              <CircleAlert size={14} className="text-danger" aria-hidden /> Not sent
+            </>
+          ) : (
+            <>
+              <Loader2 size={14} className="animate-spin text-ink-3" aria-hidden /> Sending…
+            </>
+          )}
+        </p>
       ) : state === 'approved' ? (
         <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
           <CircleCheck size={14} className="text-success" aria-hidden /> Confirmed
@@ -707,5 +757,45 @@ function ConfirmationCard({
         </p>
       ) : null}
     </section>
+  )
+}
+
+const kb = (n: number) =>
+  n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** An email on a card, in full: who it's from and to (addresses, never names), the subject and the body. */
+function EmailPreview({ email }: { email: CardEmail }) {
+  const row = (label: string, value: ReactNode) => (
+    <div className="flex gap-2">
+      <dt className="w-12 shrink-0 text-ink-2">{label}</dt>
+      <dd className="min-w-0 flex-1 [overflow-wrap:anywhere]">{value}</dd>
+    </div>
+  )
+  return (
+    <div className="flex flex-col overflow-hidden rounded-lg bg-hover text-[11px] leading-snug text-ink">
+      <dl aria-label="Email" className="flex flex-col gap-0.5 border-b border-sep px-2.5 py-2 select-text">
+        {row('From', email.from)}
+        {row('To', email.to.join(', ') || 'No one yet')}
+        {email.cc.length > 0 && row('Cc', email.cc.join(', '))}
+        {row('Subject', <span className="font-medium">{email.subject || '(no subject)'}</span>)}
+      </dl>
+      <pre
+        tabIndex={0}
+        aria-label="Message"
+        className="max-h-56 overflow-y-auto px-2.5 py-2 font-sans whitespace-pre-wrap select-text [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        {email.body || ' '}
+      </pre>
+      {email.attachments.length > 0 && (
+        <ul aria-label="Attachments" className="flex flex-col gap-0.5 border-t border-sep px-2.5 py-2">
+          {email.attachments.map((a, i) => (
+            <li key={i} className="flex items-center gap-1.5 [overflow-wrap:anywhere]">
+              <Paperclip size={11} className="shrink-0 text-ink-3" aria-hidden />
+              {a.name} <span className="text-ink-2">({kb(a.size)})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

@@ -38,7 +38,12 @@ vi.mock('../headless/services', async () => {
       senders: [],
     } as never,
   ]
-  return { mainServices: () => services }
+  // Like the real one: sending exists only when the assistant asks for it.
+  const send = vi.fn(async () => ({ ok: true as const }))
+  return {
+    mainServices: (options: { send?: boolean } = {}) =>
+      options.send ? { ...services, mail: { ...services.mail, send } } : services,
+  }
 })
 
 const { ask, clear, confirm, currentHistory, info, MAX_HISTORY, setCloudConsent, stop } =
@@ -146,6 +151,27 @@ describe('asking', () => {
     )
     await ask({ text: 'who emails me?', page: 'home' }, asWc(window()))
     expect(currentHistory().at(-1)).toMatchObject({ user: 'who emails me?', tainted: true })
+  })
+
+  it('remembers a confirmed send, so later questions are told and it isn’t sent twice', async () => {
+    let n = 0
+    model(() =>
+      n++ === 0
+        ? {
+            type: 'tool',
+            tool: 'ordo_mail_send',
+            args: { mode: 'new', to: ['pat@friend.example'], subject: 'Hi', body: 'Hello' },
+          }
+        : { type: 'answer', text: 'Sent.' },
+    )
+    const w = window()
+    const run = ask({ text: 'Send an email to pat@friend.example saying hello', page: 'mail/inbox' }, asWc(w))
+    const id = await cardOn(w)
+    const card = w.events.find((e) => e.type === 'confirm') as Extract<AssistantEvent, { type: 'confirm' }>
+    expect(card.card).toMatchObject({ action: 'send', email: { to: ['pat@friend.example'] } })
+    confirm({ id, approve: true }, asWc(w))
+    expect(await run).toMatchObject({ ok: true, answer: 'Sent.' })
+    expect(currentHistory().at(-1)).toMatchObject({ changes: ['Sent an email'], sent: [expect.any(String)] })
   })
 
   it('surfaces a model that can’t be reached instead of hiding it', async () => {
@@ -257,7 +283,7 @@ describe('cloud consent for the assistant', () => {
       cloud: {
         vendor: 'Anthropic',
         consent: false,
-        sends: expect.stringContaining('transactions with amounts and dates'),
+        sends: expect.stringMatching(/transactions with amounts and dates.*send email you confirm/),
       },
     })
     expect(await ask({ text: 'hi', page: 'home' }, asWc(window()))).toEqual({

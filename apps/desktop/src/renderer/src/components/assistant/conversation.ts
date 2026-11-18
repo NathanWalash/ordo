@@ -17,6 +17,8 @@ export type TraceEntry =
       card: ConfirmCard
       /** `blocked`: the change can't happen; the card only explains why. */
       state: 'open' | 'approved' | 'cancelled' | 'blocked'
+      /** After approval: whether the change it confirmed went through ("Sent", or not). */
+      result?: 'done' | 'failed'
     }
 
 export interface UserItem {
@@ -68,7 +70,16 @@ export function applyEvent(items: Item[], e: AssistantEvent): Item[] {
         ...(e.summary !== undefined && { summary: e.summary }),
       }
       const at = reply.trace.findIndex((t) => t.kind === 'tool' && t.id === e.id)
-      const trace = at === -1 ? [...reply.trace, entry] : reply.trace.map((t, i) => (i === at ? entry : t))
+      const withTool = at === -1 ? [...reply.trace, entry] : reply.trace.map((t, i) => (i === at ? entry : t))
+      // A confirmed change's card says how it went (a send card says Sent).
+      const trace =
+        e.status === 'running'
+          ? withTool
+          : withTool.map((t) =>
+              t.kind === 'card' && t.id === e.id && t.state === 'approved'
+                ? { ...t, result: e.status === 'done' ? ('done' as const) : ('failed' as const) }
+                : t,
+            )
       return replaceLast(items, { ...reply, trace, status: e.status === 'running' ? e.label : reply.status })
     }
     case 'confirm':

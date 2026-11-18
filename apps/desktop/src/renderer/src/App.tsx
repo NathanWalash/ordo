@@ -28,6 +28,12 @@ export function App() {
   const [assistantOpen, setAssistantOpen] = useState(false)
   /** Bumped when the assistant opens a page or finishes a change, so the page loads fresh data. */
   const [pageKey, setPageKey] = useState(0)
+  /** Mail reloads in place instead, so the open folder and message stay open. */
+  const [mailChanged, setMailChanged] = useState(0)
+  const routeNow = useRef(route)
+  useEffect(() => {
+    routeNow.current = route
+  }, [route])
   const [financeMonth, setFinanceMonth] = useState<string | undefined>(undefined)
   const returnFocus = useRef<HTMLElement | null>(null)
   /** The content's width: wide enough, and the assistant sits beside it instead of over it. */
@@ -69,7 +75,8 @@ export function App() {
         setPageKey((k) => k + 1)
         window.location.hash = `/${next}`
       },
-      onChanged: () => setPageKey((k) => k + 1),
+      onChanged: () =>
+        routeNow.current === 'mail/inbox' ? setMailChanged((n) => n + 1) : setPageKey((k) => k + 1),
     }),
     [],
   )
@@ -144,7 +151,12 @@ export function App() {
           >
             {route === 'home' && <HomePage onNavigate={setRoute} />}
             {route === 'mail/inbox' && (
-              <MailPage account={account} onConnect={() => setConnecting(true)} onTitle={setTitleOverride} />
+              <MailPage
+                account={account}
+                onConnect={() => setConnecting(true)}
+                onTitle={setTitleOverride}
+                changed={mailChanged}
+              />
             )}
             {route === 'mail/unclutter' && (
               <UnclutterPage

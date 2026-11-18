@@ -68,6 +68,24 @@ const mailboxPath = z
   // eslint-disable-next-line no-control-regex -- control characters are what's refused
   .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), '--mailbox is not a mailbox path')
 const mailbox = mailboxPath.default('INBOX')
+/** The most messages one mail change acts on. */
+export const MAIL_CHANGE_MAX = 20
+/** Message uids, as positional arguments: `mail move 41 42 --to archive`. */
+const uids = (command: string) =>
+  z
+    .array(
+      digits(
+        z
+          .number({ error: 'A uid is a whole number, from `mail list`' })
+          .int('A uid is a whole number, from `mail list`')
+          .positive('A uid is a whole number, from `mail list`')
+          .max(4_294_967_295, 'That uid is too big'),
+      ),
+      { error: `${command} needs at least one message uid (from \`mail list\`)` },
+    )
+    .min(1, `${command} needs at least one message uid (from \`mail list\`)`)
+    .max(MAIL_CHANGE_MAX, `At most ${MAIL_CHANGE_MAX} messages at a time`)
+    .refine((u) => new Set(u).size === u.length, 'The same uid is given twice')
 /** A day (`2026-11-20`, an all-day event) or a time (`2026-11-20T09:30`). */
 const when = (flag: string) =>
   z
@@ -182,6 +200,54 @@ const COMMANDS = {
         .int('The uid is a whole number')
         .positive('The uid is a whole number'),
       mailbox,
+    }),
+  },
+  'mail move': {
+    args: [],
+    rest: 'uids',
+    flags: z.object({
+      uids: uids('mail move'),
+      mailbox,
+      to: z
+        .string({ error: 'mail move needs --to archive, bin, junk, inbox or a folder from `mail mailboxes`' })
+        .trim()
+        .min(1, 'mail move needs --to archive, bin, junk, inbox or a folder from `mail mailboxes`')
+        .max(1000, '--to is too long')
+        // eslint-disable-next-line no-control-regex -- control characters are what's refused
+        .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), '--to is not a folder'),
+      confirm: z.boolean().default(false),
+    }),
+  },
+  'mail flag': {
+    args: [],
+    rest: 'uids',
+    flags: z.object({
+      uids: uids('mail flag'),
+      mailbox,
+      unflag: z.boolean().default(false),
+      confirm: z.boolean().default(false),
+    }),
+  },
+  'mail mark': {
+    args: [],
+    rest: 'uids',
+    flags: z
+      .object({
+        uids: uids('mail mark'),
+        mailbox,
+        read: z.boolean().default(false),
+        unread: z.boolean().default(false),
+        confirm: z.boolean().default(false),
+      })
+      .refine((f) => f.read !== f.unread, 'mail mark needs --read or --unread'),
+  },
+  'mail undo': {
+    args: ['id'],
+    flags: z.object({
+      id: digits(
+        z.number({ error: 'The undo id is a whole number, from `mail move`' }).int().positive(),
+      ).optional(),
+      confirm: z.boolean().default(false),
     }),
   },
   'calendar sync': { args: [], flags: z.object({}) },
@@ -315,6 +381,10 @@ export const CHANGE_COMMANDS: ReadonlySet<CommandName> = new Set([
   'calendar add',
   'calendar edit',
   'calendar delete',
+  'mail move',
+  'mail flag',
+  'mail mark',
+  'mail undo',
 ])
 
 const GROUPS = new Set(['cleanup', 'mail', 'calendar', 'money', 'ai', 'boards'])
@@ -351,6 +421,8 @@ const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
   sender: 'list',
   mailbox: 'value',
   unread: 'switch',
+  read: 'switch',
+  unflag: 'switch',
   server: 'switch',
   board: 'value',
   column: 'value',
@@ -451,21 +523,29 @@ export function parseInvocation(args: readonly string[]): Invocation {
       )
     throw new UsageError(`Unknown command: ${first}. See \`help\`.`)
   }
-  const spec = COMMANDS[name as CommandName]
+  const spec = COMMANDS[name as CommandName] as {
+    args: readonly string[]
+    /** Takes any number of trailing arguments, as a list under this name. */
+    rest?: string
+    flags: z.ZodObject
+  }
   const rest = positionals.slice(GROUPS.has(first) ? 2 : 1)
-  if (rest.length > spec.args.length) throw new UsageError(`Unexpected argument: ${rest[spec.args.length]}`)
+  if (!spec.rest && rest.length > spec.args.length)
+    throw new UsageError(`Unexpected argument: ${rest[spec.args.length]}`)
 
   const input: Record<string, unknown> = {}
   const allowed = new Set(Object.keys(spec.flags.shape))
   for (const [flag, value] of flags) {
     if (GLOBAL_FLAGS.has(flag)) continue
-    if (!allowed.has(flag) || (spec.args as readonly string[]).includes(flag))
+    if (!allowed.has(flag) || spec.args.includes(flag) || flag === spec.rest)
       throw new UsageError(`${name} doesn't take --${flag}`)
     input[flag] = value
   }
   spec.args.forEach((arg, i) => {
     if (rest[i] !== undefined) input[arg] = rest[i]
   })
+  // The rest of the arguments, as a list (`mail move 41 42 --to archive`).
+  if (spec.rest && rest.length > spec.args.length) input[spec.rest] = rest.slice(spec.args.length)
 
   return { kind: 'command', command: commandFrom(name as CommandName, input), json, allowChanges }
 }

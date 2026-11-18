@@ -122,6 +122,53 @@ describe('parseInvocation', () => {
     expect(() => parseInvocation(['mail', 'list', '--mailbox', 'a\u0007b'])).toThrow(/not a mailbox path/)
   })
 
+  it('parses the mail changes: several uids, a target, and no send', () => {
+    expect(command('mail', 'move', '41', '42', '--to', 'archive', '--confirm').command).toEqual({
+      name: 'mail move',
+      uids: [41, 42],
+      mailbox: 'INBOX',
+      to: 'archive',
+      confirm: true,
+    })
+    expect(
+      command('mail', 'move', '41', '--mailbox', 'Archive', '--to', 'Projects/2026').command,
+    ).toMatchObject({
+      mailbox: 'Archive',
+      to: 'Projects/2026',
+      confirm: false,
+    })
+    expect(command('mail', 'flag', '7', '--unflag').command).toEqual({
+      name: 'mail flag',
+      uids: [7],
+      mailbox: 'INBOX',
+      unflag: true,
+      confirm: false,
+    })
+    expect(command('mail', 'mark', '7', '8', '--unread').command).toMatchObject({
+      uids: [7, 8],
+      read: false,
+      unread: true,
+    })
+    expect(command('mail', 'undo').command).toEqual({ name: 'mail undo', confirm: false })
+    expect(command('mail', 'undo', '3', '--confirm').command).toEqual({
+      name: 'mail undo',
+      id: 3,
+      confirm: true,
+    })
+    expect(usage('mail', 'move', '--to', 'archive')).toMatch(/needs at least one message uid/)
+    expect(usage('mail', 'move', '41')).toMatch(/needs --to archive, bin, junk, inbox or a folder/)
+    expect(usage('mail', 'move', '1e3', '--to', 'archive')).toMatch(/whole number/)
+    expect(usage('mail', 'move', '4', '4', '--to', 'archive')).toMatch(/given twice/)
+    expect(
+      usage('mail', 'move', ...Array.from({ length: 21 }, (_, i) => String(i + 1)), '--to', 'bin'),
+    ).toMatch(/At most 20 messages/)
+    expect(usage('mail', 'mark', '7')).toMatch(/--read or --unread/)
+    expect(usage('mail', 'mark', '7', '--read', '--unread')).toMatch(/--read or --unread/)
+    expect(usage('mail', 'move', '7', '--uids', '8', '--to', 'bin')).toMatch(/Unknown option --uids/)
+    expect(usage('mail', 'move', '7', '--to', 'a\u0007b')).toMatch(/not a folder/)
+    for (const c of ['send', 'reply', 'forward', 'draft']) expect(usage('mail', c)).toMatch(/Unknown command/)
+  })
+
   it('checks dates and ranges for calendar events', () => {
     expect(command('calendar', 'events', '--from', '2026-11-01', '--to', '2026-11-30').command).toEqual({
       name: 'calendar events',
@@ -201,6 +248,10 @@ it('marks exactly the commands that change data', () => {
     'calendar delete',
     'calendar edit',
     'cleanup run',
+    'mail flag',
+    'mail mark',
+    'mail move',
+    'mail undo',
     'money import',
     'money sort',
     'undo',

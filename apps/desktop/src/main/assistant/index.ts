@@ -34,7 +34,8 @@ export const CONFIRM_TIMEOUT_MS = 10 * 60_000
 /** What a cloud model sees through the assistant. Shown before the user agrees, and in docs/assistant.md. */
 export const CLOUD_SENDS =
   'Your questions, and the Ordo data the assistant looks up to answer them: transactions with amounts and dates, ' +
-  'balances, bills, calendar events, sender names, addresses and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address.'
+  'balances, bills, calendar events, sender names, addresses and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. ' +
+  'The assistant can also move, flag and draft email, and send email you confirm: each only after you press Confirm or Send on a card.'
 
 let history: Turn[] = []
 let running: AbortController | null = null
@@ -175,10 +176,11 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
       }
     }
     const timeoutMs = options.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS
-    const { tainted, ...outcome } = await runAssistant({
+    const { tainted, changes, sent, ...outcome } = await runAssistant({
       provider,
       model,
-      services: mainServices(),
+      // The one place sending exists: only after the user confirms the send card.
+      services: mainServices({ send: true }),
       history,
       question: parsed.data.text,
       page,
@@ -205,9 +207,16 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
         }).finally(() => pending.delete(id)),
     })
     if (outcome.ok && started === generation)
-      history = [...history, { user: cut(parsed.data.text), answer: cut(outcome.answer), tainted }].slice(
-        -MAX_HISTORY,
-      )
+      history = [
+        ...history,
+        {
+          user: cut(parsed.data.text),
+          answer: cut(outcome.answer),
+          tainted,
+          ...(changes.length && { changes }),
+          ...(sent.length && { sent }),
+        },
+      ].slice(-MAX_HISTORY)
     return outcome
   } finally {
     sender.removeListener('destroyed', gone)

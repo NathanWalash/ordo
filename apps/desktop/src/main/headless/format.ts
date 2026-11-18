@@ -232,6 +232,16 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       .filter((l, i) => l !== '' || i === 6)
       .join('\n'),
 
+  'mail move': (d) =>
+    `Moved ${plural(d.moved, 'message')} from ${clean(d.mailbox, 60)} to ${clean(d.to, 60)}.` +
+    (d.undoId ? ` Undo with \`mail undo ${d.undoId} --confirm\` while this Ordo is running.` : ''),
+
+  'mail flag': (d) => `${d.flagged ? 'Flagged' : 'Unflagged'} ${plural(d.uids.length, 'message')}.`,
+
+  'mail mark': (d) => `Marked ${plural(d.uids.length, 'message')} as ${d.read ? 'read' : 'unread'}.`,
+
+  'mail undo': (d) => `Moved ${plural(d.restored, 'message')} back.`,
+
   'calendar sync': (d) =>
     `Synced ${plural(d.calendars, 'calendar')} (${d.fetched} fetched, ${d.skipped} unchanged): ${plural(d.events, 'event')}.` +
     (d.failed?.length
@@ -436,7 +446,13 @@ Mail:
   mail search <words> [--mailbox <path>] [--server] [--limit <n>]
                                                 Search downloaded mail, or the server
   mail read <uid> [--mailbox <path>]            A message as plain text. Doesn't mark it read
-                                                Headless mode never sends or changes mail.
+  mail move <uid>... --to <where> [--mailbox <path>] --confirm
+                                                Move to archive, bin, junk, inbox or a folder *
+  mail flag <uid>... [--unflag] [--mailbox <path>] --confirm      Flag or unflag *
+  mail mark <uid>... --read|--unread [--mailbox <path>] --confirm  Mark read or unread *
+  mail undo [<id>] --confirm                    Undo a move made by this Ordo run (the last) *
+                                                At most 20 messages at a time, from the cache.
+                                                Headless mode never sends mail.
 
 Calendar:
   calendar sync                                 Fetch changed calendars

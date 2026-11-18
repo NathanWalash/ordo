@@ -69,9 +69,11 @@ interface Props {
   onConnect: () => void
   /** Show a different title in the toolbar (the mailbox), or null for the default. */
   onTitle: (title: string | null) => void
+  /** Bumped when the assistant changed mail: reload what's on screen, keeping the open folder. */
+  changed?: number
 }
 
-export function MailPage({ account, onConnect, onTitle }: Props) {
+export function MailPage({ account, onConnect, onTitle, changed = 0 }: Props) {
   if (!account?.connected)
     return (
       <EmptyState
@@ -85,7 +87,7 @@ export function MailPage({ account, onConnect, onTitle }: Props) {
         }
       />
     )
-  return <MailClient key={account.email} email={account.email} onTitle={onTitle} />
+  return <MailClient key={account.email} email={account.email} onTitle={onTitle} changed={changed} />
 }
 
 type Opened = { key: string; message?: MessageContent; error?: string }
@@ -113,7 +115,15 @@ function useWindowWidth(): number {
   return width
 }
 
-function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | null) => void }) {
+function MailClient({
+  email,
+  onTitle,
+  changed,
+}: {
+  email: string
+  onTitle: (t: string | null) => void
+  changed: number
+}) {
   const [boxes, setBoxes] = useState<MailboxInfo[]>([])
   const [current, setCurrent] = useState(INBOX)
   const [filter, setFilter] = useState<Filter>('all')
@@ -189,10 +199,26 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
       if (p.messages.length < Math.min(CHUNK, want - offset)) break
     }
     const b = await window.ordo.mail.mailboxes()
-    if (mailbox !== view.current.current || f !== view.current.filter) return
+    if (mailbox !== view.current.current || f !== view.current.filter) return null
     setBoxes(b)
     setList({ total, messages: pages })
+    return pages
   }, [])
+
+  // The assistant moved, flagged or marked mail, or saved a draft: show it, in the same folder.
+  // A selected message that moved away is no longer selected.
+  useEffect(() => {
+    if (!changed) return
+    let live = true
+    void load().then((rows) => {
+      if (!live || !rows || view.current.query.trim()) return
+      const keys = new Set(rows.map(keyOf))
+      setSelected((s) => (s && !keys.has(keyOf(s)) ? null : s))
+    })
+    return () => {
+      live = false
+    }
+  }, [changed, load])
 
   /** The next page, added to the end of the list. */
   const loadMore = async () => {
