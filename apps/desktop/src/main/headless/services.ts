@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import * as mail from '../mail'
 import * as cleanup from '../cleanup'
+import * as mailClient from '../mail-client'
 import * as calendar from '../calendar'
 import * as money from '../money'
 import { aiSettings, categoriseSenders, sendersWithAi, status as aiStatus } from '../ai'
@@ -23,6 +24,15 @@ export function mainServices(): OrdoServices {
       run: cleanup.run,
       history: cleanup.history,
       undo: cleanup.undo,
+    },
+    // Read-only: no send, draft, flag or move, here or in the MCP server.
+    mail: {
+      mailboxes: mailClient.mailboxes,
+      refresh: (input, onProgress) => mailClient.refresh(input, onProgress),
+      messages: mailClient.messages,
+      search: mailClient.search,
+      searchServer: mailClient.searchServer,
+      open: mailClient.open,
     },
     calendar: {
       status: calendar.status,

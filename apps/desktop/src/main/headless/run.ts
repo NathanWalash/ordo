@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { closeMail } from '../mail'
+import { closeMailClient } from '../mail-client'
 import { closeCalendar } from '../calendar'
 import { closeMoney } from '../money'
 import { initAi } from '../ai'
@@ -21,6 +22,7 @@ function writeOut(text: string): Promise<void> {
 /** Close the databases, drop the write lock and exit. */
 function quit(code: number): void {
   closeMail()
+  closeMailClient()
   closeCalendar()
   closeMoney()
   releaseWriteLock()

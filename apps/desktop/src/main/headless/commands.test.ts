@@ -3,7 +3,7 @@ import { parseInvocation, type Command } from './args'
 import { runCli, type CliIo } from './cli'
 import { exitCodeFor, gate, runCommand } from './commands'
 import { clean, formatHuman, pounds } from './format'
-import { fakeServices } from './fake-services'
+import { fakeServices, summary } from './fake-services'
 
 function io() {
   const out: string[] = []
@@ -128,6 +128,56 @@ describe('commands', () => {
     })
     expect(await run({ name: 'scan' }, services)).toMatchObject({ ok: false, code: 'not_connected' })
     expect(services.scan).not.toHaveBeenCalled()
+  })
+
+  it('mail commands need an account too', async () => {
+    const services = fakeServices({ account: () => ({ connected: false }) })
+    for (const c of ['mailboxes', 'list', 'sync'] as const)
+      expect(await cli(services, 'mail', c, '--json')).toMatchObject({ code: 1 })
+    expect(services.mail.refresh).not.toHaveBeenCalled()
+  })
+
+  it('mail list and search print the uid to read, with control characters removed', async () => {
+    const services = fakeServices()
+    services.mail.messages = vi.fn(() => ({
+      total: 1,
+      messages: [summary(7, { subject: 'Hi\u001b[31m‮evil' })],
+    }))
+    const r = await cli(services, 'mail', 'list', '--mailbox', 'Archive', '--unread')
+    expect(services.mail.messages).toHaveBeenCalledWith({
+      mailbox: 'Archive',
+      limit: 25,
+      offset: 0,
+      unread: true,
+    })
+    expect(r.stdout).toMatch(/^UID +DATE/)
+    expect(r.stdout).toContain('Sam')
+    expect(r.stdout).not.toContain(String.fromCharCode(0x1b))
+    expect(r.stdout).not.toContain(String.fromCharCode(0x202e))
+    const s = await cli(fakeServices(), 'mail', 'search', 'lunch', '--json')
+    expect(JSON.parse(s.stdout)).toMatchObject({ where: 'cache', mailbox: null, messages: [{ uid: 7 }] })
+  })
+
+  it('mail read prints text, never HTML, and never escape sequences', async () => {
+    const r = await cli(fakeServices(), 'mail', 'read', '7')
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('From:    Sam <sam@friend.example>')
+    expect(r.stdout).toContain('Files:   menu.pdf')
+    expect(r.stdout).toContain('Fancy lunch?')
+    expect(r.stdout).toContain('The menu <https://cafe.example/menu>')
+    expect(r.stdout).not.toMatch(/<p>|<script>/)
+    expect(r.stdout).not.toContain(String.fromCharCode(0x1b))
+    const gone = await cli(fakeServices(), 'mail', 'read', '8', '--json')
+    expect(gone.code).toBe(1)
+    expect(JSON.parse(gone.stdout).error.code).toBe('not_found')
+  })
+
+  it('mail sync refreshes one folder and is not a change', async () => {
+    const services = fakeServices()
+    const r = await cli(services, 'mail', 'sync', '--mailbox', 'Projects', '--json')
+    expect(r.code).toBe(0)
+    expect(services.mail.refresh).toHaveBeenCalledWith({ mailbox: 'Projects' }, expect.anything())
+    expect(JSON.parse(r.stdout)).toEqual({ mailbox: 'Projects', added: 1, removed: 0, changed: 2 })
   })
 
   it('senders filters, limits and marks people as protected', async () => {
@@ -313,6 +363,8 @@ describe('output', () => {
       'history',
       'undo',
       'calendar sync',
+      'mail read <uid>',
+      'mail search <words>',
     ])
       expect(r.stdout).toContain(c)
     const j = await cli(fakeServices(), '--help', '--json')
