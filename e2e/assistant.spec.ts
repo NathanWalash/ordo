@@ -163,6 +163,8 @@ async function ask(text: string) {
 }
 
 test('opens from the toolbar and the keyboard, with prompts for the page', async () => {
+  // Wait for the app to be drawn, so the shortcut's listener is there before the key goes in.
+  await expect(page.getByRole('button', { name: 'Assistant', exact: true })).toBeVisible()
   await expect(panel()).toBeHidden()
   await page.keyboard.press(`${mod}+k`)
   await expect(panel()).toBeVisible()
