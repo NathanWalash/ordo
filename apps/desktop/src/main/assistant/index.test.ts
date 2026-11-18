@@ -426,6 +426,27 @@ describe('money details in history and mid-run', () => {
     }
   })
 
+  it('consent taken back mid-question stops before earlier money turns are sent again', async () => {
+    state.settings = cloud
+    model(looseEndsThenAnswer(), 'cloud')
+    setCloudConsent({ allow: true })
+    await ask({ text: 'what am I holding?', page: 'home' }, asWc(window()))
+    expect(currentHistory()).toHaveLength(1)
+    // Same provider and consents at the start, so that turn is in this question's history. While
+    // the model picks a tool that has nothing to do with money, the user turns the consent off.
+    const requests = model((req) => {
+      if (req.prompt.includes('<step n="1">')) return { type: 'answer', text: 'Here are your bills.' }
+      state.settings = { ...cloud, moneyDetailsConsent: null }
+      return { type: 'tool', tool: 'ordo_bills', args: {} }
+    }, 'cloud')
+    expect(await ask({ text: 'and my bills?', page: 'home' }, asWc(window()))).toMatchObject({
+      ok: false,
+      reason: 'consent',
+    })
+    expect(requests).toHaveLength(1)
+    setCloudConsent({ allow: false })
+  })
+
   it('a change confirmed after the consent was taken back doesn’t run', async () => {
     state.settings = cloud
     model(() => ({ type: 'tool', tool: 'ordo_money_forget', args: { fact: 'f1' } }), 'cloud')

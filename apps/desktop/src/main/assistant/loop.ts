@@ -71,8 +71,9 @@ export interface LoopOptions {
   allowed?: (tool: OrdoTool) => string | null
   /**
    * Checked before every model call: why what's about to be sent may no longer go to this model
-   * (provider or consent changed), or null. `moneyDetails` says whether the steps so far include a
-   * tool returning what Ordo learned about money. A refusal ends the question before sending.
+   * (provider or consent changed), or null. `moneyDetails` says whether the history or the steps so
+   * far include a tool returning what Ordo learned about money. A refusal ends the question before
+   * sending.
    */
   canSend?: (moneyDetails: boolean) => string | null
 }
@@ -209,8 +210,10 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
 
   for (let call = 0; call < MAX_MODEL_CALLS; call++) {
     if (o.signal.aborted) return stopped()
-    // The results gathered so far go out with this call: check they still may.
-    const gathered = steps.some((s) => tools.find((t) => t.name === s.tool)?.moneyDetails === true)
+    // Earlier turns and the results gathered so far go out with this call: check they still may.
+    const gathered =
+      o.history.some((t) => t.moneyDetails) ||
+      steps.some((s) => tools.find((t) => t.name === s.tool)?.moneyDetails === true)
     const why = o.canSend?.(gathered) ?? null
     if (why) return end({ ok: false, reason: 'consent', message: why })
     o.onEvent({ type: 'thinking', step: call + 1 })
