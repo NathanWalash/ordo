@@ -107,7 +107,16 @@ describe('fillAmounts', () => {
         results,
       ),
     ).toEqual({
-      text: 'Net £418.99 from 28 Aug; Tesco −£25.00, 3 in all',
+      text: 'Net [Net: £418.99] from 28 Aug; Tesco [Tesco: −£25.00], [Payments found: 3] in all',
+      parts: [
+        { kind: 'text', text: 'Net ' },
+        { kind: 'figure', label: 'Net', value: '£418.99' },
+        { kind: 'text', text: ' from 28 Aug; Tesco ' },
+        { kind: 'figure', label: 'Tesco', value: '−£25.00' },
+        { kind: 'text', text: ', ' },
+        { kind: 'figure', label: 'Payments found', value: '3' },
+        { kind: 'text', text: ' in all' },
+      ],
     })
   })
   it('refuses placeholders that point nowhere', () => {
@@ -125,7 +134,16 @@ describe('askMoney', () => {
     )
     const steps: string[] = []
     const r = await askMoney('How much was Italy?', provider, ctx, { onStep: (s) => steps.push(s.tool) })
-    expect(r.answer).toBe('Italy cost you £418.99 after £5.00 came back.')
+    expect(r.answer).toBe(
+      'Italy cost you [Net cost of Italy: £418.99] after [Paid back for Italy: £5.00] came back.',
+    )
+    expect(r.parts).toEqual([
+      { kind: 'text', text: 'Italy cost you ' },
+      { kind: 'figure', label: 'Net cost of Italy', value: '£418.99' },
+      { kind: 'text', text: ' after ' },
+      { kind: 'figure', label: 'Paid back for Italy', value: '£5.00' },
+      { kind: 'text', text: ' came back.' },
+    ])
     expect(r.steps).toEqual([{ tool: 'event_cost', label: 'Worked out an event' }])
     expect(steps).toEqual(['event_cost'])
     expect(calls).toHaveLength(2)
@@ -144,9 +162,9 @@ describe('askMoney', () => {
           : { type: 'answer', text: 'You hold {{r1.held.0.holdingPence}} for Patrick.' },
     )
     const r = await askMoney('What am I holding?', provider, ctx)
-    expect(r.answer).toBe('You hold £298.50 for Patrick.')
+    expect(r.answer).toBe('You hold [Holding for Patrick O: £298.50] for Patrick.')
     expect(calls).toHaveLength(3)
-    expect(calls[2]!.prompt).toContain('Write no digits or currency signs')
+    expect(calls[2]!.prompt).toContain('Write no digits, currency signs or %')
   })
 
   it('also refuses 12.50, 1250p and 30 pounds', async () => {
@@ -164,7 +182,7 @@ describe('askMoney', () => {
     )
     const r = await askMoney('Loop?', provider, ctx, { maxSteps: 2 })
     expect(r.steps).toHaveLength(2)
-    expect(r.answer).toBe('Here is what I found: 0 payments.')
+    expect(r.answer).toBe('Here is what I found: [Payments found: 0] payments.')
     expect(calls).toHaveLength(3)
   })
 
@@ -287,13 +305,15 @@ describe('askMoney', () => {
         ? { type: 'call', tool: 'share_of', args: { id: 'h-ryanair' } }
         : {
             type: 'answer',
-            text: 'Your share of the flights was {{r1.yoursPence}}: Amelie paid {{r1.paidBackPence}} of {{r1.paidPence}}.',
+            text: 'Your share of the flights was {{r1.yoursPence}}. Amelie paid {{r1.paidBackPence}} of {{r1.paidPence}}.',
           },
     )
     const r = await askMoney('What did the flights cost me?', provider, {
       ...ctx,
       facts: [AMELIE_PAYBACK, ITALY, LUCA_PAYBACK, GABE_FOR_PATRICK],
     })
-    expect(r.answer).toBe('Your share of the flights was £148.97: Amelie paid £148.80 of £297.77.')
+    expect(r.answer).toBe(
+      'Your share of the flights was [Your share of Ryanair: £148.97]. Amelie paid [Paid back for Ryanair: £148.80] of [Paid: £297.77].',
+    )
   })
 })

@@ -134,9 +134,13 @@ export {
   type ToolName,
 } from './ask-tools'
 export {
+  answerText,
   askMoney,
   askSystemPrompt,
+  figureLabel,
   fillAmounts,
+  writtenAmount,
+  type AnswerPart,
   type AskOptions,
   type AskProposal,
   type AskResult,

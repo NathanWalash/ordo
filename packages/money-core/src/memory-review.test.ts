@@ -70,7 +70,7 @@ describe('1. placeholders only fill in numbers Ordo worked out', () => {
   })
 
   it('names without digits or currency still work', () => {
-    expect(fillAmounts('{{r1.items.0.name}} paid', [{ items: [{ name: 'Luca B' }] }])).toEqual({
+    expect(fillAmounts('{{r1.items.0.name}} paid', [{ items: [{ name: 'Luca B' }] }])).toMatchObject({
       text: 'Luca B paid',
     })
     expect(fillAmounts('{{r1.items.0.name}}', [{ items: [{ name: 'Tesco 3021' }] }])).toHaveProperty('error')
@@ -87,7 +87,7 @@ describe('1. placeholders only fill in numbers Ordo worked out', () => {
       await expect(ask(text)).rejects.toMatchObject({ code: 'bad-response' })
     // Ordinary punctuation after a placeholder is fine.
     expect((await ask('You got {{r1.totalInPence}}, from {{r1.total}} payments.')).answer).toBe(
-      'You got £0.01, from 1 payments.',
+      'You got [Money in: £0.01], from [Payments found: 1] payments.',
     )
   })
 })
@@ -348,11 +348,11 @@ describe('security follow-up: names, labels and glue', () => {
   it('the filled-in answer is checked again, outside the spans Ordo filled from numbers', () => {
     // Each name is fine alone, but together they'd spell an amount.
     const r = [{ items: [{ name: 'Big' }, { name: 'Pounds Ltd' }], total: 3 }]
-    expect(fillAmounts('{{r1.items.0.name}} owes', r)).toEqual({ text: 'Big owes' })
+    expect(fillAmounts('{{r1.items.0.name}} owes', r)).toMatchObject({ text: 'Big owes' })
     expect(fillAmounts('Seventy {{r1.items.1.name}}', r)).toHaveProperty('error')
     expect(
       fillAmounts('You spent {{r1.netPence}}, on {{r1.date}}.', [{ netPence: 500, date: '2026-11-02' }]),
-    ).toEqual({ text: 'You spent £5.00, on 2 Nov.' })
+    ).toMatchObject({ text: 'You spent [Net: £5.00], on 2 Nov.' })
   })
 
   it('a proposal label with an amount or a placeholder is replaced with Ordo’s own sentence', async () => {
@@ -394,7 +394,7 @@ describe('security follow-up: names, labels and glue', () => {
       await expect(ask(text)).rejects.toMatchObject({ code: 'bad-response' })
     // Possessives and ordinary punctuation are fine.
     expect((await ask('{{r1.items.0.name}}’s payment, and ({{r1.total}}) in all.')).answer).toBe(
-      'TESCO’s payment, and (1) in all.',
+      'TESCO’s payment, and ([Payments found: 1]) in all.',
     )
   })
 
@@ -414,7 +414,9 @@ describe('security follow-up 2: decided by value, and an allowlist after numbers
     const r = [{ items: [{ name: 'One' }], from: 'Pounds Ltd' }]
     expect(fillAmounts('{{r1.items.0.name}} {{r1.from}}', r)).toHaveProperty('error')
     // A real date under `from` is still a date.
-    expect(fillAmounts('Since {{r1.from}}.', [{ from: '2026-08-28' }])).toEqual({ text: 'Since 28 Aug.' })
+    expect(fillAmounts('Since {{r1.from}}.', [{ from: '2026-08-28' }])).toMatchObject({
+      text: 'Since 28 Aug.',
+    })
   })
 
   const results = [{ netPence: 500, total: 3, date: '2026-11-02' }]
@@ -444,12 +446,116 @@ describe('security follow-up 2: decided by value, and an allowlist after numbers
 
   it('ordinary sentences after numbers still work', () => {
     for (const [text, out] of [
-      ['You spent {{r1.netPence}} on {{r1.date}}.', 'You spent £5.00 on 2 Nov.'],
-      ['{{r1.netPence}} back, {{r1.total}} payments in all', '£5.00 back, 3 payments in all'],
-      ['That’s {{r1.netPence}} each, {{r1.netPence}} per month', 'That’s £5.00 each, £5.00 per month'],
-      ['Net {{r1.netPence}}; out {{r1.netPence}} — from {{r1.date}}!', 'Net £5.00; out £5.00 — from 2 Nov!'],
-      ['({{r1.total}}) and {{r1.netPence}} net', '(3) and £5.00 net'],
+      ['You spent {{r1.netPence}} on {{r1.date}}.', 'You spent [Net: £5.00] on 2 Nov.'],
+      [
+        '{{r1.netPence}} back, {{r1.total}} payments in all',
+        '[Net: £5.00] back, [Payments found: 3] payments in all',
+      ],
+      [
+        'That’s {{r1.netPence}} each, {{r1.netPence}} per month',
+        'That’s [Net: £5.00] each, [Net: £5.00] per month',
+      ],
+      [
+        'Net {{r1.netPence}}; out {{r1.netPence}} — from {{r1.date}}!',
+        'Net [Net: £5.00]; out [Net: £5.00] — from 2 Nov!',
+      ],
+      ['({{r1.total}}) and {{r1.netPence}} net', '([Payments found: 3]) and [Net: £5.00] net'],
     ] as const)
-      expect(fillAmounts(text, results)).toEqual({ text: out })
+      expect(fillAmounts(text, results)).toMatchObject({ text: out })
+  })
+})
+
+describe('security follow-up 3: punctuation runs, whole tokens, fractions, NFKC, figures', () => {
+  const results = [{ netPence: 500, total: 3, date: '2026-11-02' }]
+
+  it('punctuation after a figure doesn’t skip the allowlist', () => {
+    for (const text of [
+      'It was {{r1.netPence}}, squillion.',
+      'It was {{r1.netPence}} — squillion.',
+      'It was {{r1.netPence}}; mn of them.',
+      'It was {{r1.netPence}},, b each.',
+      'It was ({{r1.total}}), m.',
+    ])
+      expect(fillAmounts(text, results)).toHaveProperty('error')
+    // A full stop ends the sentence: the next one is checked on its own.
+    expect(fillAmounts('It was {{r1.netPence}}. Luca paid it.', results)).toMatchObject({
+      text: 'It was [Net: £5.00]. Luca paid it.',
+    })
+  })
+
+  it('a safe word must be a whole token', () => {
+    for (const text of [
+      'It was {{r1.netPence}} per-cent.',
+      'It was {{r1.netPence}} back’n’forth.',
+      'It was {{r1.netPence}} onwards.',
+    ])
+      expect(fillAmounts(text, results)).toHaveProperty('error')
+  })
+
+  for (const word of [
+    'half',
+    'halves',
+    'quarter',
+    'quarters',
+    'third',
+    'thirds',
+    'double',
+    'twice',
+    'triple',
+    'times',
+    'x',
+    'squared',
+    'per cent',
+    'per-cent',
+    'percent',
+    '%',
+  ])
+    it(`refuses "${word}" anywhere in the model’s text`, () => {
+      expect(writtenAmount(`Roughly ${word} what you thought.`)).not.toBeNull()
+    })
+
+  it('text is NFKC-normalised before every check', () => {
+    // Full-width letters and digits, and the ﬁ-style compatibility forms, all fold to plain ones.
+    expect(writtenAmount('About ｔｈｏｕｓａｎｄ of them.')).not.toBeNull()
+    expect(writtenAmount('It was ５０.')).not.toBeNull()
+    expect(fillAmounts('It was {{r1.netPence}} ｍｎ.', results)).toHaveProperty('error')
+  })
+
+  for (const word of [
+    'hundreds',
+    'thousands',
+    'millions',
+    'billions',
+    'dozens',
+    'tens',
+    'scores',
+    'lakhs',
+    'crores',
+  ])
+    it(`refuses the plural "${word}"`, () => {
+      expect(writtenAmount(`There were ${word} of them.`)).not.toBeNull()
+    })
+
+  it('figures are separate parts with Ordo’s own label, so prose next to them can’t change them', () => {
+    const r = fillAmounts('Italy cost you {{r1.netPence}} so far.', [
+      { id: 'e', name: 'Italy', netPence: 41899 },
+    ])
+    expect(r).toEqual({
+      text: 'Italy cost you [Net cost of Italy: £418.99] so far.',
+      parts: [
+        { kind: 'text', text: 'Italy cost you ' },
+        { kind: 'figure', label: 'Net cost of Italy', value: '£418.99' },
+        { kind: 'text', text: ' so far.' },
+      ],
+    })
+  })
+
+  it('a label never carries a name that looks like an amount', () => {
+    const r = fillAmounts('That was {{r1.items.0.amountPence}}.', [
+      { items: [{ name: '£4,000 YOU OWE ME', date: '2026-11-02', amountPence: 1 }] },
+    ])
+    expect(r).toMatchObject({
+      parts: [expect.anything(), { kind: 'figure', label: 'Amount', value: '£0.01' }, expect.anything()],
+    })
   })
 })
