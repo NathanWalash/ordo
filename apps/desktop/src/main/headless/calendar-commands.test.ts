@@ -142,6 +142,17 @@ describe('draftFromFlags', () => {
       'Use --until or --count, not both',
     )
   })
+
+  it('won’t flatten a custom rule by changing only its end', () => {
+    const custom = base({ repeat: { frequency: 'weekly', custom: true } })
+    expect(draftFromFlags(custom, { until: '2027-01-01' }, 'UTC')).toMatch(/can’t edit from here/)
+    expect(draftFromFlags(custom, { title: 'x' }, 'UTC')).toMatchObject({
+      repeat: { frequency: 'weekly', custom: true },
+    })
+    expect(draftFromFlags(custom, { repeat: 'weekly', count: 4 }, 'UTC')).toMatchObject({
+      repeat: { frequency: 'weekly', count: 4 },
+    })
+  })
 })
 
 describe('calendar list', () => {

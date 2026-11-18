@@ -221,6 +221,8 @@ export function draftFromFlags(
   if (f.until !== undefined || f.count !== undefined) {
     if (!repeat) return '--until and --count need --repeat'
     if (f.until !== undefined && f.count !== undefined) return 'Use --until or --count, not both'
+    if (repeat.custom && !f.repeat)
+      return 'This event repeats in a way Ordo can’t edit from here. Give --repeat to replace its rule, or change it in Calendar.'
     repeat = {
       frequency: repeat.frequency,
       ...(f.until !== undefined ? { until: f.until } : { count: f.count }),
