@@ -160,10 +160,12 @@ body,
   -webkit-app-region: no-drag;
 }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: 6px;
+/* In the base layer, so a component's own focus style (a utility) wins over it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
 }
 
 /* Assistant motion: surfaces pop in, messages rise in, and "Thinking" shimmers while it works. */
@@ -215,9 +217,31 @@ body,
   background-clip: text;
   animation: assistant-shimmer 1.8s linear infinite;
 }
-/* The composer's frame shows focus; the field inside doesn't need its own ring. */
-.assistant-composer textarea:focus-visible {
+/* The panel takes focus only to hold it; it doesn't need a ring of its own. */
+.assistant-pop:focus-visible {
   outline: none;
+}
+/* The assistant's panel: frosted, but more opaque than a sheet so text stays easy to read. */
+.assistant-surface {
+  background-color: var(--sheet);
+  border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .assistant-surface {
+    background-color: color-mix(in srgb, var(--sheet) 92%, transparent);
+    backdrop-filter: var(--glass-filter);
+  }
+}
+.reduce-transparency .assistant-surface {
+  background-color: var(--sheet);
+  backdrop-filter: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .assistant-surface {
+    background-color: var(--sheet);
+    backdrop-filter: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {

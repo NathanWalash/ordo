@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AssistantEvent, AssistantInfo } from '@ordo/shared'
-import { applyEvent, finish, type Item } from './conversation'
+import { applyEvent, cardOpen, finish, type Item } from './conversation'
 
 export interface Assistant {
   info: AssistantInfo | null
   items: Item[]
   busy: boolean
+  /** A card is waiting for the user. */
+  waiting: boolean
+  /** The unsent question, kept while the panel is closed. */
+  draft: string
+  setDraft(text: string): void
   ask(text: string, page: string): Promise<void>
   answerCard(id: string, approve: boolean): void
+  setCloudConsent(allow: boolean): Promise<void>
   stop(): void
   clear(): void
   refreshInfo(): void
@@ -15,7 +21,7 @@ export interface Assistant {
 
 /**
  * The conversation, held by App so it survives closing the panel. It lives in memory only, like
- * the main process's copy: quitting Ordo or pressing Clear forgets it.
+ * the main process's copy: quitting Ordo, reloading or pressing New conversation forgets it.
  */
 export function useAssistant(handlers: {
   onNavigate: (e: Extract<AssistantEvent, { type: 'navigate' }>) => void
@@ -25,6 +31,7 @@ export function useAssistant(handlers: {
   const [info, setInfo] = useState<AssistantInfo | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState('')
   const nextId = useRef(1)
   const on = useRef(handlers)
   useEffect(() => {
@@ -45,6 +52,15 @@ export function useAssistant(handlers: {
     [],
   )
 
+  // A fresh window starts a fresh conversation: if main still has one (or a run) from before a
+  // reload, this window can't show it, so end it.
+  useEffect(() => {
+    void window.ordo.assistant.info().then((i) => {
+      setInfo(i)
+      void window.ordo.assistant.clear()
+    })
+  }, [])
+
   const ask = useCallback(
     async (text: string, page: string) => {
       if (busy) return
@@ -52,7 +68,14 @@ export function useAssistant(handlers: {
       setItems((all) => [
         ...all,
         { kind: 'user', id: nextId.current++, text },
-        { kind: 'reply', id: nextId.current++, trace: [], status: 'Thinking', startedAt: Date.now() },
+        {
+          kind: 'reply',
+          id: nextId.current++,
+          question: text,
+          trace: [],
+          status: 'Thinking',
+          startedAt: Date.now(),
+        },
       ])
       try {
         const outcome = await window.ordo.assistant.ask({ text, page })
@@ -76,6 +99,10 @@ export function useAssistant(handlers: {
     void window.ordo.assistant.confirm({ id, approve })
   }, [])
 
+  const setCloudConsent = useCallback(async (allow: boolean) => {
+    setInfo(await window.ordo.assistant.setCloudConsent({ allow }))
+  }, [])
+
   const stop = useCallback(() => void window.ordo.assistant.stop(), [])
 
   const clear = useCallback(() => {
@@ -83,5 +110,20 @@ export function useAssistant(handlers: {
     setItems([])
   }, [])
 
-  return { info, items, busy, ask, answerCard, stop, clear, refreshInfo }
+  const waiting = useMemo(() => cardOpen(items), [items])
+
+  return {
+    info,
+    items,
+    busy,
+    waiting,
+    draft,
+    setDraft,
+    ask,
+    answerCard,
+    setCloudConsent,
+    stop,
+    clear,
+    refreshInfo,
+  }
 }

@@ -11,7 +11,13 @@ export type TraceEntry =
       status: 'running' | 'done' | 'failed'
       summary?: string
     }
-  | { kind: 'card'; id: string; card: ConfirmCard; state: 'open' | 'approved' | 'cancelled' }
+  | {
+      kind: 'card'
+      id: string
+      card: ConfirmCard
+      /** `blocked`: the change can't happen; the card only explains why. */
+      state: 'open' | 'approved' | 'cancelled' | 'blocked'
+    }
 
 export interface UserItem {
   kind: 'user'
@@ -22,6 +28,8 @@ export interface UserItem {
 export interface ReplyItem {
   kind: 'reply'
   id: number
+  /** The question it answers, for Try again. */
+  question: string
   trace: TraceEntry[]
   /** What it's doing now, while it works. */
   status: string | null
@@ -32,6 +40,8 @@ export interface ReplyItem {
 }
 
 export type Item = UserItem | ReplyItem
+
+export const WAITING = 'Waiting for your answer'
 
 const lastReply = (items: Item[]): ReplyItem | undefined => {
   const last = items.at(-1)
@@ -64,8 +74,11 @@ export function applyEvent(items: Item[], e: AssistantEvent): Item[] {
     case 'confirm':
       return replaceLast(items, {
         ...reply,
-        trace: [...reply.trace, { kind: 'card', id: e.id, card: e.card, state: 'open' }],
-        status: 'Waiting for you',
+        trace: [
+          ...reply.trace,
+          { kind: 'card', id: e.id, card: e.card, state: e.card.blocked ? 'blocked' : 'open' },
+        ],
+        status: e.card.blocked ? reply.status : WAITING,
       })
     case 'confirmed':
       return replaceLast(items, {
@@ -98,6 +111,10 @@ export function finish(items: Item[], outcome: AskOutcome, now: number): Item[] 
   })
 }
 
+/** Whether a card is waiting for the user. */
+export const cardOpen = (items: readonly Item[]) =>
+  items.some((i) => i.kind === 'reply' && i.trace.some((t) => t.kind === 'card' && t.state === 'open'))
+
 /** "4 s", "1 min 5 s". */
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -120,11 +137,28 @@ export function groupTrace(trace: readonly TraceEntry[]): TraceGroup[] {
   return groups
 }
 
-/** The footer under a finished reply: "Worked for 4 s · 2 steps", or null when there's nothing to say. */
-export function workedFor(ms: number, steps: number): string | null {
-  const parts = [
-    ms >= 1000 && `Worked for ${elapsed(ms)}`,
-    steps > 0 && `${steps} step${steps === 1 ? '' : 's'}`,
-  ].filter(Boolean)
-  return parts.length ? parts.join(' · ') : null
+/** The footer under a finished reply: only for a good answer that took a while. */
+export function workedFor(item: Pick<ReplyItem, 'answer' | 'startedAt' | 'endedAt'>): string | null {
+  if (!item.answer || item.endedAt === undefined) return null
+  const ms = item.endedAt - item.startedAt
+  return ms >= 3000 ? `Worked for ${elapsed(ms)}` : null
+}
+
+export type AnswerBlock = { kind: 'p'; text: string } | { kind: 'list'; items: string[] }
+
+/** An answer as paragraphs and bulleted lists ("- " lines). */
+export function answerBlocks(text: string): AnswerBlock[] {
+  const blocks: AnswerBlock[] = []
+  for (const line of text.split('\n')) {
+    const bullet = /^\s*[-•*]\s+(.*)$/.exec(line)
+    const last = blocks.at(-1)
+    if (bullet) {
+      if (last?.kind === 'list') last.items.push(bullet[1]!)
+      else blocks.push({ kind: 'list', items: [bullet[1]!] })
+    } else if (!line.trim()) {
+      if (last) blocks.push({ kind: 'p', text: '' })
+    } else if (last?.kind === 'p' && last.text) last.text += `\n${line}`
+    else blocks.push({ kind: 'p', text: line })
+  }
+  return blocks.filter((b) => b.kind === 'list' || b.text)
 }

@@ -13,7 +13,7 @@ import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
 import { useAppearanceClasses } from './appearance'
-import { AssistantPanel } from './components/assistant/AssistantPanel'
+import { AssistantPanel, COMPOSER_ID, PANEL_ID } from './components/assistant/AssistantPanel'
 import { useAssistant } from './components/assistant/useAssistant'
 
 export function App() {
@@ -26,6 +26,16 @@ export function App() {
   const [pageKey, setPageKey] = useState(0)
   const [financeMonth, setFinanceMonth] = useState<string | undefined>(undefined)
   const returnFocus = useRef<HTMLElement | null>(null)
+  /** The content's width: wide enough, and the assistant sits beside it instead of over it. */
+  const main = useRef<HTMLElement>(null)
+  const [mainWidth, setMainWidth] = useState(0)
+  useEffect(() => {
+    const el = main.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => setMainWidth(entry?.contentRect.width ?? 0))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   useAppearanceClasses()
 
   const refreshAccount = useCallback(async () => setAccount(await window.ordo.account.status()), [])
@@ -79,13 +89,18 @@ export function App() {
       const key = e.key.toLowerCase()
       if (key !== 'k' && key !== 'j') return
       e.preventDefault()
-      if (assistantOpen) closeAssistant()
-      else openAssistant()
+      if (!assistantOpen) return openAssistant()
+      // Open but focus is elsewhere: go to the composer (or the panel) rather than closing.
+      const panel = document.getElementById(PANEL_ID)
+      if (panel && !panel.contains(document.activeElement))
+        return void (document.getElementById(COMPOSER_ID) ?? panel).focus()
+      closeAssistant()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isMac, assistantOpen, openAssistant, closeAssistant])
   const shortcut = isMac ? '⌘K' : 'Ctrl+K'
+  const docked = assistantOpen && mainWidth >= 1000
 
   useEffect(() => {
     const onHash = () => setRouteState(routeFromHash(window.location.hash))
@@ -104,18 +119,23 @@ export function App() {
   return (
     <div className="flex h-full">
       <Sidebar route={route} onNavigate={setRoute} platform={info?.platform} />
-      <main className="relative min-w-0 flex-1 bg-content border-l border-sep">
+      <main ref={main} className="relative min-w-0 flex-1 bg-content border-l border-sep">
         <Toolbar
           title={TITLES[route]}
           platform={info?.platform}
           assistant={{
             open: assistantOpen,
+            waiting: assistant.waiting,
             shortcut,
             onToggle: () => (assistantOpen ? closeAssistant() : openAssistant()),
           }}
         />
         {/* Content scrolls under the translucent toolbar, so pages start 52px down. */}
-        <div key={pageKey} className="absolute inset-0 flex flex-col overflow-auto pt-[52px]">
+        <div
+          key={pageKey}
+          className="absolute inset-0 flex flex-col overflow-auto pt-[52px]"
+          style={docked ? { right: 404 } : undefined}
+        >
           {route === 'home' && <HomePage onNavigate={setRoute} />}
           {route === 'mail/inbox' && (
             <InboxPage
@@ -147,6 +167,7 @@ export function App() {
             assistant={assistant}
             route={route}
             shortcut={shortcut}
+            docked={docked}
             onClose={closeAssistant}
             onOpenSettings={() => setRoute('settings')}
           />

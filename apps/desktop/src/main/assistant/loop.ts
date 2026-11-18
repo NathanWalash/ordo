@@ -120,7 +120,9 @@ export function triggerFor(
   ]
   if (history.some((t) => t.tainted)) sources.push('earlier results')
   if (asked && named && sources.length === 0) return { kind: 'request', text: 'You asked for this.' }
-  const reading = sources.length ? ` after reading ${[...new Set(sources)].join(', ')}, ${CAUTION}` : ''
+  const unique = [...new Set(sources)]
+  const list = unique.length > 1 ? `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}` : unique[0]
+  const reading = list ? ` after reading ${list}, ${CAUTION}` : ''
   if (asked && reading)
     return { kind: 'data', text: `You asked for this, but the assistant chose what to change${reading}` }
   if (asked)

@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { ASSISTANT_PAGE_IDS, type ConfirmCard } from '@ordo/shared'
 import { ROUTES } from '../../routes'
 import {
+  answerBlocks,
   applyEvent,
+  cardOpen,
   elapsed,
   finish,
   groupTrace,
+  WAITING,
   workedFor,
   type Item,
   type ReplyItem,
@@ -24,7 +27,7 @@ const card: ConfirmCard = {
 
 const start = (): Item[] => [
   { kind: 'user', id: 1, text: 'Undo it' },
-  { kind: 'reply', id: 2, trace: [], status: 'Thinking', startedAt: 0 },
+  { kind: 'reply', id: 2, question: 'Undo it', trace: [], status: 'Thinking', startedAt: 0 },
 ]
 const reply = (items: Item[]) => items.at(-1) as ReplyItem
 
@@ -56,7 +59,7 @@ describe('the conversation', () => {
 
   it('opens a card, marks it answered, and cancels any card left open at the end', () => {
     let items = applyEvent(start(), { type: 'confirm', id: 'c1', card })
-    expect(reply(items).status).toBe('Waiting for you')
+    expect(reply(items).status).toBe(WAITING)
     items = applyEvent(items, { type: 'confirmed', id: 'c1', approved: true })
     expect(reply(items).trace[0]).toMatchObject({ state: 'approved' })
 
@@ -93,10 +96,40 @@ describe('the conversation', () => {
     ])
   })
 
-  it('says how long it worked, only when there is something to say', () => {
-    expect(workedFor(300, 0)).toBeNull()
-    expect(workedFor(300, 1)).toBe('1 step')
-    expect(workedFor(4200, 2)).toBe('Worked for 4 s · 2 steps')
+  it('says how long it worked only for a good answer that took 3 s or more', () => {
+    expect(workedFor({ answer: 'ok', startedAt: 0, endedAt: 2900 })).toBeNull()
+    expect(workedFor({ answer: 'ok', startedAt: 0, endedAt: 4200 })).toBe('Worked for 4 s')
+    expect(workedFor({ startedAt: 0, endedAt: 9000 })).toBeNull()
+  })
+
+  it('shows a blocked card as its own state, and doesn’t count it as waiting', () => {
+    const items = applyEvent(start(), {
+      type: 'confirm',
+      id: 'b',
+      card: { ...card, blocked: 'Choose a model in Settings → AI first.' },
+    })
+    expect(reply(items).trace[0]).toMatchObject({ state: 'blocked' })
+    expect(cardOpen(items)).toBe(false)
+    const done = finish(items, { ok: false, reason: 'blocked', message: 'Nothing was changed' }, 1)
+    expect(reply(done).trace[0]).toMatchObject({ state: 'blocked' })
+  })
+
+  it('knows when a card is waiting', () => {
+    const items = applyEvent(start(), { type: 'confirm', id: 'c', card })
+    expect(cardOpen(items)).toBe(true)
+    expect(reply(items).status).toBe(WAITING)
+    expect(cardOpen(applyEvent(items, { type: 'confirmed', id: 'c', approved: false }))).toBe(false)
+  })
+
+  it('turns "- " lines into lists and keeps paragraphs', () => {
+    expect(
+      answerBlocks('You have two bills:\n- Netflix £10.99\n- Spotify £11.99\n\nBoth are monthly.'),
+    ).toEqual([
+      { kind: 'p', text: 'You have two bills:' },
+      { kind: 'list', items: ['Netflix £10.99', 'Spotify £11.99'] },
+      { kind: 'p', text: 'Both are monthly.' },
+    ])
+    expect(answerBlocks('One line\nand another')).toEqual([{ kind: 'p', text: 'One line\nand another' }])
   })
 
   it('says how long it worked', () => {

@@ -14,7 +14,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleX,
-  Compass,
+  Cloud,
   Inbox,
   Loader2,
   MessageSquareText,
@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  SquarePen,
   Square,
   Wallet,
   X,
@@ -30,15 +31,29 @@ import {
 import type { AssistantInfo } from '@ordo/shared'
 import type { Route } from '../../routes'
 import { Button } from '../Button'
-import { elapsed, groupTrace, workedFor, type Item, type ReplyItem, type TraceEntry } from './conversation'
+import {
+  answerBlocks,
+  elapsed,
+  groupTrace,
+  WAITING,
+  workedFor,
+  type Item,
+  type ReplyItem,
+  type TraceEntry,
+} from './conversation'
 import { suggestionsFor, type SuggestionIcon } from './suggestions'
 import type { Assistant } from './useAssistant'
+
+export const PANEL_ID = 'assistant-panel'
+export const COMPOSER_ID = 'assistant-composer'
 
 interface Props {
   assistant: Assistant
   route: Route
   /** Shortcut label for the platform, e.g. "⌘K". */
   shortcut: string
+  /** Beside the content (it shrinks to make room) rather than over it. */
+  docked: boolean
   onClose: () => void
   onOpenSettings: () => void
 }
@@ -51,26 +66,43 @@ const SUGGESTION_ICONS: Record<SuggestionIcon, ReactNode> = {
   sparkles: <Sparkles size={14} />,
 }
 
+/** Clicks on a card this soon after it appears are ignored, so a double press can't confirm it. */
+const CARD_ARM_MS = 500
+
 /**
- * The assistant: a frosted panel on the right of the content, over whatever page is open. Opened
+ * The assistant: a panel on the right of the content, over or beside whatever page is open. Opened
  * with ⌘K or ⌘J (Ctrl on Windows and Linux) or the toolbar button; Escape closes it.
  */
-export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSettings }: Props) {
-  const { info, items, busy } = assistant
+export function AssistantPanel({ assistant, route, shortcut, docked, onClose, onOpenSettings }: Props) {
+  const { info, items, busy, waiting, draft, setDraft } = assistant
   const titleId = useId()
+  const panel = useRef<HTMLElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const log = useRef<HTMLDivElement>(null)
-  const [draft, setDraft] = useState('')
 
   const refreshInfo = assistant.refreshInfo
   useEffect(() => refreshInfo(), [refreshInfo])
-  // Focus the composer once it can take input (it's disabled until a model is set up).
+
   const ready = info?.ready === true
-  const panel = useRef<HTMLElement>(null)
+  const needsConsent = ready && info?.cloud !== undefined && !info.cloud.consent
+  const canAsk = ready && !needsConsent
+
+  // Focus the composer when it can take input; otherwise the panel (Not ready moves it to its button).
   useEffect(() => {
-    if (ready) input.current?.focus()
-    else panel.current?.focus()
-  }, [ready])
+    if (canAsk) input.current?.focus()
+    else if (!info) panel.current?.focus()
+  }, [canAsk, info])
+
+  // After a card is answered, give focus back to the composer.
+  const wasWaiting = useRef(waiting)
+  useEffect(() => {
+    if (wasWaiting.current && !waiting) {
+      const frame = requestAnimationFrame(() => input.current?.focus())
+      wasWaiting.current = waiting
+      return () => cancelAnimationFrame(frame)
+    }
+    wasWaiting.current = waiting
+  }, [waiting])
 
   // Keep the newest message in view.
   useLayoutEffect(() => {
@@ -88,7 +120,7 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
 
   const send = (text: string) => {
     const q = text.trim()
-    if (!q || busy || !info?.ready) return
+    if (!q || busy || !canAsk) return
     setDraft('')
     void assistant.ask(q, route)
     input.current?.focus()
@@ -108,18 +140,23 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
     }
   }
 
+  const size = docked
+    ? 'w-[392px]'
+    : 'w-[min(392px,calc(100%-1.5rem))] max-w-[50%] min-w-[320px] shadow-[var(--panel-shadow)]'
+
   return (
     <section
+      id={PANEL_ID}
       ref={panel}
       tabIndex={-1}
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
       onKeyDown={onPanelKey}
-      className="assistant-pop glass-panel no-drag absolute outline-none top-[60px] right-3 bottom-3 z-30 flex w-[392px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[14px]"
+      className={`assistant-pop assistant-surface no-drag absolute top-[60px] right-3 bottom-3 z-30 flex flex-col overflow-hidden rounded-xl ${size}`}
     >
       <header className="flex items-center gap-2.5 border-b border-sep px-3.5 py-2.5">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-accent text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]">
           <Sparkles size={15} aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
@@ -128,105 +165,131 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
           </h2>
           <ProviderLine info={info} />
         </div>
-        <IconButton
-          label="Clear conversation"
-          onClick={assistant.clear}
-          disabled={busy || items.length === 0}
-        >
-          <RotateCcw size={14} />
+        <IconButton label="New conversation" onClick={assistant.clear}>
+          <SquarePen size={15} />
         </IconButton>
         <IconButton label="Close assistant" onClick={onClose}>
           <X size={15} />
         </IconButton>
       </header>
 
-      <div
-        ref={log}
-        role="log"
-        aria-label="Conversation"
-        aria-live="polite"
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3.5 py-4"
-      >
-        {info && !info.ready ? (
-          <NotReady info={info} onOpenSettings={onOpenSettings} />
-        ) : items.length === 0 ? (
-          <Welcome route={route} onPick={send} disabled={!info?.ready || busy} />
-        ) : (
-          items.map((item) => <Message key={item.id} item={item} onAnswerCard={assistant.answerCard} />)
-        )}
-      </div>
-
-      {info?.dataNotice && (
-        <p className="mx-3.5 mb-2 flex gap-2 rounded-[8px] bg-warn-tint px-2.5 py-2 text-[11.5px] leading-snug text-ink">
-          <ShieldAlert size={14} className="mt-px shrink-0 text-warn" aria-hidden />
-          <span>{info.dataNotice}</span>
-        </p>
+      {!info ? (
+        <div className="flex-1" />
+      ) : !ready ? (
+        <NotReady info={info} onOpenSettings={onOpenSettings} />
+      ) : needsConsent && info.cloud ? (
+        <CloudConsent
+          info={info}
+          onAllow={() => void assistant.setCloudConsent(true)}
+          onOpenSettings={onOpenSettings}
+        />
+      ) : items.length === 0 ? (
+        <Welcome
+          route={route}
+          info={info}
+          onPick={send}
+          disabled={busy}
+          onStopSharing={() => void assistant.setCloudConsent(false)}
+        />
+      ) : (
+        <div
+          ref={log}
+          role="log"
+          aria-label="Conversation"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3.5 py-4"
+        >
+          {items.map((item) => (
+            <Message
+              key={item.id}
+              item={item}
+              onAnswerCard={assistant.answerCard}
+              onRetry={busy ? undefined : (q) => void assistant.ask(q, route)}
+              onOpenSettings={onOpenSettings}
+            />
+          ))}
+        </div>
       )}
 
-      <form
-        className="assistant-composer px-3 pb-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          send(draft)
-        }}
-      >
-        <div className="flex items-end gap-2 rounded-[12px] bg-field py-1.5 pr-1.5 pl-3 shadow-[0_0_0_1px_var(--sep),0_1px_2px_rgb(0_0_0/0.04)] focus-within:shadow-[0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-tint)]">
-          <textarea
-            ref={input}
-            rows={1}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onComposerKey}
-            maxLength={2000}
-            disabled={!info?.ready}
-            aria-label="Ask the assistant"
-            placeholder="Ask about your mail, calendar or money"
-            className="max-h-28 min-h-[22px] flex-1 resize-none bg-transparent py-[3px] text-[13px] leading-[18px] text-ink outline-none select-text placeholder:text-ink-3 disabled:opacity-60"
-          />
-          {busy ? (
-            <button
-              type="button"
-              onClick={assistant.stop}
-              aria-label="Stop"
-              title="Stop"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-ink text-content hover:opacity-85"
-            >
-              <Square size={10} fill="currentColor" aria-hidden />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              aria-label="Send"
-              title="Send"
-              disabled={!draft.trim() || !info?.ready}
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-opacity enabled:hover:brightness-110 disabled:opacity-35"
-            >
-              <ArrowUp size={15} strokeWidth={2.4} aria-hidden />
-            </button>
+      {canAsk && (
+        <form
+          className="px-3 pt-2 pb-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            send(draft)
+          }}
+        >
+          {info?.cloud && items.length > 0 && (
+            <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-ink-2">
+              <Cloud size={12} className="shrink-0 text-warn" aria-hidden />
+              <span className="flex-1 truncate">Sent to {info.cloud.vendor} under your account</span>
+              <button
+                type="button"
+                onClick={() => void assistant.setCloudConsent(false)}
+                className="rounded-sm text-accent hover:underline"
+              >
+                Stop sharing
+              </button>
+            </p>
           )}
-        </div>
-        <p className="mt-1.5 px-1 text-[11px] text-ink-3">
-          Ordo asks before changing anything · <kbd className="font-sans">{shortcut}</kbd> to open or close
-        </p>
-      </form>
+          <div className="flex items-end gap-2 rounded-[10px] bg-field py-1.5 pr-1.5 pl-3 shadow-[0_0_0_1px_var(--sep),0_1px_2px_rgb(0_0_0/0.04)] focus-within:shadow-[0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-tint)]">
+            <textarea
+              id={COMPOSER_ID}
+              ref={input}
+              rows={1}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onComposerKey}
+              maxLength={2000}
+              disabled={waiting}
+              aria-label="Ask the assistant"
+              placeholder={waiting ? 'Answer the card above first' : 'Ask about your mail, calendar or money'}
+              className="max-h-28 min-h-[22px] flex-1 resize-none bg-transparent py-[3px] text-[13px] leading-[18px] text-ink outline-none select-text placeholder:text-ink-2 disabled:opacity-60"
+            />
+            {busy ? (
+              <button
+                type="button"
+                onClick={assistant.stop}
+                aria-label="Stop"
+                title="Stop"
+                className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-white enabled:hover:brightness-110"
+              >
+                <Square size={10} fill="currentColor" aria-hidden />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                aria-label="Send"
+                title="Send"
+                disabled={!draft.trim()}
+                className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-opacity enabled:hover:brightness-110 disabled:opacity-35"
+              >
+                <ArrowUp size={15} strokeWidth={2.4} aria-hidden />
+              </button>
+            )}
+          </div>
+          <p className="mt-1.5 px-1 text-[11px] text-ink-2">
+            Ordo asks before changing anything · <kbd className="font-sans">{shortcut}</kbd>
+          </p>
+        </form>
+      )}
     </section>
   )
 }
 
 function ProviderLine({ info }: { info: AssistantInfo | null }) {
-  if (!info) return <p className="text-[11px] text-ink-3">Checking…</p>
-  if (!info.label) return <p className="text-[11px] text-ink-3">No model chosen</p>
+  if (!info) return <p className="text-[11px] text-ink-2">Checking…</p>
+  if (!info.label) return <p className="text-[11px] text-ink-2">No model chosen</p>
   const where = info.kind === 'cloud' ? 'Cloud' : 'Local'
   // "openai/gpt-oss-20b" → "gpt-oss-20b": the vendor prefix only crowds the line.
   const model = info.model?.split('/').at(-1)
   return (
     <p
       className="flex items-center gap-1.5 truncate text-[11px] text-ink-2"
-      title={info.kind === 'cloud' ? `Sent to ${info.label}` : 'Runs on this computer'}
+      title={info.cloud ? `Sent to ${info.cloud.vendor}` : 'Runs on this computer'}
     >
       <span
         aria-hidden
-        className={`size-1.5 shrink-0 rounded-full ${info.kind === 'cloud' ? 'bg-[var(--promotions)]' : 'bg-success'}`}
+        className={`size-1.5 shrink-0 rounded-full ${info.kind === 'cloud' ? 'bg-warn' : 'bg-success'}`}
       />
       <span className="truncate">{[info.label, model, where].filter(Boolean).join(' · ')}</span>
     </p>
@@ -250,39 +313,95 @@ function IconButton(props: { label: string; onClick: () => void; disabled?: bool
 
 function NotReady({ info, onOpenSettings }: { info: AssistantInfo; onOpenSettings: () => void }) {
   return (
-    <div className="assistant-rise m-auto flex max-w-[280px] flex-col items-center gap-2 text-center">
-      <span className="mb-1 flex size-10 items-center justify-center rounded-[10px] bg-accent-tint text-accent">
-        <Sparkles size={20} aria-hidden />
-      </span>
+    <div className="assistant-rise m-auto flex max-w-[280px] flex-col items-center gap-2 px-4 text-center">
       <h3 className="text-[15px] font-semibold">Set up a model first</h3>
-      <p className="text-[12px] leading-relaxed text-ink-2">{info.message}</p>
-      <p className="text-[12px] leading-relaxed text-ink-2">
+      <p className="text-[13px] leading-relaxed text-ink-2">{info.message}</p>
+      <p className="text-[13px] leading-relaxed text-ink-2">
         LM Studio or Ollama keep everything on this computer.
       </p>
-      <Button variant="primary" className="mt-2" onClick={onOpenSettings}>
+      <Button variant="primary" className="mt-2" onClick={onOpenSettings} autoFocus>
         Open Settings
       </Button>
     </div>
   )
 }
 
+function CloudConsent({
+  info,
+  onAllow,
+  onOpenSettings,
+}: {
+  info: AssistantInfo
+  onAllow: () => void
+  onOpenSettings: () => void
+}) {
+  const [declined, setDeclined] = useState(false)
+  const headingId = useId()
+  const cloud = info.cloud!
+  return (
+    <div
+      role="region"
+      aria-labelledby={headingId}
+      className="assistant-rise mt-auto flex flex-col gap-3 overflow-y-auto px-4 py-4"
+    >
+      <span className="flex size-8 items-center justify-center rounded-lg bg-warn-tint text-warn">
+        <Cloud size={16} aria-hidden />
+      </span>
+      <h3 id={headingId} className="text-[15px] leading-snug font-semibold">
+        Let the assistant send your data to {cloud.vendor}?
+      </h3>
+      <p className="text-[13px] leading-relaxed text-ink-2">
+        You’ve chosen {info.label}, so the assistant’s model runs at {cloud.vendor}. {cloud.sends} It goes
+        under your own account, and your account’s terms apply.
+      </p>
+      <p className="text-[13px] leading-relaxed text-ink-2">
+        This is separate from sorting with AI, which sends much less. LM Studio or Ollama keep everything on
+        this computer.
+      </p>
+      {declined ? (
+        <div className="flex flex-col gap-2">
+          <p role="status" className="text-[13px] text-ink">
+            Nothing was sent. Choose LM Studio or Ollama in Settings to use the assistant on this computer.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={onOpenSettings}>Open Settings</Button>
+            <Button variant="primary" onClick={onAllow}>
+              Allow after all
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-2">
+          <Button autoFocus onClick={() => setDeclined(true)}>
+            Not now
+          </Button>
+          <Button variant="primary" onClick={onAllow}>
+            Allow
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Welcome({
   route,
+  info,
   onPick,
   disabled,
+  onStopSharing,
 }: {
   route: Route
+  info: AssistantInfo
   onPick: (q: string) => void
   disabled: boolean
+  onStopSharing: () => void
 }) {
   return (
-    <div className="assistant-rise mt-auto flex flex-col gap-4">
+    <div className="assistant-rise mt-auto flex flex-col gap-4 overflow-y-auto px-3.5 pt-4">
       <div className="px-1">
-        <span className="mb-3 flex size-9 items-center justify-center rounded-[10px] bg-accent-tint text-accent shadow-[0_0_0_1px_var(--accent-tint),0_8px_24px_var(--accent-tint)]">
-          <Sparkles size={18} aria-hidden />
-        </span>
-        <h3 className="text-[17px] leading-snug font-semibold tracking-[-0.01em]">What can I help with?</h3>
-        <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
+        <h3 className="text-[15px] leading-snug font-semibold">What can I help with?</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
           I can look things up in your mail, calendar and money, open pages for you, and make changes once you
           confirm them.
         </p>
@@ -294,19 +413,27 @@ function Welcome({
               type="button"
               disabled={disabled}
               onClick={() => onPick(s.text)}
-              className="group flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left text-[12.5px] text-ink shadow-[0_0_0_1px_var(--sep)] enabled:hover:bg-hover disabled:opacity-50"
+              className="group flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-[13px] text-ink shadow-[0_0_0_1px_var(--sep)] enabled:hover:bg-hover disabled:opacity-50"
             >
-              <span className="text-ink-3 group-hover:text-accent">{SUGGESTION_ICONS[s.icon]}</span>
+              <span className="text-ink-3 group-hover:text-accent" aria-hidden>
+                {SUGGESTION_ICONS[s.icon]}
+              </span>
               <span className="flex-1">{s.text}</span>
-              <ArrowUp
-                size={13}
-                className="rotate-45 text-ink-3 opacity-0 group-hover:opacity-100"
-                aria-hidden
-              />
             </button>
           </li>
         ))}
       </ul>
+      {info.cloud && (
+        <p className="flex gap-2 rounded-[10px] bg-warn-tint px-2.5 py-2 text-[11px] leading-snug text-ink">
+          <ShieldAlert size={14} className="mt-px shrink-0 text-warn" aria-hidden />
+          <span className="flex-1">
+            {info.cloud.sends} It goes to {info.cloud.vendor} under your own account.{' '}
+            <button type="button" onClick={onStopSharing} className="text-accent hover:underline">
+              Stop sharing
+            </button>
+          </span>
+        </p>
+      )}
     </div>
   )
 }
@@ -314,33 +441,43 @@ function Welcome({
 function Message({
   item,
   onAnswerCard,
+  onRetry,
+  onOpenSettings,
 }: {
   item: Item
   onAnswerCard: (id: string, approve: boolean) => void
+  onRetry?: (question: string) => void
+  onOpenSettings: () => void
 }) {
   if (item.kind === 'user')
     return (
       <div className="assistant-rise flex justify-end pl-10">
-        <p className="rounded-[14px] rounded-br-[5px] bg-accent-tint px-3 py-1.5 text-[13px] leading-[18px] whitespace-pre-wrap text-ink select-text">
+        <p className="rounded-[10px] rounded-br-[4px] bg-accent-tint px-3 py-1.5 text-[13px] leading-[18px] whitespace-pre-wrap text-ink select-text [overflow-wrap:anywhere]">
+          <span className="sr-only">You said: </span>
           {item.text}
         </p>
       </div>
     )
-  return <Reply item={item} onAnswerCard={onAnswerCard} />
+  return <Reply item={item} onAnswerCard={onAnswerCard} onRetry={onRetry} onOpenSettings={onOpenSettings} />
 }
 
 function Reply({
   item,
   onAnswerCard,
+  onRetry,
+  onOpenSettings,
 }: {
   item: ReplyItem
   onAnswerCard: (id: string, approve: boolean) => void
+  onRetry?: (question: string) => void
+  onOpenSettings: () => void
 }) {
-  const steps = item.trace.filter((t) => t.kind === 'tool').length
   const hasCard = item.trace.some((t) => t.kind === 'card')
-  // A cancelled card already says nothing was changed.
-  const showError = item.error && !(item.error.reason === 'cancelled' && hasCard)
-  const footer = item.endedAt ? workedFor(item.endedAt - item.startedAt, steps) : null
+  // A card already says nothing was changed, or why it couldn't be.
+  const showError =
+    item.error && !((item.error.reason === 'cancelled' || item.error.reason === 'blocked') && hasCard)
+  const canRetry = item.error && (item.error.reason === 'failed' || item.error.reason === 'invalid')
+  const footer = workedFor(item)
   return (
     <article aria-label="Assistant reply" className="assistant-rise flex flex-col gap-2 pr-4">
       {groupTrace(item.trace).map((g) =>
@@ -351,30 +488,50 @@ function Reply({
             ))}
           </ul>
         ) : (
-          <ConfirmationCard key={g.id} entry={g} onAnswer={onAnswerCard} />
+          <ConfirmationCard key={g.id} entry={g} onAnswer={onAnswerCard} onOpenSettings={onOpenSettings} />
         ),
       )}
       {item.status && <Working item={item} />}
-      {item.answer && (
-        <p className="text-[13px] leading-[1.55] whitespace-pre-wrap text-ink select-text [overflow-wrap:anywhere]">
-          {item.answer}
-        </p>
-      )}
+      {item.answer && <Answer text={item.answer} />}
       {showError && item.error && (
-        <p
-          role={item.error.reason === 'failed' || item.error.reason === 'invalid' ? 'alert' : undefined}
-          className="flex items-start gap-1.5 text-[12.5px] leading-snug text-ink-2"
-        >
-          {item.error.reason === 'stopped' || item.error.reason === 'cancelled' ? (
-            <CircleX size={14} className="mt-px shrink-0 text-ink-3" aria-hidden />
-          ) : (
-            <CircleAlert size={14} className="mt-px shrink-0 text-danger" aria-hidden />
+        <div className="flex flex-col items-start gap-2">
+          <p className="flex items-start gap-1.5 text-[13px] leading-snug text-ink-2">
+            {item.error.reason === 'stopped' || item.error.reason === 'cancelled' ? (
+              <CircleX size={14} className="mt-0.5 shrink-0 text-ink-3" aria-hidden />
+            ) : (
+              <CircleAlert size={14} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+            )}
+            {item.error.message}
+          </p>
+          {canRetry && onRetry && (
+            <Button icon={<RotateCcw size={13} aria-hidden />} onClick={() => onRetry(item.question)}>
+              Try again
+            </Button>
           )}
-          {item.error.message}
-        </p>
+        </div>
       )}
-      {footer && <p className="text-[11px] text-ink-3 tabular-nums">{footer}</p>}
+      {footer && <p className="text-[11px] text-ink-2 tabular-nums">{footer}</p>}
     </article>
+  )
+}
+
+function Answer({ text }: { text: string }) {
+  return (
+    <div className="flex flex-col gap-2 text-[13px] leading-[1.55] text-ink select-text [overflow-wrap:anywhere]">
+      {answerBlocks(text).map((b, i) =>
+        b.kind === 'p' ? (
+          <p key={i} className="whitespace-pre-wrap">
+            {b.text}
+          </p>
+        ) : (
+          <ul key={i} className="flex list-disc flex-col gap-0.5 pl-4 marker:text-ink-3">
+            {b.items.map((t, j) => (
+              <li key={j}>{t}</li>
+            ))}
+          </ul>
+        ),
+      )}
+    </div>
   )
 }
 
@@ -384,10 +541,15 @@ function Working({ item }: { item: ReplyItem }) {
     const t = setInterval(() => setNow(Date.now()), 500)
     return () => clearInterval(t)
   }, [])
+  const waiting = item.status === WAITING
   return (
-    <p role="status" className="flex items-center gap-2 text-[12.5px]">
-      <span className="shimmer-text font-medium">{item.status}</span>
-      <span className="text-[11px] text-ink-3 tabular-nums">{elapsed(now - item.startedAt)}</span>
+    <p role="status" className="flex items-center gap-2 text-[13px]">
+      <span className={waiting ? 'font-medium text-ink-2' : 'shimmer-text font-medium'}>{item.status}</span>
+      {!waiting && (
+        <span aria-hidden className="text-[11px] text-ink-2 tabular-nums">
+          {elapsed(now - item.startedAt)}
+        </span>
+      )}
     </p>
   )
 }
@@ -398,21 +560,17 @@ function ToolChip({ entry }: { entry: Extract<TraceEntry, { kind: 'tool' }> }) {
       <Loader2 size={12} className="animate-spin text-ink-3" aria-hidden />
     ) : entry.status === 'failed' ? (
       <CircleAlert size={12} className="text-danger" aria-hidden />
-    ) : entry.toolKind === 'navigate' ? (
-      <Compass size={12} className="text-accent" aria-hidden />
     ) : (
       <Check size={12} strokeWidth={2.6} className="text-success" aria-hidden />
     )
   return (
     <li
-      className="flex max-w-full items-center gap-1.5 rounded-[6px] bg-field px-2 py-[3px] text-[11.5px] text-ink-2 shadow-[0_0_0_1px_var(--sep)]"
+      className="flex max-w-full items-center gap-1.5 rounded-md bg-field px-2 py-[3px] text-[11px] text-ink-2 shadow-[0_0_0_1px_var(--sep)]"
       title={entry.summary}
     >
       {icon}
       <span className="truncate text-ink">{entry.label}</span>
-      {entry.summary && entry.status !== 'running' && (
-        <span className="truncate text-ink-3 tabular-nums">· {entry.summary}</span>
-      )}
+      {entry.status === 'failed' && entry.summary && <span className="truncate">· {entry.summary}</span>}
     </li>
   )
 }
@@ -420,106 +578,132 @@ function ToolChip({ entry }: { entry: Extract<TraceEntry, { kind: 'tool' }> }) {
 function ConfirmationCard({
   entry,
   onAnswer,
+  onOpenSettings,
 }: {
   entry: Extract<TraceEntry, { kind: 'card' }>
   onAnswer: (id: string, approve: boolean) => void
+  onOpenSettings: () => void
 }) {
   const { card, state } = entry
   const titleId = useId()
-  const fromData = card.trigger.kind === 'data'
-  const confirmRef = useRef<HTMLButtonElement>(null)
-  const cancelRef = useRef<HTMLButtonElement>(null)
+  const triggerId = useId()
+  const group = useRef<HTMLElement>(null)
+  const blocked = state === 'blocked'
+  const fromData = !blocked && card.trigger.kind === 'data'
+  const [armed, setArmed] = useState(false)
 
-  // Take focus when the card appears; Cancel is the safe default when the user didn't ask for it.
+  // Take focus (the card itself, never a button) and ignore clicks for a moment, so a key or click
+  // meant for something else can't confirm it.
   useEffect(() => {
     if (state !== 'open') return
-    ;(fromData || card.blocked ? cancelRef : confirmRef).current?.focus()
+    group.current?.focus()
+    const t = setTimeout(() => setArmed(true), CARD_ARM_MS)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const answer = (approve: boolean) => {
+    if (armed) onAnswer(entry.id, approve)
+  }
+
+  const eyebrow = blocked ? 'Can’t do this yet' : fromData ? 'Check this first' : 'Needs your OK'
+
   return (
     <section
+      ref={group}
+      tabIndex={-1}
       role="group"
       aria-labelledby={titleId}
-      className="assistant-rise flex flex-col gap-2.5 rounded-[12px] bg-field p-3 shadow-[var(--card-shadow)]"
+      aria-describedby={blocked ? undefined : triggerId}
+      className="assistant-rise flex flex-col gap-2.5 rounded-[10px] bg-field p-3 shadow-[var(--card-shadow)] outline-none focus-visible:shadow-[0_0_0_1px_var(--accent),0_0_0_4px_var(--accent-tint),var(--card-shadow)]"
     >
       <div className="flex items-start gap-2.5">
         <span
-          className={`flex size-7 shrink-0 items-center justify-center rounded-[8px] ${
-            fromData ? 'bg-warn-tint text-warn' : 'bg-accent-tint text-accent'
+          className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${
+            blocked
+              ? 'bg-hover text-ink-2'
+              : fromData
+                ? 'bg-warn-tint text-warn'
+                : 'bg-accent-tint text-accent'
           }`}
         >
-          {fromData ? <ShieldAlert size={15} aria-hidden /> : <ShieldCheck size={15} aria-hidden />}
+          {blocked ? (
+            <CircleAlert size={15} aria-hidden />
+          ) : fromData ? (
+            <ShieldAlert size={15} aria-hidden />
+          ) : (
+            <ShieldCheck size={15} aria-hidden />
+          )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[10.5px] font-semibold tracking-[0.04em] text-ink-3 uppercase">
-            Confirm a change
-          </p>
+          <p className={`text-[11px] font-medium ${fromData ? 'text-warn' : 'text-ink-2'}`}>{eyebrow}</p>
           <h3 id={titleId} className="text-[13px] leading-snug font-semibold">
             {card.title}
           </h3>
         </div>
       </div>
 
+      {fromData && (
+        <p
+          id={triggerId}
+          className="flex gap-2 rounded-lg bg-warn-tint px-2.5 py-2 text-[11px] leading-snug text-ink"
+        >
+          <ShieldAlert size={13} className="mt-px shrink-0 text-warn" aria-hidden />
+          <span className="min-w-0 [overflow-wrap:anywhere]">{card.trigger.text}</span>
+        </p>
+      )}
+
       {card.details.length > 0 && (
-        <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-[8px] bg-hover px-2.5 py-2 text-[12px] leading-snug select-text">
+        <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-lg bg-hover px-2.5 py-2 text-[11px] leading-snug text-ink select-text">
           {card.details.map((d, i) => (
-            <li key={i} className="[overflow-wrap:anywhere]">
-              {d}
+            <li key={i} title={d.title} className="[overflow-wrap:anywhere]">
+              {d.text}
             </li>
           ))}
         </ul>
       )}
-      {card.notes.map((n, i) => (
-        <p key={i} className="text-[11.5px] leading-snug text-ink-2">
-          {n}
-        </p>
-      ))}
+      {!blocked &&
+        card.notes.map((n, i) => (
+          <p key={i} className="text-[11px] leading-snug text-ink-2">
+            {n}
+          </p>
+        ))}
 
-      <p
-        className={`flex gap-2 rounded-[8px] px-2.5 py-2 text-[11.5px] leading-snug ${
-          fromData ? 'bg-warn-tint text-ink' : 'text-ink-2 shadow-[0_0_0_1px_var(--sep)]'
-        }`}
-      >
-        {fromData ? (
-          <ShieldAlert size={13} className="mt-px shrink-0 text-warn" aria-hidden />
-        ) : (
-          <MessageSquareText size={13} className="mt-px shrink-0 text-ink-3" aria-hidden />
-        )}
-        <span className="min-w-0 [overflow-wrap:anywhere]">{card.trigger.text}</span>
-      </p>
-
-      {card.blocked && (
-        <p className="flex gap-1.5 text-[12px] text-danger">
-          <CircleAlert size={14} className="mt-px shrink-0" aria-hidden />
-          {card.blocked}
+      {!blocked && !fromData && (
+        <p id={triggerId} className="flex items-center gap-2 text-[11px] text-ink-2">
+          <MessageSquareText size={13} className="shrink-0 text-ink-3" aria-hidden />
+          {card.trigger.text}
         </p>
+      )}
+
+      {blocked && card.blocked && (
+        <div className="flex flex-col items-start gap-2">
+          <p className="flex gap-1.5 text-[13px] leading-snug text-ink">
+            <CircleAlert size={14} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+            {card.blocked}
+          </p>
+          {/Settings/.test(card.blocked) && <Button onClick={onOpenSettings}>Open Settings</Button>}
+        </div>
       )}
 
       {state === 'open' ? (
         <div className="flex justify-end gap-2 pt-0.5">
-          <Button ref={cancelRef} onClick={() => onAnswer(entry.id, false)}>
+          <Button disabled={!armed} onClick={() => answer(false)}>
             Cancel
           </Button>
-          {!card.blocked && (
-            <Button ref={confirmRef} variant="primary" onClick={() => onAnswer(entry.id, true)}>
-              Confirm
-            </Button>
-          )}
+          <Button variant={fromData ? 'secondary' : 'primary'} disabled={!armed} onClick={() => answer(true)}>
+            {fromData ? 'Confirm anyway' : 'Confirm'}
+          </Button>
         </div>
-      ) : (
-        <p role="status" className="flex items-center gap-1.5 text-[12px] font-medium text-ink-2">
-          {state === 'approved' ? (
-            <>
-              <CircleCheck size={14} className="text-success" aria-hidden /> Confirmed
-            </>
-          ) : (
-            <>
-              <CircleX size={14} className="text-ink-3" aria-hidden /> Cancelled. Nothing was changed.
-            </>
-          )}
+      ) : state === 'approved' ? (
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
+          <CircleCheck size={14} className="text-success" aria-hidden /> Confirmed
         </p>
-      )}
+      ) : state === 'cancelled' ? (
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
+          <CircleX size={14} className="text-ink-3" aria-hidden /> Cancelled. Nothing was changed.
+        </p>
+      ) : null}
     </section>
   )
 }
