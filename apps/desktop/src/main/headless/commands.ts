@@ -326,7 +326,13 @@ export async function runCommand(
       const p = page(all, command.limit, offset)
       return {
         ok: true,
-        data: { total: p.total, offset: p.offset, shown: p.shown, senders: p.items.map(senderRow) },
+        data: {
+          category: command.category ?? null,
+          total: p.total,
+          offset: p.offset,
+          shown: p.shown,
+          senders: p.items.map(senderRow),
+        },
       }
     }
 

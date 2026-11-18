@@ -135,6 +135,7 @@ describe('commands', () => {
     expect(r).toEqual({
       ok: true,
       data: {
+        category: null,
         total: 2,
         offset: 0,
         shown: 1,
@@ -155,6 +156,11 @@ describe('commands', () => {
     expect(await run({ name: 'senders', limit: 50, category: 'people' })).toMatchObject({
       data: { total: 1, senders: [{ address: 'sam@friend.example', protected: true }] },
     })
+  })
+
+  it('an empty category says so, instead of asking for a scan', async () => {
+    const r = await cli(fakeServices(), 'senders', '--category', 'receipts')
+    expect(r.stdout).toBe('No senders in receipts.\n')
   })
 
   it('cleanup plan sends the same request the review sheet would', async () => {

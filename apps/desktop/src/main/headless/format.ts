@@ -73,7 +73,9 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
 
   senders: (d) =>
     d.total === 0
-      ? 'No senders. Run `scan` first.'
+      ? d.category
+        ? `No senders in ${d.category === 'uncategorised' ? 'Other' : d.category}.`
+        : 'No senders. Run `scan` first.'
       : table([
           ['EMAILS', 'CATEGORY', 'UNSUBSCRIBE', 'SENDER'],
           ...d.senders.map((s: any) => [
