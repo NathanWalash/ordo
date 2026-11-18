@@ -1,5 +1,5 @@
 import { rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ImapFlow } from 'imapflow'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -165,7 +165,10 @@ test.describe('without an account', () => {
           'ordo_money_sort',
         ]),
       )
-      const refused = await changes.callTool({ name: 'ordo_import_statement', arguments: { path: FIXTURE } })
+      const refused = await changes.callTool({
+        name: 'ordo_import_statement',
+        arguments: { path: resolve(FIXTURE) },
+      })
       expect(refused.isError).toBe(true)
       expect(toolText(refused)).toMatchObject({ error: { code: 'confirm_required' } })
     } finally {

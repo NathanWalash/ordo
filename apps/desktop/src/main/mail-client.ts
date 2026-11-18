@@ -37,7 +37,7 @@ import {
   MAIL_IPC,
   MessageListQuerySchema,
   MessageRefSchema,
-  MoveSchema,
+  MailMoveSchema,
   OpenLinkSchema,
   SearchQuerySchema,
   ServerSearchSchema,
@@ -338,7 +338,7 @@ const TARGET_NAMES: Record<MoveTarget, string> = {
 
 /** Move messages to Archive, Bin, Inbox or Junk. Nothing is ever deleted. */
 export async function move(input: unknown): Promise<MailOutcome<{ moved: number; undoId: number | null }>> {
-  const parsed = MoveSchema.safeParse(input)
+  const parsed = MailMoveSchema.safeParse(input)
   if (!parsed.success) return INVALID
   if (!loadAccount()) return NO_ACCOUNT
   const { mailbox, uids, to } = parsed.data

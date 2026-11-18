@@ -68,6 +68,9 @@ importers:
       '@ordo/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@ordo/boards-core':
+        specifier: workspace:*
+        version: link:../../packages/boards-core
       '@ordo/calendar-core':
         specifier: workspace:*
         version: link:../../packages/calendar-core
@@ -132,6 +135,15 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/boards-core:
+    dependencies:
+      '@ordo/ai':
+        specifier: workspace:*
+        version: link:../ai
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
   packages/calendar-core:
     dependencies:
       ical.js:
@@ -179,6 +191,9 @@ importers:
       '@ordo/ai':
         specifier: workspace:*
         version: link:../ai
+      '@ordo/boards-core':
+        specifier: workspace:*
+        version: link:../boards-core
       '@ordo/calendar-core':
         specifier: workspace:*
         version: link:../calendar-core

@@ -3,7 +3,7 @@ import { parseInvocation, type Command } from './args'
 import { runCli, type CliIo } from './cli'
 import { exitCodeFor, gate, runCommand } from './commands'
 import { clean, formatHuman, pounds } from './format'
-import { fakeServices, summary } from './fake-services'
+import { boardCard, fakeServices, summary } from './fake-services'
 
 function io() {
   const out: string[] = []
@@ -33,6 +33,8 @@ describe('the change gate', () => {
     ['money', 'import', 'x.csv', '--confirm'],
     ['ai', 'sort', '--confirm'],
     ['money', 'sort', '--confirm'],
+    ['boards', 'add-card', '--board', 'Home', '--title', 'x', '--confirm'],
+    ['boards', 'move-card', 'Fix the gate', '--column', 'Doing', '--confirm'],
   ])('%s %s is refused without --allow-changes and nothing is called', async (...args) => {
     const services = fakeServices()
     const r = await cli(services, ...args)
@@ -43,6 +45,8 @@ describe('the change gate', () => {
     expect(services.money.importFile).not.toHaveBeenCalled()
     expect(services.ai.sort).not.toHaveBeenCalled()
     expect(services.money.aiSort).not.toHaveBeenCalled()
+    expect(services.boards.addCard).not.toHaveBeenCalled()
+    expect(services.boards.moveCard).not.toHaveBeenCalled()
   })
 
   it('is refused without --confirm even when changes are allowed', async () => {
@@ -383,6 +387,10 @@ describe('output', () => {
       'calendar sync',
       'mail read <uid>',
       'mail search <words>',
+      'boards list',
+      'boards cards',
+      'boards add-card',
+      'boards move-card',
     ])
       expect(r.stdout).toContain(c)
     const j = await cli(fakeServices(), '--help', '--json')
@@ -392,6 +400,9 @@ describe('output', () => {
   it('strips control characters and bidi tricks from third-party text', () => {
     expect(clean('Evil\u001b[2J\r\nCorp\u202e')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
+    // Zero-width, direction marks, line and paragraph separators and the BOM go too.
+    for (const code of [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2028, 0x2029, 0x061c, 0xfeff])
+      expect(clean(`a${String.fromCharCode(code)}b`)).toBe('a b')
     // Right-to-left and left-to-right marks reorder text; line and paragraph separators start lines.
     const sneaky = ['a', 0x200f, 'b', 0x200e, 'c', 0x061c, 'd', 0x2028, 'e', 0x2029, 'f']
       .map((p) => (typeof p === 'number' ? String.fromCharCode(p) : p))
@@ -506,5 +517,144 @@ describe('calendar events', () => {
       if (tz === undefined) delete process.env['TZ']
       else process.env['TZ'] = tz
     }
+  })
+})
+
+describe('boards', () => {
+  it('lists boards without needing an account', async () => {
+    const services = fakeServices({ account: () => ({ connected: false }) })
+    const r = await cli(services, 'boards', 'list', '--json')
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual({
+      boards: [{ id: 'board-1-uuid', name: 'Home', cards: 2, overdue: 1 }],
+    })
+    const human = await cli(services, 'boards', 'list')
+    expect(human.stdout).toMatch(/CARDS\s+OVERDUE\s+ID\s+BOARD/)
+    expect(human.stdout).toMatch(/2\s+1\s+board-1-\s+Home/)
+  })
+
+  it('lists cards by board, column and labels, paged', async () => {
+    const services = fakeServices()
+    const r = await cli(
+      services,
+      'boards',
+      'cards',
+      '--board',
+      'Home',
+      '--label',
+      'Urgent',
+      '--label',
+      'Home',
+      '--json',
+    )
+    expect(services.boards.cards).toHaveBeenCalledWith({
+      board: 'Home',
+      column: undefined,
+      labels: ['Urgent', 'Home'],
+      archived: false,
+    })
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      board: 'Home',
+      total: 1,
+      shown: 1,
+      cards: [{ title: 'Fix the gate' }],
+    })
+    const human = await cli(services, 'boards', 'cards', '--board', 'Home')
+    expect(human.stdout).toContain('c0ffee00  To do   2026-11-20  Fix the gate  [Urgent]  1/3')
+  })
+
+  it('reports an unknown board as a failure, exit 1', async () => {
+    const services = fakeServices()
+    services.boards.cards = () => ({
+      ok: false,
+      error: 'not-found',
+      message: 'There’s no board called “Nope”.',
+    })
+    const r = await cli(services, 'boards', 'cards', '--board', 'Nope', '--json')
+    expect(r.code).toBe(1)
+    expect(JSON.parse(r.stdout)).toEqual({
+      error: { code: 'invalid', message: 'There’s no board called “Nope”.' },
+    })
+  })
+
+  it('adds a card with --allow-changes and --confirm', async () => {
+    const services = fakeServices()
+    const r = await cli(
+      services,
+      'boards',
+      'add-card',
+      '--board',
+      'Home',
+      '--title',
+      'Book the MOT',
+      '--due',
+      '2026-12-01',
+      '--label',
+      'Urgent',
+      '--allow-changes',
+      '--confirm',
+    )
+    expect(r.code).toBe(0)
+    expect(services.boards.addCard).toHaveBeenCalledWith({
+      board: 'Home',
+      column: undefined,
+      title: 'Book the MOT',
+      notes: undefined,
+      start: undefined,
+      due: '2026-12-01',
+      labels: ['Urgent'],
+    })
+    expect(r.stdout).toBe('Added “Book the MOT” to Home › To do (c0ffee00).\n')
+  })
+
+  it('checks add-card arguments', () => {
+    expect(() => parseInvocation(['boards', 'add-card', '--title', 'x'])).toThrow(/needs --board/)
+    expect(() => parseInvocation(['boards', 'add-card', '--board', 'Home'])).toThrow(/needs --title/)
+    expect(() =>
+      parseInvocation(['boards', 'add-card', '--board', 'H', '--title', 'x', '--due', '2026-02-30']),
+    ).toThrow(/isn't a real date/)
+    expect(() => parseInvocation(['boards', 'move-card', 'x', '--position', '0'])).toThrow(/starts at 1/)
+    expect(() => parseInvocation(['boards', 'move-card'])).toThrow(/needs a card/)
+    expect(() => parseInvocation(['boards', 'list', '--board', 'x'])).toThrow(/doesn't take --board/)
+  })
+
+  it('moves a card by title to a column and position', async () => {
+    const services = fakeServices()
+    const r = await cli(
+      services,
+      'boards',
+      'move-card',
+      'Fix the gate',
+      '--column',
+      'Doing',
+      '--position',
+      '1',
+      '--allow-changes',
+      '--confirm',
+      '--json',
+    )
+    expect(r.code).toBe(0)
+    expect(services.boards.moveCard).toHaveBeenCalledWith({
+      card: 'Fix the gate',
+      board: undefined,
+      column: 'Doing',
+      position: 1,
+    })
+    expect(JSON.parse(r.stdout).card).toMatchObject({ column: 'Doing' })
+  })
+
+  it('passes the write lock through, exit 4', async () => {
+    const services = fakeServices()
+    services.boards.moveCard = async () => ({ ok: false, error: 'locked', message: 'Ordo is busy.' })
+    const r = await cli(services, 'boards', 'move-card', 'x', '--allow-changes', '--confirm')
+    expect(r.code).toBe(4)
+  })
+
+  it('strips control characters from card titles in human output', async () => {
+    const services = fakeServices()
+    services.boards.cards = () => ({ ok: true, value: [boardCard({ title: 'Evil\u001b[2Jtitle\u202e' })] })
+    const r = await cli(services, 'boards', 'cards')
+    expect(r.stdout).not.toContain('\u001b')
+    expect(r.stdout).not.toContain('\u202e')
   })
 })

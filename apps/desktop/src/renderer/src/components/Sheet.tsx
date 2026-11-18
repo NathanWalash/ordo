@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useFocusTrap } from './focus'
 
 /**
  * Render over the content area (the app's <main>), whatever is scrolled, leaving the
@@ -29,28 +30,23 @@ interface Props {
   describedBy?: string
   footer: ReactNode
   children: ReactNode
+  /** A selector for what to focus first; the first field by default. */
+  initialFocus?: string
 }
 
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-
-/** The first thing to focus in a sheet: a field, then what the sheet marks, then its main button. */
-function initialFocus(panel: HTMLElement): HTMLElement {
-  return (
-    panel.querySelector<HTMLElement>(
-      'input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
-    ) ??
-    panel.querySelector<HTMLElement>('[data-autofocus]') ??
-    panel.querySelector<HTMLElement>('button[type="submit"]:not([disabled])') ??
-    panel.querySelector<HTMLElement>('button:not([disabled])') ??
-    panel
-  )
-}
+/** Where focus goes when a sheet opens, in order of preference. */
+const FIRST_FOCUS = [
+  '[data-autofocus]',
+  'input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+  'button[type="submit"]:not([disabled])',
+  'button:not([disabled])',
+]
 
 /**
  * A macOS-style sheet: slides over the content, Escape cancels, Return submits. Focus moves into
- * it, Tab stays inside it, and when it closes focus goes back where it was (or to the message
- * list).
+ * it when it opens (an autofocused control, the first field, the default button, any button),
+ * Tab stays inside it, and focus goes back to where it was when it closes (or, if that has gone,
+ * to the message list on Mail).
  */
 export function Sheet({
   title,
@@ -65,63 +61,47 @@ export function Sheet({
   describedBy,
   footer,
   children,
+  initialFocus,
 }: Props) {
   const titleId = useId()
   const panel = useRef<HTMLFormElement>(null)
+  useFocusTrap(panel)
 
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const el = panel.current
-    if (el) initialFocus(el).focus()
-    return () => {
-      // Back to where you were, if it's still there; otherwise to the message list.
-      const back =
-        before && before !== document.body && before.isConnected
-          ? before
-          : document.querySelector<HTMLElement>('[role="listbox"]')
-      back?.focus()
+    if (el && !el.contains(document.activeElement)) {
+      // An initialFocus selector first, then an autofocused control, the first field, the default
+      // button, any button, and the sheet itself.
+      const order = initialFocus ? [initialFocus, ...FIRST_FOCUS] : FIRST_FOCUS
+      const first = order.map((s) => el.querySelector<HTMLElement>(s)).find(Boolean)
+      ;(first ?? el).focus()
     }
+    return () => {
+      // Back to where focus was, if it's still there and nothing else has taken it; otherwise to
+      // a list on the page, so the keyboard carries on where you were.
+      if (document.activeElement && document.activeElement !== document.body) return
+      if (before?.isConnected) before.focus()
+      else document.querySelector<HTMLElement>('[role="listbox"]')?.focus()
+    }
+    // Only when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  const closeRef = useRef({ busy, onClose })
-  useEffect(() => {
-    closeRef.current = { busy, onClose }
-  }, [busy, onClose])
 
   // Escape from anywhere in the window (focus may be outside the panel, e.g. in the message
-  // frame behind it, whose key presses the panel never sees).
+  // frame behind it). Escape inside the panel is handled there and goes no further.
   useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return
-      const { busy: b, onClose: close } = closeRef.current
-      if (!b) close()
-    }
+    const onKey = (e: globalThis.KeyboardEvent) =>
+      e.key === 'Escape' && !e.defaultPrevented && !busy && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [busy, onClose])
 
   const onPanelKey = (e: KeyboardEvent<HTMLFormElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      if (!busy) onClose()
-      return
-    }
-    if (e.key !== 'Tab' || !panel.current) return
-    // Keep Tab inside the sheet: it's modal.
-    const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-      (x) => x.offsetParent !== null,
-    )
-    if (!items.length) return
-    const first = items[0]!
-    const last = items[items.length - 1]!
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault()
-      first.focus()
-    }
+    if (e.key !== 'Escape') return
+    e.preventDefault()
+    e.stopPropagation()
+    if (!busy) onClose()
   }
 
   const submit = (e: FormEvent) => {
@@ -132,8 +112,8 @@ export function Sheet({
   return (
     <OverContent>
       <div
-        className={`absolute inset-0 z-20 flex justify-center bg-black/20 pt-12 pb-8 dark:bg-black/40 ${
-          fit ? 'items-start overflow-hidden pt-6 pb-6' : 'overflow-auto'
+        className={`absolute inset-0 z-50 flex justify-center bg-black/20 dark:bg-black/40 ${
+          fit ? 'items-start overflow-hidden pt-6 pb-6' : 'overflow-auto pt-12 pb-8'
         }`}
       >
         <form

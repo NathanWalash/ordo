@@ -3,6 +3,7 @@ import { closeMail } from '../mail'
 import { closeMailClient } from '../mail-client'
 import { closeCalendar } from '../calendar'
 import { closeMoney } from '../money'
+import { closeBoards } from '../boards'
 import { initAi } from '../ai'
 import { releaseWriteLock, setWriteOwner } from '../writes'
 import { parseInvocation, UsageError, type Invocation } from './args'
@@ -25,6 +26,7 @@ function quit(code: number): void {
   closeMailClient()
   closeCalendar()
   closeMoney()
+  closeBoards()
   releaseWriteLock()
   app.exit(code)
 }

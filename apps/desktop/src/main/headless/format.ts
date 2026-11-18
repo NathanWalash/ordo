@@ -8,9 +8,15 @@ import type { CommandResult } from './commands'
  * control characters before it reaches a terminal (no escape sequences, no fake lines).
  */
 
-// C0 and C1 control characters, DEL, bidi marks, overrides and isolates, and Unicode line breaks.
+// C0 and C1 control characters, DEL, bidi overrides/isolates and marks, zero-width characters,
+// line and paragraph separators, and the byte order mark.
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
+
+/** Like `UNSAFE`, but keeping tabs and line breaks: for multi-line text such as an answer. */
+export const UNSAFE_KEEP_LINES =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
 
 export function clean(value: unknown, max = 80): string {
   const s = String(value ?? '').replace(UNSAFE, ' ')
@@ -22,6 +28,9 @@ export function pounds(pence: number | null | undefined): string {
   const sign = pence < 0 ? '-' : ''
   return `${sign}£${(Math.abs(pence) / 100).toFixed(2)}`
 }
+
+/** The first eight characters of an id: enough to name a card in `boards move-card`. */
+const shortId = (id: unknown) => clean(id, 40).slice(0, 8)
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const when = (iso: unknown) => (typeof iso === 'string' ? iso.replace('T', ' ').slice(0, 16) : 'never')
@@ -45,6 +54,22 @@ const more = (d: { total: number; offset: number; shown: number }, what: string)
   d.total > d.offset + d.shown
     ? `\n…and ${d.total - d.offset - d.shown} more ${what}. Use --limit to see more.`
     : ''
+
+/** "2026-11-20 09:00 – 10:00 Europe/London, weekly" for a changed event. */
+function describe(e: {
+  allDay: boolean
+  start: string
+  end: string
+  timeZone: string | null
+  repeat: { frequency: string } | null
+}): string {
+  const span = e.allDay
+    ? e.start === e.end
+      ? `${e.start}, all day`
+      : `${e.start} to ${e.end}, all day`
+    : `${e.start.replace('T', ' ')} – ${e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11) : e.end.replace('T', ' ')}${e.timeZone ? ` ${clean(e.timeZone, 40)}` : ''}`
+  return e.repeat ? `${span}, ${e.repeat.frequency}` : span
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- the data shapes come from commands.ts */
 const person = (a: any) => (a.name ? `${clean(a.name, 40)} <${clean(a.address, 60)}>` : clean(a.address, 60))
@@ -224,6 +249,29 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
           ]),
         ) + more(d, 'events'),
 
+  'calendar list': (d) =>
+    d.calendars.length === 0
+      ? 'No calendars yet. Run `calendar sync` first.'
+      : table(
+          d.calendars.map((c: any) => [
+            clean(c.name, 40),
+            c.source === 'icloud' ? 'iCloud' : c.source === 'link' ? 'link' : 'file',
+            c.readOnly ? 'read-only' : 'writable',
+            c.visible ? '' : 'hidden',
+          ]),
+        ),
+
+  'calendar add': (d) =>
+    `Added “${clean(d.event.title, 60)}” to ${clean(d.calendar, 40)} (${describe(d.event)}).`,
+
+  'calendar edit': (d) =>
+    `Changed “${clean(d.event.title, 60)}”${d.scope === 'this' ? ' (this event only)' : ''}: ${describe(d.event)}.`,
+
+  'calendar delete': (d) =>
+    d.scope === 'this'
+      ? `Deleted one occurrence of “${clean(d.title, 60)}”.`
+      : `Deleted “${clean(d.title, 60)}”.`,
+
   'money bills': (d) =>
     d.bills.length === 0 && d.toReview.length === 0
       ? 'No bills yet. Import a statement first.'
@@ -305,6 +353,35 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   'ai sort': (d) =>
     `Checked ${plural(d.checked, 'sender')}: ${d.changed} sorted, ${d.cached} from earlier answers, ${d.failed} failed.` +
     (d.errors.length ? `\n${d.errors.map((e: string) => clean(e, 200)).join('\n')}` : ''),
+
+  'boards list': (d) =>
+    d.boards.length === 0
+      ? 'No boards yet. Make one in the app, under Boards.'
+      : table([
+          ['CARDS', 'OVERDUE', 'ID', 'BOARD'],
+          ...d.boards.map((b: any) => [String(b.cards), String(b.overdue), shortId(b.id), clean(b.name, 60)]),
+        ]),
+
+  'boards cards': (d) =>
+    d.total === 0
+      ? 'No cards.'
+      : table([
+          ['ID', 'COLUMN', 'DUE', 'CARD'],
+          ...d.cards.map((c: any) => [
+            shortId(c.id),
+            clean(d.board ? c.column : `${c.board} › ${c.column}`, 40),
+            c.due ? (c.start ? `${c.start}…${c.due}` : c.due) : '',
+            clean(c.title, 60) +
+              (c.labels.length ? `  [${c.labels.map((l: string) => clean(l, 20)).join(', ')}]` : '') +
+              (c.checklist.total ? `  ${c.checklist.done}/${c.checklist.total}` : ''),
+          ]),
+        ]) + more(d, 'cards'),
+
+  'boards add-card': (d) =>
+    `Added “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)} (${shortId(d.card.id)}).`,
+
+  'boards move-card': (d) =>
+    `Moved “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)}.`,
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -364,6 +441,15 @@ Mail:
 Calendar:
   calendar sync                                 Fetch changed calendars
   calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]
+  calendar list                                 Calendars, and which can be changed
+  calendar add --calendar <name> --title <t> --start <when> [--end <when>] --confirm *
+          [--time-zone <zone>] [--location <l>] [--notes <n>] [--alert <minutes>]
+          [--repeat daily|weekly|monthly|yearly [--until YYYY-MM-DD | --count <n>]]
+  calendar edit --uid <uid> [--occurrence <id> | --all] <fields to change> --confirm *
+  calendar delete --uid <uid> [--occurrence <id> | --all] --confirm *
+                                                <when> is a day (2026-11-20, all day) or a
+                                                time (2026-11-20T09:30). Uids and occurrence
+                                                ids are in calendar events --json.
 
 Money:
   money bills                                   Bills and subscriptions
@@ -372,6 +458,14 @@ Money:
   money import <file.csv> [--account <name>] --confirm   Import a bank statement *
   money sort --confirm                          Categorise merchants in Other and match bills
                                                 to email with the saved model (AI for Money) *
+
+Boards:
+  boards list                                   Boards, with card and overdue counts
+  boards cards [--board <name>] [--column <name>] [--label <name>]... [--archived] [--limit <n>]
+  boards add-card --board <name> --title <text> [--column <name>] [--due YYYY-MM-DD]
+          [--start YYYY-MM-DD] [--notes <text>] [--label <name>]... --confirm   Add a card *
+  boards move-card <card> [--column <name>] [--position <n>] [--board <name>] --confirm
+                                                Move a card (id, first 8 of its id, or title) *
 
 AI:
   ai status                                     Providers and the saved choice

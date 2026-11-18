@@ -78,6 +78,7 @@ describe('AI settings', () => {
     model: 'openai/gpt-oss-20b',
     sortSenders: true,
     money: false,
+    boards: false,
     cloudConsent: null,
   } as const
 
@@ -89,6 +90,7 @@ describe('AI settings', () => {
       model: null,
       sortSenders: false,
       money: false,
+      boards: false,
       cloudConsent: null,
     })
   })
@@ -101,9 +103,18 @@ describe('AI settings', () => {
       cloudConsent: null,
     } as const
     writeFileSync(file, JSON.stringify({ theme: 'dark', ai: before }))
-    expect(readSettings(file)).toEqual({ theme: 'dark', ai: { ...before, money: false } })
-    expect(updateSettings(file, { ai: { ...before, money: true } }).ai.money).toBe(true)
+    expect(readSettings(file)).toEqual({ theme: 'dark', ai: { ...before, money: false, boards: false } })
+    expect(updateSettings(file, { ai: { ...before, money: true, boards: false } }).ai.money).toBe(true)
     expect(readSettings(file).ai.money).toBe(true)
+  })
+
+  it('keeps AI settings saved before AI for Boards existed, with Boards off', () => {
+    const before = { ...lmStudio, money: true } as Record<string, unknown>
+    delete before['boards']
+    writeFileSync(file, JSON.stringify({ theme: 'dark', ai: before }))
+    expect(readSettings(file).ai).toEqual({ ...lmStudio, money: true, boards: false })
+    expect(updateSettings(file, { ai: { ...lmStudio, boards: true } }).ai.boards).toBe(true)
+    expect(readSettings(file).ai.boards).toBe(true)
   })
 
   it('saves a local provider without any consent', () => {
@@ -112,7 +123,13 @@ describe('AI settings', () => {
   })
 
   it('refuses a cloud provider without consent for that provider', () => {
-    const claude = { provider: 'claude-cli', model: 'haiku', sortSenders: true, money: false } as const
+    const claude = {
+      provider: 'claude-cli',
+      model: 'haiku',
+      sortSenders: true,
+      money: false,
+      boards: false,
+    } as const
     expect(() => updateSettings(file, { ai: { ...claude, cloudConsent: null } })).toThrow()
     expect(() => updateSettings(file, { ai: { ...claude, cloudConsent: 'codex-cli' } })).toThrow()
     expect(updateSettings(file, { ai: { ...claude, cloudConsent: 'claude-cli' } }).ai.provider).toBe(

@@ -10,6 +10,11 @@ describe('routeFromHash', () => {
     expect(routeFromHash('#/calendar')).toBe('calendar')
     expect(routeFromHash('#/settings')).toBe('settings')
     expect(routeFromHash('#/mail/history')).toBe('mail/history')
+    expect(routeFromHash('#/boards')).toBe('boards')
+  })
+  it('ignores options after a question mark', () => {
+    expect(routeFromHash('#/boards?card=abc')).toBe('boards')
+    expect(routeFromHash('#/nope?card=abc')).toBe('home')
   })
   it('falls back to home for empty or unknown hashes', () => {
     expect(routeFromHash('')).toBe('home')

@@ -24,6 +24,11 @@ export const AiSettingsSchema = z
      * matching bank payments to email senders. Off by default, and for files saved before it existed.
      */
     money: z.boolean().default(false),
+    /**
+     * Use the chosen model for Suggest on a board's card: the card, other cards' titles, upcoming
+     * events and (with the switches above) bills and email subjects. Off by default.
+     */
+    boards: z.boolean().default(false),
     /** The cloud provider the user agreed may receive sender names and subject lines (and, with `money`, merchant names). */
     cloudConsent: z.enum(PROVIDER_IDS).nullable(),
   })
@@ -39,6 +44,7 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   model: null,
   sortSenders: false,
   money: false,
+  boards: false,
   cloudConsent: null,
 }
 

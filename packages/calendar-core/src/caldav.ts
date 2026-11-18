@@ -1,6 +1,14 @@
 import { DAVClient, type DAVCalendar } from 'tsdav'
 import { parseIcs } from './ics'
-import type { CalendarEvent, CalendarProvider, DateRange, RemoteCalendar } from './types'
+import type {
+  CalendarEvent,
+  CalendarProvider,
+  CalendarResource,
+  DateRange,
+  RemoteCalendar,
+  WritableCalendarProvider,
+} from './types'
+import { firstUid } from './write'
 
 export const ICLOUD_CALDAV_URL = 'https://caldav.icloud.com'
 
@@ -23,8 +31,27 @@ export class CalendarUnavailableError extends CalendarConnectionError {
   override name = 'CalendarUnavailableError'
 }
 
-/** Read-only CalDAV provider. With iCloud, sign in with the Apple ID email and an app-specific password. */
-export class CalDavProvider implements CalendarProvider {
+/**
+ * The server refused a change. `conflict`: the event changed since Ordo last fetched it (HTTP 412).
+ * `gone`: it was deleted (404/410). `forbidden`: the calendar can't be written to (403).
+ */
+export class CalendarWriteError extends Error {
+  override name = 'CalendarWriteError'
+  constructor(
+    readonly kind: 'conflict' | 'gone' | 'forbidden' | 'failed',
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message)
+  }
+}
+
+/**
+ * CalDAV provider. With iCloud, sign in with the Apple ID email and an app-specific password.
+ * Changes are conditional on the ETag Ordo last saw, so a change made elsewhere is never
+ * overwritten without anyone knowing.
+ */
+export class CalDavProvider implements CalendarProvider, WritableCalendarProvider {
   private client: DAVClient
   private known = new Map<string, DAVCalendar>()
 
@@ -51,7 +78,11 @@ export class CalDavProvider implements CalendarProvider {
 
   async connect(): Promise<void> {
     await this.call(() => this.client.login())
+    this.loggedIn = true
   }
+
+  /** Changes don't need the account's calendar list; fetching does, so sign in first if needed. */
+  private loggedIn = false
 
   async listCalendars(): Promise<RemoteCalendar[]> {
     const calendars = await this.call(() =>
@@ -81,7 +112,17 @@ export class CalDavProvider implements CalendarProvider {
   }
 
   async fetchEvents(calendarId: string, range: DateRange): Promise<CalendarEvent[]> {
-    if (!this.known.has(calendarId)) await this.listCalendars()
+    return (await this.fetchResources(calendarId, range)).events
+  }
+
+  async fetchResources(
+    calendarId: string,
+    range: DateRange,
+  ): Promise<{ events: CalendarEvent[]; resources: CalendarResource[] }> {
+    if (!this.known.has(calendarId)) {
+      if (!this.loggedIn) await this.connect()
+      await this.listCalendars()
+    }
     const calendar = this.known.get(calendarId)
     if (!calendar) throw new Error(`Unknown calendar ${calendarId}`)
     const objects = await this.call(() =>
@@ -90,15 +131,81 @@ export class CalDavProvider implements CalendarProvider {
         timeRange: { start: range.start.toISOString(), end: range.end.toISOString() },
       }),
     )
-    return objects.flatMap((o) => {
-      if (typeof o.data !== 'string') return []
+    const events: CalendarEvent[] = []
+    const resources: CalendarResource[] = []
+    for (const o of objects) {
+      if (typeof o.data !== 'string') continue
       try {
-        return parseIcs(o.data, { calendarId, range })
+        events.push(...parseIcs(o.data, { calendarId, range }))
       } catch {
         // One malformed event shouldn't hide the rest of the calendar.
-        return []
+        continue
       }
-    })
+      const uid = firstUid(o.data)
+      if (uid && inside(calendarId, o.url))
+        resources.push({ href: o.url, etag: o.etag || undefined, uid, ics: o.data })
+    }
+    return { events, resources }
+  }
+
+  async fetchResource(calendarId: string, href: string): Promise<CalendarResource | null> {
+    if (!inside(calendarId, href)) throw outside()
+    let objects
+    try {
+      objects = await this.call(() =>
+        this.client.fetchCalendarObjects({
+          calendar: { url: calendarId } as DAVCalendar,
+          objectUrls: [href],
+        }),
+      )
+    } catch (err) {
+      // tsdav throws when the server says the object isn't there (a 404 in the multistatus, or
+      // an incomplete answer): that's "gone". A wrong password or no connection still fails.
+      if (err instanceof CalendarAuthError || err instanceof CalendarConnectionError) throw err
+      return null
+    }
+    const o = objects[0]
+    const uid = typeof o?.data === 'string' ? firstUid(o.data) : null
+    return o && uid ? { href, etag: o.etag || undefined, uid, ics: o.data as string } : null
+  }
+
+  async createResource(
+    calendarId: string,
+    uid: string,
+    ics: string,
+  ): Promise<{ href: string; etag?: string }> {
+    const filename = `${uid.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 200)}.ics`
+    const res = await this.call(() =>
+      this.client.createCalendarObject({
+        calendar: { url: calendarId } as DAVCalendar,
+        filename,
+        iCalString: ics,
+      }),
+    )
+    checkWrite(res)
+    return { href: new URL(filename, withSlash(calendarId)).href, etag: res.headers.get('etag') ?? undefined }
+  }
+
+  async updateResource(
+    calendarId: string,
+    href: string,
+    ics: string,
+    etag?: string,
+  ): Promise<{ etag?: string }> {
+    if (!inside(calendarId, href)) throw outside()
+    const res = await this.call(() =>
+      this.client.updateCalendarObject({ calendarObject: { url: href, data: ics, etag } }),
+    )
+    checkWrite(res)
+    return { etag: res.headers.get('etag') ?? undefined }
+  }
+
+  async deleteResource(calendarId: string, href: string, etag?: string): Promise<void> {
+    if (!inside(calendarId, href)) throw outside()
+    const res = await this.call(() =>
+      this.client.deleteCalendarObject({ calendarObject: { url: href, etag } }),
+    )
+    checkWrite(res)
   }
 
   async close(): Promise<void> {
@@ -113,6 +220,50 @@ export class CalDavProvider implements CalendarProvider {
       throw classify(err, this.failedStatus)
     }
   }
+}
+
+const withSlash = (url: string) => (url.endsWith('/') ? url : `${url}/`)
+
+/**
+ * Ordo only ever writes to objects inside the calendar they came from: same origin, under the
+ * calendar's path. A server can't point a change (and the password with it) anywhere else.
+ */
+export function inside(calendarId: string, href: string): boolean {
+  try {
+    const cal = new URL(withSlash(calendarId))
+    const obj = new URL(href, cal)
+    return (
+      obj.origin === cal.origin &&
+      obj.pathname.startsWith(cal.pathname) &&
+      obj.pathname.length > cal.pathname.length &&
+      !obj.pathname.slice(cal.pathname.length).includes('/') &&
+      !/(^|\/)\.\.?(\/|$)/.test(decodeURIComponent(obj.pathname))
+    )
+  } catch {
+    return false
+  }
+}
+
+const outside = () =>
+  new CalendarWriteError('failed', 'That event isn’t in the calendar it was listed under.')
+
+function checkWrite(res: Response): void {
+  if (res.ok) return
+  if (res.status === 412)
+    throw new CalendarWriteError('conflict', 'The event was changed somewhere else.', res.status)
+  if (res.status === 404 || res.status === 410)
+    throw new CalendarWriteError('gone', 'The event was deleted somewhere else.', res.status)
+  if (res.status === 401) throw new CalendarAuthError(`${res.status} Unauthorized`)
+  if (res.status === 403)
+    throw new CalendarWriteError('forbidden', 'The calendar doesn’t allow changes.', res.status)
+  // Busy, limiting requests or down for now: nothing was changed, so trying again is safe.
+  if (severity(res.status) === 2)
+    throw new CalendarUnavailableError(`The calendar server is busy (HTTP ${res.status}).`)
+  throw new CalendarWriteError(
+    'failed',
+    `The calendar server answered with an error (${res.status}).`,
+    res.status,
+  )
 }
 
 /** 2: busy or down (429, 5xx). 1: refused (401, 403). 0: anything else. */

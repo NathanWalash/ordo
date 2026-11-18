@@ -4,12 +4,15 @@ import type { SettingsApi } from './settings'
 import type { AiApi } from './ai'
 import type { CleanupApi } from './cleanup'
 import type { MailApi } from './mail'
+import type { AssistantApi } from './assistant'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
 export * from './calendar'
 import type { MoneyApi } from './money'
+import type { BoardsApi } from './boards'
 
 export * from './money'
+export * from './boards'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -23,6 +26,7 @@ export const MODULES: readonly ModuleInfo[] = [
   { id: 'mail', name: 'Mail' },
   { id: 'calendar', name: 'Calendar' },
   { id: 'money', name: 'Money' },
+  { id: 'boards', name: 'Boards' },
 ]
 
 export const AppInfoSchema = z.object({
@@ -57,6 +61,7 @@ export * from './settings'
 export * from './ai'
 export * from './cleanup'
 export * from './mail'
+export * from './assistant'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -88,9 +93,11 @@ export interface OrdoApi {
     list(): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
   }
   money: MoneyApi
+  boards: BoardsApi
   calendar: CalendarApi
   cleanup: CleanupApi
   mail: MailApi
+  assistant: AssistantApi
 }
 
 export const IPC = {

@@ -57,8 +57,8 @@ export type SetFlagsInput = z.input<typeof SetFlagsSchema>
 export const MOVE_TARGETS = ['archive', 'trash', 'inbox', 'junk'] as const
 export type MoveTarget = (typeof MOVE_TARGETS)[number]
 
-export const MoveSchema = z.object({ mailbox: MailboxPathSchema, uids, to: z.enum(MOVE_TARGETS) })
-export type MoveInput = z.input<typeof MoveSchema>
+export const MailMoveSchema = z.object({ mailbox: MailboxPathSchema, uids, to: z.enum(MOVE_TARGETS) })
+export type MailMoveInput = z.input<typeof MailMoveSchema>
 
 export const UndoMoveSchema = z.number().int().positive()
 
@@ -146,7 +146,7 @@ export interface MailApi {
   open(ref: MessageRef): Promise<MailOutcome<{ message: MessageContent }>>
   setFlags(input: SetFlagsInput): Promise<MailOutcome>
   /** Move to Archive, Bin, Inbox or Junk. `undoId` is null when the server can't say where they went. */
-  move(input: MoveInput): Promise<MailOutcome<{ moved: number; undoId: number | null }>>
+  move(input: MailMoveInput): Promise<MailOutcome<{ moved: number; undoId: number | null }>>
   undoMove(undoId: number): Promise<MailOutcome<{ restored: number }>>
   /** Fetch a message's remote images through Ordo, as data: URLs. */
   loadImages(input: { urls: string[] }): Promise<{ images: Record<string, string>; failed: number }>

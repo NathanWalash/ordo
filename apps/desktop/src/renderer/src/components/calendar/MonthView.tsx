@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { daysIn, isLong, sameDay, segments, type DateRange } from '@ordo/calendar-core'
-import { ItemBar, TimedRow } from './ItemChips'
+import { ItemBar, TimedRow, type EditItem } from './ItemChips'
 import type { CalendarItem, OpenItem } from './model'
 
 const HEADER = 27
@@ -14,9 +14,12 @@ interface Props {
   items: CalendarItem[]
   onOpen: OpenItem
   onShowDay: (day: Date) => void
+  /** Double-click an empty part of a day to create an event on it. */
+  onCreate?: (day: Date) => void
+  onEditItem?: EditItem
 }
 
-export function MonthView({ range, cursor, today, items, onOpen, onShowDay }: Props) {
+export function MonthView({ range, cursor, today, items, onOpen, onShowDay, onCreate, onEditItem }: Props) {
   const days = daysIn(range)
   const weeks = Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7))
   const grid = useRef<HTMLDivElement>(null)
@@ -33,7 +36,7 @@ export function MonthView({ range, cursor, today, items, onOpen, onShowDay }: Pr
   const maxLanes = Math.max(1, Math.floor((rowHeight - HEADER - 4) / LANE))
 
   return (
-    <div className="flex h-full min-h-0 flex-col" role="grid" aria-label="Month">
+    <div className="isolate flex h-full min-h-0 flex-col" role="grid" aria-label="Month">
       <div className="grid shrink-0 grid-cols-7 border-b border-sep" role="row">
         {weeks[0]!.map((d) => (
           <div
@@ -56,6 +59,8 @@ export function MonthView({ range, cursor, today, items, onOpen, onShowDay }: Pr
             maxLanes={maxLanes}
             onOpen={onOpen}
             onShowDay={onShowDay}
+            onCreate={onCreate}
+            onEditItem={onEditItem}
           />
         ))}
       </div>
@@ -71,8 +76,10 @@ function WeekRow(props: {
   maxLanes: number
   onOpen: OpenItem
   onShowDay: (day: Date) => void
+  onCreate?: (day: Date) => void
+  onEditItem?: EditItem
 }) {
-  const { week, month, today, items, maxLanes, onOpen, onShowDay } = props
+  const { week, month, today, items, maxLanes, onOpen, onShowDay, onCreate, onEditItem } = props
   const segs = segments(items, week[0]!)
   const lanes = segs.reduce((n, s) => Math.max(n, s.lane + 1), 0)
   // When everything doesn't fit, the last visible lane becomes "+N more".
@@ -100,6 +107,7 @@ function WeekRow(props: {
               weekend ? 'bg-black/[0.018] dark:bg-white/[0.025]' : ''
             }`}
             style={{ gridColumn: col + 1, gridRow: '1 / -1' }}
+            onDoubleClick={(e) => e.target === e.currentTarget && onCreate?.(day)}
           >
             <button
               type="button"
@@ -132,11 +140,12 @@ function WeekRow(props: {
               <ItemBar
                 item={s.item}
                 onOpen={onOpen}
+                onEdit={onEditItem}
                 continuesBefore={s.continuesBefore}
                 continuesAfter={s.continuesAfter}
               />
             ) : (
-              <TimedRow item={s.item} onOpen={onOpen} />
+              <TimedRow item={s.item} onOpen={onOpen} onEdit={onEditItem} />
             )}
           </div>
         ))}

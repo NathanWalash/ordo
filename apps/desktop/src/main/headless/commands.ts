@@ -1,11 +1,20 @@
 import type {
   AccountStatus,
+  BoardSummary,
+  BoardsResult,
   AiProviderStatus,
   AiSettings,
   AiSortOutcome,
   AiSortProgress,
+  CalendarChangeOutcome,
   CalendarEvent,
   CalendarListItem,
+  CreateEventInput,
+  DeleteEventInput,
+  EventDetails,
+  EventDraft,
+  EventRef,
+  UpdateEventInput,
   CalendarStatus,
   CalendarSyncOutcome,
   CalendarSyncProgress,
@@ -33,6 +42,7 @@ import type {
   UndoOutcome,
 } from '@ordo/shared'
 import { bodyText, type CleanupPlan, type PlannedSender } from '@ordo/mail-core'
+import { localZone } from '@ordo/calendar-core'
 import type { LockHolder } from '../lock'
 import { CHANGE_COMMANDS, type Command } from './args'
 
@@ -71,6 +81,12 @@ export interface OrdoServices {
     sync(onProgress?: (p: CalendarSyncProgress) => void): Promise<CalendarSyncOutcome>
     calendars(): CalendarListItem[]
     events(range: { start: Date; end: Date }): CalendarEvent[]
+    /** The calendars with a cached event of this UID. */
+    locate(uid: string): string[]
+    details(ref: EventRef): EventDetails | null
+    createEvent(input: CreateEventInput): Promise<CalendarChangeOutcome>
+    updateEvent(input: UpdateEventInput): Promise<CalendarChangeOutcome>
+    deleteEvent(input: DeleteEventInput): Promise<CalendarChangeOutcome>
   }
   money: {
     overview(): Promise<MoneyOverview>
@@ -85,8 +101,59 @@ export interface OrdoServices {
     status(): Promise<AiProviderStatus[]>
     sort(onProgress?: (p: AiSortProgress) => void): Promise<AiSortOutcome>
   }
+  boards: {
+    list(): BoardSummary[]
+    /** Cards by board, column and label names (or ids). */
+    cards(query: {
+      board?: string
+      column?: string
+      labels?: string[]
+      archived?: boolean
+    }): BoardsResult<BoardCardRow[]>
+    addCard(input: {
+      board: string
+      column?: string
+      title: string
+      notes?: string
+      start?: string
+      due?: string
+      labels?: string[]
+    }): Promise<BoardsResult<BoardCardRow>>
+    /** `position` 1 is the top of the column; without it the card goes to the end. */
+    moveCard(input: {
+      card: string
+      board?: string
+      column?: string
+      position?: number
+    }): Promise<BoardsResult<BoardCardRow>>
+    /**
+     * Look names up without changing anything, for a change's preview: the board, the column (or the
+     * card's own column), the card and labels, as Ordo has them.
+     */
+    resolve(query: { board?: string; column?: string; card?: string; labels?: string[] }): BoardsResult<{
+      board: string
+      column: string | null
+      card: BoardCardRow | null
+      labels: string[]
+    }>
+  }
   /** Who holds the write lock right now, if anyone. */
   lockHolder(): LockHolder | null
+}
+
+/** A card as headless mode shows it: board, column, label and field names rather than ids. */
+export interface BoardCardRow {
+  id: string
+  title: string
+  board: string | null
+  column: string | null
+  start: string | null
+  due: string | null
+  labels: string[]
+  checklist: { done: number; total: number }
+  links: number
+  fields: Record<string, string>
+  archived: boolean
 }
 
 /** Progress for long-running commands; the CLI prints it to stderr. */
@@ -110,7 +177,9 @@ export type ErrorCode =
   | 'network'
   | 'invalid'
   | 'unavailable'
+  | 'conflict'
   | 'not_found'
+  | 'read_only'
   | 'failed'
   | 'unknown'
   | 'internal'
@@ -148,9 +217,201 @@ const KNOWN_CODES = new Set<string>([
   'unknown',
 ])
 const fromService = (r: { error?: string; message: string }): CommandResult =>
-  r.error === 'not-found'
-    ? fail('not_found', r.message)
-    : fail(r.error && KNOWN_CODES.has(r.error) ? (r.error as ErrorCode) : 'failed', r.message)
+  fail(
+    r.error === 'not-found' || r.error === 'limit'
+      ? 'invalid'
+      : r.error && KNOWN_CODES.has(r.error)
+        ? (r.error as ErrorCode)
+        : 'failed',
+    r.message,
+  )
+
+/** A mail read that didn't work: a message or folder that's gone is `not_found`. */
+const fromMail = (r: { error?: string; message: string }): CommandResult =>
+  r.error === 'not-found' ? fail('not_found', r.message) : fromService(r)
+
+/** A calendar change that didn't happen, as a headless error code. */
+function fromChange(r: Extract<CalendarChangeOutcome, { ok: false }>): CommandResult {
+  const codes: Record<string, ErrorCode> = {
+    conflict: 'conflict',
+    'not-found': 'not_found',
+    'read-only': 'read_only',
+    invitation: 'read_only',
+    'not-connected': 'not_connected',
+    locked: 'locked',
+    auth: 'auth',
+    network: 'network',
+    invalid: 'invalid',
+  }
+  return fail(codes[r.error] ?? 'failed', r.message)
+}
+
+// ---- Calendar changes --------------------------------------------------------------------------
+
+export type EventFlags = {
+  title?: string
+  start?: string
+  end?: string
+  'time-zone'?: string
+  location?: string
+  notes?: string
+  repeat?: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'none'
+  until?: string
+  count?: number
+  alert?: number | null
+}
+
+const isDay = (s: string) => s.length === 10
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** `YYYY-MM-DDTHH:MM` plus some minutes, on the clock face. */
+function plusMinutes(t: string, minutes: number): string {
+  const [d, hm] = t.split('T') as [string, string]
+  const [y, m, day] = d.split('-').map(Number) as [number, number, number]
+  const [h, mi] = hm.split(':').map(Number) as [number, number]
+  const x = new Date(Date.UTC(y, m - 1, day, h, mi + minutes))
+  return `${x.getUTCFullYear()}-${pad2(x.getUTCMonth() + 1)}-${pad2(x.getUTCDate())}T${pad2(x.getUTCHours())}:${pad2(x.getUTCMinutes())}`
+}
+const minutesBetween = (a: string, b: string) => (Date.parse(`${b}:00Z`) - Date.parse(`${a}:00Z`)) / 60_000
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000)
+const plusDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86_400_000).toISOString().slice(0, 10)
+
+/**
+ * The draft after applying the flags to `base` (an existing event), or a new one. A day for
+ * --start makes it all-day; a time makes it timed. Without --end, it keeps its length (an hour,
+ * or one day, when new).
+ */
+export function draftFromFlags(
+  base: EventDraft | null,
+  f: EventFlags,
+  localZone: string,
+): EventDraft | string {
+  const start = f.start ?? base?.start
+  if (!start) return 'Give the event a --start'
+  const allDay = isDay(start)
+  let end = f.end
+  if (end && isDay(end) !== allDay)
+    return allDay ? '--end must be a day too, like --start' : '--end must be a time too, like --start'
+  if (!end) {
+    if (base && base.allDay === allDay && f.start)
+      end = allDay
+        ? plusDays(start, daysBetween(base.start, base.end))
+        : plusMinutes(start, minutesBetween(base.start, base.end))
+    else if (base && base.allDay === allDay) end = base.end
+    else end = allDay ? start : plusMinutes(start, 60)
+  }
+  let repeat = base?.repeat ?? null
+  if (f.repeat === 'none') repeat = null
+  else if (f.repeat) repeat = { frequency: f.repeat }
+  if (f.until !== undefined || f.count !== undefined) {
+    if (!repeat) return '--until and --count need --repeat'
+    if (f.until !== undefined && f.count !== undefined) return 'Use --until or --count, not both'
+    if (repeat.custom && !f.repeat)
+      return 'This event repeats in a way Ordo can’t edit from here. Give --repeat to replace its rule, or change it in Calendar.'
+    repeat = {
+      frequency: repeat.frequency,
+      ...(f.until !== undefined ? { until: f.until } : { count: f.count }),
+    }
+  } else if (f.repeat && f.repeat !== 'none' && base?.repeat && f.repeat === base.repeat.frequency)
+    repeat = base.repeat
+  return {
+    title: f.title ?? base?.title ?? '',
+    allDay,
+    start,
+    end,
+    timeZone: allDay ? null : (f['time-zone'] ?? (base && !base.allDay ? base.timeZone : localZone)),
+    location: f.location ?? base?.location ?? '',
+    notes: f.notes ?? base?.notes ?? '',
+    repeat,
+    alert: f.alert !== undefined ? f.alert : (base?.alert ?? null),
+  }
+}
+
+/** A calendar named on the command line, by id or (ignoring case) by name. */
+export function pickCalendar(
+  services: OrdoServices,
+  name: string,
+): { ok: true; calendar: CalendarListItem } | { ok: false; result: CommandResult } {
+  const all = services.calendar.calendars()
+  const byId = all.find((c) => c.id === name)
+  if (byId) return { ok: true, calendar: byId }
+  const named = all.filter((c) => c.name.toLowerCase() === name.toLowerCase())
+  if (named.length === 1) return { ok: true, calendar: named[0]! }
+  return {
+    ok: false,
+    result: named.length
+      ? fail('usage', `More than one calendar is called “${name}”. Use its id from \`calendar list --json\`.`)
+      : fail('not_found', `There’s no calendar called “${name}”. See \`calendar list\`.`),
+  }
+}
+
+/** The event a change names, with its details and scope, or why it can't be changed. */
+export function pickEvent(
+  services: OrdoServices,
+  c: { uid: string; occurrence?: string; all: boolean; calendar?: string },
+):
+  | { ok: true; ref: EventRef; details: EventDetails; scope: 'this' | 'all' }
+  | { ok: false; result: CommandResult } {
+  let calendarId: string
+  if (c.calendar) {
+    const picked = pickCalendar(services, c.calendar)
+    if (!picked.ok) return picked
+    calendarId = picked.calendar.id
+  } else {
+    const found = services.calendar.locate(c.uid)
+    if (found.length > 1)
+      return {
+        ok: false,
+        result: fail('usage', 'That event is in more than one calendar. Say which with --calendar.'),
+      }
+    if (!found.length)
+      return {
+        ok: false,
+        result: fail(
+          'not_found',
+          'No event has that UID. Run `calendar sync`, then `calendar events --json`.',
+        ),
+      }
+    calendarId = found[0]!
+  }
+  const ref: EventRef = { calendarId, uid: c.uid, ...(c.occurrence && { recurrenceId: c.occurrence }) }
+  const details = services.calendar.details(ref)
+  if (!details) {
+    const cal = services.calendar.calendars().find((x) => x.id === calendarId)
+    return {
+      ok: false,
+      result: cal?.readOnly
+        ? fail('read_only', `“${cal.name}” is read-only, so its events can’t be changed.`)
+        : fail('not_found', 'That event wasn’t found. Run `calendar sync` and try again.'),
+    }
+  }
+  if (!details.editable)
+    return { ok: false, result: fail('read_only', details.reason ?? 'That event can’t be changed.') }
+  if (c.occurrence && !details.recurring)
+    return { ok: false, result: fail('usage', 'That event doesn’t repeat: leave out --occurrence.') }
+  if (details.recurring && !c.occurrence && !c.all)
+    return {
+      ok: false,
+      result: fail(
+        'usage',
+        'That event repeats. Add --occurrence <id> (from `calendar events --json`) for one occurrence, or --all for every one.',
+      ),
+    }
+  return { ok: true, ref, details, scope: c.occurrence && !c.all ? 'this' : 'all' }
+}
+
+function eventView(d: EventDraft) {
+  return {
+    title: d.title,
+    allDay: d.allDay,
+    start: d.start,
+    end: d.end,
+    timeZone: d.timeZone,
+    location: d.location || null,
+    repeat: d.repeat,
+    alert: d.alert,
+  }
+}
 
 const NOT_CONNECTED = fail(
   'not_connected',
@@ -434,7 +695,7 @@ export async function runCommand(
     case 'mail sync': {
       if (!connected()) return NOT_CONNECTED
       const r = await services.mail.refresh({ mailbox: command.mailbox }, options.progress?.mail)
-      if (!r.ok) return fromService(r)
+      if (!r.ok) return fromMail(r)
       return {
         ok: true,
         data: { mailbox: command.mailbox, added: r.added, removed: r.removed, changed: r.changed },
@@ -466,7 +727,7 @@ export async function runCommand(
       if (command.server) {
         const mailbox = command.mailbox ?? 'INBOX'
         const r = await services.mail.searchServer({ query: command.query, mailbox, limit: command.limit })
-        if (!r.ok) return fromService(r)
+        if (!r.ok) return fromMail(r)
         return {
           ok: true,
           data: { query: command.query, where: 'server', mailbox, messages: r.messages.map(messageRow) },
@@ -491,7 +752,7 @@ export async function runCommand(
     case 'mail read': {
       if (!connected()) return NOT_CONNECTED
       const r = await services.mail.open({ mailbox: command.mailbox, uid: command.uid })
-      if (!r.ok) return fromService(r)
+      if (!r.ok) return fromMail(r)
       const m = r.message
       const text = bodyText(m, { links: true })
       return {
@@ -521,7 +782,7 @@ export async function runCommand(
     case 'calendar sync': {
       if (!hasCalendars()) return NOT_CONNECTED
       const r = await services.calendar.sync(options.progress?.calendar)
-      if (!r.ok) return fromService(r)
+      if (!r.ok) return fromMail(r)
       const { ok: _ok, ...rest } = r
       return { ok: true, data: rest }
     }
@@ -552,7 +813,81 @@ export async function runCommand(
             allDay: e.allDay,
             calendar: names.get(e.calendarId) ?? null,
             location: e.location ?? null,
+            // For `calendar edit` and `calendar delete`.
+            uid: e.uid,
+            occurrence: e.recurrenceId ?? null,
           })),
+        },
+      }
+    }
+
+    case 'calendar list': {
+      if (!hasCalendars()) return NOT_CONNECTED
+      return {
+        ok: true,
+        data: {
+          calendars: services.calendar.calendars().map((c) => ({
+            id: c.id,
+            name: c.name,
+            source: c.source ?? 'icloud',
+            readOnly: c.readOnly,
+            visible: c.visible,
+          })),
+        },
+      }
+    }
+
+    case 'calendar add': {
+      if (!connected()) return NOT_CONNECTED
+      const picked = pickCalendar(services, command.calendar)
+      if (!picked.ok) return picked.result
+      if (picked.calendar.readOnly)
+        return fail('read_only', `“${picked.calendar.name}” is read-only, so events can’t be added to it.`)
+      const draft = draftFromFlags(null, command, localZone())
+      if (typeof draft === 'string') return fail('usage', draft)
+      const r = await services.calendar.createEvent({ calendarId: picked.calendar.id, draft })
+      if (!r.ok) return fromChange(r)
+      return { ok: true, data: { uid: r.uid, calendar: picked.calendar.name, event: eventView(draft) } }
+    }
+
+    case 'calendar edit': {
+      if (!connected()) return NOT_CONNECTED
+      const fields: (keyof EventFlags)[] = [
+        'title',
+        'start',
+        'end',
+        'time-zone',
+        'location',
+        'notes',
+        'repeat',
+        'until',
+        'count',
+        'alert',
+      ]
+      if (!fields.some((f) => command[f] !== undefined))
+        return fail('usage', 'Say what to change, e.g. --title, --start, --end, --location or --repeat.')
+      const picked = pickEvent(services, command)
+      if (!picked.ok) return picked.result
+      const draft = draftFromFlags(picked.details.draft, command, localZone())
+      if (typeof draft === 'string') return fail('usage', draft)
+      const r = await services.calendar.updateEvent({ ref: picked.ref, draft, scope: picked.scope })
+      if (!r.ok) return fromChange(r)
+      return { ok: true, data: { uid: r.uid, scope: picked.scope, event: eventView(draft) } }
+    }
+
+    case 'calendar delete': {
+      if (!connected()) return NOT_CONNECTED
+      const picked = pickEvent(services, command)
+      if (!picked.ok) return picked.result
+      const r = await services.calendar.deleteEvent({ ref: picked.ref, scope: picked.scope })
+      if (!r.ok) return fromChange(r)
+      return {
+        ok: true,
+        data: {
+          uid: r.uid,
+          scope: picked.scope,
+          title: picked.details.draft.title,
+          ...(picked.scope === 'this' && { occurrence: picked.ref.recurrenceId }),
         },
       }
     }
@@ -681,6 +1016,61 @@ export async function runCommand(
           })),
         },
       }
+    }
+
+    case 'boards list':
+      return {
+        ok: true,
+        data: {
+          boards: services.boards
+            .list()
+            .map((b) => ({ id: b.id, name: b.name, cards: b.cards, overdue: b.overdue })),
+        },
+      }
+
+    case 'boards cards': {
+      const r = services.boards.cards({
+        board: command.board,
+        column: command.column,
+        labels: command.label,
+        archived: command.archived,
+      })
+      if (!r.ok) return fromService(r)
+      const p = page(r.value, command.limit, offset)
+      return {
+        ok: true,
+        data: {
+          board: command.board ?? null,
+          column: command.column ?? null,
+          total: p.total,
+          offset: p.offset,
+          shown: p.shown,
+          cards: p.items,
+        },
+      }
+    }
+
+    case 'boards add-card': {
+      const r = await services.boards.addCard({
+        board: command.board,
+        column: command.column,
+        title: command.title,
+        notes: command.notes,
+        start: command.start,
+        due: command.due,
+        labels: command.label,
+      })
+      return r.ok ? { ok: true, data: { card: r.value } } : fromService(r)
+    }
+
+    case 'boards move-card': {
+      const r = await services.boards.moveCard({
+        card: command.card,
+        board: command.board,
+        column: command.column,
+        position: command.position,
+      })
+      return r.ok ? { ok: true, data: { card: r.value } } : fromService(r)
     }
 
     case 'ai sort': {

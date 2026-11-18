@@ -1,17 +1,26 @@
 import type { MouseEvent } from 'react'
-import { Hourglass, Receipt, RefreshCw } from 'lucide-react'
+import { Hourglass, Receipt, RefreshCw, SquareKanban } from 'lucide-react'
 import type { CalendarOverlayItem } from '@ordo/shared'
 import { fill, formatTimeShort, ink, type CalendarItem, type OpenItem } from './model'
 import { formatAmount } from './overlays'
 
 export function OverlayIcon({ kind, size = 11 }: { kind: CalendarOverlayItem['kind']; size?: number }) {
-  const Icon = kind === 'bill' ? Receipt : kind === 'renewal' ? RefreshCw : Hourglass
+  const Icon =
+    kind === 'bill' ? Receipt : kind === 'renewal' ? RefreshCw : kind === 'card' ? SquareKanban : Hourglass
   return <Icon size={size} className="shrink-0" aria-hidden="true" />
 }
+
+/** Edits an event when it's double-clicked. */
+export type EditItem = (item: CalendarItem) => void
 
 const open = (onOpen: OpenItem, item: CalendarItem) => (e: MouseEvent<HTMLElement>) => {
   e.stopPropagation()
   onOpen(item, e.currentTarget.getBoundingClientRect())
+}
+
+const edit = (onEdit: EditItem | undefined, item: CalendarItem) => (e: MouseEvent<HTMLElement>) => {
+  e.stopPropagation()
+  if (item.type === 'event') onEdit?.(item)
 }
 
 /**
@@ -21,11 +30,13 @@ const open = (onOpen: OpenItem, item: CalendarItem) => (e: MouseEvent<HTMLElemen
 export function ItemBar({
   item,
   onOpen,
+  onEdit,
   continuesBefore = false,
   continuesAfter = false,
 }: {
   item: CalendarItem
   onOpen: OpenItem
+  onEdit?: EditItem
   continuesBefore?: boolean
   continuesAfter?: boolean
 }) {
@@ -36,6 +47,7 @@ export function ItemBar({
       <button
         type="button"
         onClick={open(onOpen, item)}
+        onDoubleClick={(e) => e.stopPropagation()}
         className={`flex h-[18px] w-full min-w-0 items-center gap-1 border border-dashed border-ink-3 px-1.5 text-left text-[11px] font-medium text-ink-2 hover:bg-hover ${radius}`}
       >
         <OverlayIcon kind={item.overlay.kind} />
@@ -48,6 +60,8 @@ export function ItemBar({
     <button
       type="button"
       onClick={open(onOpen, item)}
+      onDoubleClick={edit(onEdit, item)}
+      data-event-key={item.key}
       className={`flex h-[18px] w-full min-w-0 items-center px-1.5 text-left text-[11px] font-medium hover:brightness-95 dark:hover:brightness-125 ${radius}`}
       style={{ background: fill(item.color, 24), color: ink(item.color) }}
     >
@@ -57,12 +71,22 @@ export function ItemBar({
 }
 
 /** A timed event inside a month cell: coloured dot, start time, title. */
-export function TimedRow({ item, onOpen }: { item: CalendarItem; onOpen: OpenItem }) {
+export function TimedRow({
+  item,
+  onOpen,
+  onEdit,
+}: {
+  item: CalendarItem
+  onOpen: OpenItem
+  onEdit?: EditItem
+}) {
   const color = item.type === 'event' ? item.color : 'var(--ink-3)'
   return (
     <button
       type="button"
       onClick={open(onOpen, item)}
+      onDoubleClick={edit(onEdit, item)}
+      data-event-key={item.key}
       className="flex h-[18px] w-full min-w-0 items-center gap-1 rounded-[4px] px-1 text-left text-[11px] hover:bg-hover"
     >
       <span className="size-[7px] shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />

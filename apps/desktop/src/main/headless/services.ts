@@ -4,6 +4,7 @@ import * as cleanup from '../cleanup'
 import * as mailClient from '../mail-client'
 import * as calendar from '../calendar'
 import * as money from '../money'
+import * as boards from '../boards'
 import { aiSettings, categoriseSenders, sendersWithAi, status as aiStatus } from '../ai'
 import { lockHolder } from '../writes'
 import type { OrdoServices } from './commands'
@@ -39,6 +40,11 @@ export function mainServices(): OrdoServices {
       sync: (onProgress) => calendar.sync({}, onProgress),
       calendars: calendar.calendars,
       events: calendar.events,
+      locate: calendar.locateEvent,
+      details: calendar.eventDetails,
+      createEvent: calendar.createEvent,
+      updateEvent: calendar.updateEvent,
+      deleteEvent: calendar.deleteEvent,
     },
     money: {
       overview: money.overview,
@@ -51,6 +57,30 @@ export function mainServices(): OrdoServices {
       settings: aiSettings,
       status: () => aiStatus(false),
       sort: (onProgress) => categoriseSenders({}, onProgress),
+    },
+    boards: {
+      list: boards.list,
+      cards: ({ labels, ...q }) => {
+        const all = boards.cardsByRef(q)
+        if (!all.ok) return all
+        const want = (labels ?? []).map((l) => l.toLocaleLowerCase())
+        const rows = all.value.map(boards.cardRow)
+        return {
+          ok: true,
+          value: want.length
+            ? rows.filter((c) => c.labels.some((l) => want.includes(l.toLocaleLowerCase())))
+            : rows,
+        }
+      },
+      addCard: async (input) => {
+        const r = await boards.addCardByRef(input)
+        return r.ok ? { ok: true, value: boards.cardRow(r.value) } : r
+      },
+      moveCard: async (input) => {
+        const r = await boards.moveCardByRef(input)
+        return r.ok ? { ok: true, value: boards.cardRow(r.value) } : r
+      },
+      resolve: (q) => boards.resolveRefs(q),
     },
     lockHolder,
   }

@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { CategorisedSender, MessageContent, MessageSummary } from '@ordo/shared'
-import type { OrdoServices } from './commands'
+import type { BoardCardRow, OrdoServices } from './commands'
 
 /** A sender as the analysis would return it. */
 export function sender(address: string, extra: Partial<CategorisedSender> = {}): CategorisedSender {
@@ -68,6 +68,24 @@ export function content(extra: Partial<MessageContent> = {}): MessageContent {
   }
 }
 
+/** A board card as headless mode shows it. */
+export function boardCard(extra: Partial<BoardCardRow> = {}): BoardCardRow {
+  return {
+    id: 'c0ffee00-1111-2222-3333-444455556666',
+    title: 'Fix the gate',
+    board: 'Home',
+    column: 'To do',
+    start: null,
+    due: '2026-11-20',
+    labels: ['Urgent'],
+    checklist: { done: 1, total: 3 },
+    links: 0,
+    fields: {},
+    archived: false,
+    ...extra,
+  }
+}
+
 /** Test doubles for the main-process services, connected by default. Override what a test needs. */
 export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoServices {
   return {
@@ -120,6 +138,17 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       })),
       calendars: () => [],
       events: () => [],
+      locate: () => [],
+      details: () => null,
+      createEvent: vi.fn(async () => ({ ok: true as const, uid: 'NEW-UID' })),
+      updateEvent: vi.fn(async (input: { ref: { uid: string } }) => ({
+        ok: true as const,
+        uid: input.ref.uid,
+      })),
+      deleteEvent: vi.fn(async (input: { ref: { uid: string } }) => ({
+        ok: true as const,
+        uid: input.ref.uid,
+      })),
     },
     money: {
       overview: async () => ({
@@ -152,10 +181,45 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         model: null,
         sortSenders: false,
         money: false,
+        boards: false,
         cloudConsent: null,
       }),
       status: async () => [],
       sort: vi.fn(async () => ({ ok: false as const, message: 'Choose a model in Settings → AI first.' })),
+    },
+    boards: {
+      list: () => [
+        {
+          id: 'board-1-uuid',
+          name: 'Home',
+          rank: 'V',
+          createdAt: '2026-11-01T10:00:00.000Z',
+          cards: 2,
+          overdue: 1,
+        },
+      ],
+      cards: vi.fn(() => ({ ok: true as const, value: [boardCard()] })),
+      addCard: vi.fn(async (input: { title: string }) => ({
+        ok: true as const,
+        value: boardCard({ title: input.title }),
+      })),
+      moveCard: vi.fn(async () => ({ ok: true as const, value: boardCard({ column: 'Doing' }) })),
+      resolve: (q: { board?: string; column?: string; card?: string; labels?: string[] }) =>
+        q.board && q.board !== 'Home'
+          ? {
+              ok: false as const,
+              error: 'not-found' as const,
+              message: `There’s no board called “${q.board}”.`,
+            }
+          : {
+              ok: true as const,
+              value: {
+                board: 'Home',
+                column: q.column ?? (q.card ? 'To do' : null),
+                card: q.card ? boardCard() : null,
+                labels: q.labels ?? [],
+              },
+            },
     },
     lockHolder: () => null,
     ...overrides,
