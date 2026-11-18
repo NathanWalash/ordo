@@ -20,6 +20,7 @@ import type {
   MoneyOverview,
   ScanOutcome,
   ScanProgress,
+  StatementFilePreview,
   TransactionPage,
   TransactionQuery,
   UndoOutcome,
@@ -56,6 +57,8 @@ export interface OrdoServices {
     overview(): Promise<MoneyOverview>
     transactions(query: TransactionQuery): Promise<TransactionPage>
     importFile(path: string, accountName?: string): Promise<ImportOutcome>
+    /** What `importFile` would add, without saving anything. */
+    previewFile(path: string, accountName?: string): Promise<StatementFilePreview>
     counts(): { transactions: number; accounts: number; bills: number }
     /** Sort with AI: categories for merchants in Other, then bill matching. Needs AI for Money on. */
     aiSort(onProgress?: (p: MoneyAiProgress) => void): Promise<MoneyAiOutcome>

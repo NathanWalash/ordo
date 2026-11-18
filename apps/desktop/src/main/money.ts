@@ -51,6 +51,7 @@ import {
   type MoneyOverview,
   type MoneyResult,
   type StatementFile,
+  type StatementFilePreview,
   type StatementInput,
   type StatementPreview,
   type TransactionPage,
@@ -130,11 +131,13 @@ async function pickStatement(win: BrowserWindow | null): Promise<StatementFile |
 /** Headless imports read a file named on the command line: a CSV export, never anything big. */
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 
+type StatementRead = { ok: true; fileName: string; text: string } | { ok: false; message: string }
+
 /**
- * Import a statement from a path (headless mode). The path must resolve to a regular `.csv`
- * file under 5 MB; it is then parsed and saved exactly like a file picked in the app.
+ * Read a statement named by a path (headless mode and the assistant). The path must resolve to a
+ * regular `.csv` file under 5 MB.
  */
-export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+async function readStatementFile(path: string): Promise<StatementRead> {
   let real: string
   try {
     real = await realpath(resolve(path))
@@ -160,7 +163,38 @@ export async function importStatementFile(path: string, accountName?: string): P
     await file.close()
   }
   if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
-  return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
+  return { ok: true, fileName: basename(real), text: bytes.toString('utf8') }
+}
+
+/**
+ * Import a statement from a path (headless mode and the assistant). It is then parsed and saved
+ * exactly like a file picked in the app.
+ */
+export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+  const read = await readStatementFile(path)
+  if (!read.ok) return read
+  return importStatement({ fileName: read.fileName, text: read.text, accountName })
+}
+
+/** What importing a statement from a path would add, without saving anything. */
+export async function previewStatementFile(
+  path: string,
+  accountName?: string,
+): Promise<StatementFilePreview> {
+  const read = await readStatementFile(path)
+  if (!read.ok) return read
+  const p = previewStatement({ fileName: read.fileName, text: read.text })
+  if (!p.ok) return { ok: false, message: p.message }
+  return {
+    ok: true,
+    fileName: read.fileName,
+    accountName: accountName ?? p.suggestedAccount,
+    layout: p.layout,
+    count: p.count,
+    skipped: p.skipped,
+    from: p.from,
+    to: p.to,
+  }
 }
 
 /** How much is stored, for `status`. */

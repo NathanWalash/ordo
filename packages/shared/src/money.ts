@@ -116,6 +116,20 @@ export type ImportOutcome =
   /** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
   | { ok: false; message: string; error?: 'locked' }
 
+/** What importing a statement file from a path would add (headless and the assistant). Nothing is saved. */
+export type StatementFilePreview =
+  | {
+      ok: true
+      fileName: string
+      accountName: string
+      layout: string
+      count: number
+      skipped: number
+      from: string
+      to: string
+    }
+  | { ok: false; message: string }
+
 export const TransactionQuerySchema = z.object({
   account: z.string().max(60).optional(),
   month: z
