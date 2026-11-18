@@ -22,6 +22,7 @@ const KEY_SETTLE_MS = 900
 /** A move in progress, by drag or keys, shown before it's saved. */
 interface Pending {
   key: string
+  item: CalendarItem
   days: number
   minutes: number
   resize: number
@@ -78,18 +79,15 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
     return Math.max(1, (w - GUTTER) / days.length)
   }
 
-  /** Save the move shown for `item`, if it actually moved. */
-  const commit = useCallback(
-    (item: CalendarItem) => {
-      if (timer.current) clearTimeout(timer.current)
-      timer.current = null
-      const p = pendingRef.current
-      show(null)
-      if (!p || p.key !== item.key || (!p.days && !p.minutes && !p.resize)) return
-      onMove?.(item, nudged(item, p))
-    },
-    [onMove],
-  )
+  /** Save the move being shown, if there is one and it actually moved. */
+  const commit = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+    const p = pendingRef.current
+    show(null)
+    if (!p || (!p.days && !p.minutes && !p.resize)) return
+    onMove?.(p.item, nudged(p.item, p))
+  }, [onMove])
 
   const startDrag = (e: ReactPointerEvent<HTMLElement>, item: CalendarItem, mode: 'move' | 'resize') => {
     if (e.button !== 0 || !canMove?.(item)) return
@@ -107,8 +105,8 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
       const minutes = snap(dy / PX)
       show(
         mode === 'move'
-          ? { key: item.key, days: Math.round(dx / width), minutes, resize: 0 }
-          : { key: item.key, days: 0, minutes: 0, resize: minutes },
+          ? { key: item.key, item, days: Math.round(dx / width), minutes, resize: 0 }
+          : { key: item.key, item, days: 0, minutes: 0, resize: minutes },
       )
     }
     const end = () => {
@@ -118,7 +116,7 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
       if (moving) {
         dragged.current = true
         setTimeout(() => (dragged.current = false), 0)
-        commit(item)
+        commit()
       }
     }
     const cancel = () => {
@@ -143,12 +141,12 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
     const n = nudgeFor(e)
     if (!n || !canMove?.(item)) return
     e.preventDefault()
-    const was =
-      pendingRef.current?.key === item.key
-        ? pendingRef.current
-        : { key: item.key, days: 0, minutes: 0, resize: 0 }
+    // Another event's move is still waiting: save it before starting this one.
+    if (pendingRef.current && pendingRef.current.key !== item.key) commit()
+    const was = pendingRef.current ?? { days: 0, minutes: 0, resize: 0 }
     const next = {
       key: item.key,
+      item,
       days: was.days + (n.days ?? 0),
       minutes: was.minutes + (n.minutes ?? 0),
       resize: Math.max(
@@ -162,7 +160,7 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
       `${item.title}: ${span.start.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}, ${formatTime(span.start)} to ${formatTime(span.end)}. Saves in a moment.`,
     )
     if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => commit(item), KEY_SETTLE_MS)
+    timer.current = setTimeout(commit, KEY_SETTLE_MS)
   }
 
   const cols = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`
@@ -273,7 +271,7 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
             hintId={hintId}
             onPointerDown={startDrag}
             onKey={onKey}
-            onBlurItem={(item) => pendingRef.current?.key === item.key && commit(item)}
+            onBlurItem={(item) => pendingRef.current?.key === item.key && commit()}
           />
         ))}
         {/* Hour lines across every day. */}

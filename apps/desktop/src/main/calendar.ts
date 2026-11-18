@@ -139,7 +139,10 @@ async function runSync(
     return { ok: false, error: 'auth', message: 'Connect your iCloud account or add a calendar first.' }
   if (running) return { ok: false, error: 'busy', message: 'Your calendars are already syncing.' }
   const ctrl = (running = new AbortController())
+  // Let changes already on their way finish, so the sync doesn't cache what was there before them.
+  const queued = changes
   try {
+    await queued
     const result = await withWriteLock('syncing calendars', async (): Promise<CalendarSyncOutcome> => {
       let offset = 0
       const total: CalendarSyncResult = { calendars: 0, fetched: 0, skipped: 0, events: 0, stopped: false }
@@ -278,7 +281,25 @@ async function change(
   const a = account()
   if (!a)
     return { ok: false, error: 'not-connected', message: 'Connect your iCloud account to change events.' }
-  if (syncing) await syncing.catch(() => {})
+  // One change at a time, each after the syncs that started before it, so each one sends the
+  // ETag the last one saved. (The write lock is shared within this process, so it can't do this.)
+  const sync = syncing
+  const turn = changes.then(async () => {
+    if (sync) await sync.catch(() => {})
+    return runChange(a, task, fn)
+  })
+  changes = turn.catch(() => {})
+  return turn
+}
+
+/** Changes in this process, in order. A sync waits for the ones queued before it. */
+let changes: Promise<unknown> = Promise.resolve()
+
+async function runChange(
+  a: { email: string; password: string },
+  task: string,
+  fn: (provider: CalDavProvider, store: CalendarStore, options: ChangeOptions) => Promise<string>,
+): Promise<CalendarChangeOutcome> {
   const r = await withWriteLock(task, async (): Promise<CalendarChangeOutcome> => {
     const provider = new CalDavProvider({ serverUrl: caldavUrl(), username: a.email, password: a.password })
     try {
