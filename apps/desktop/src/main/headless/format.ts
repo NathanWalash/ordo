@@ -24,6 +24,13 @@ export function pounds(pence: number | null | undefined): string {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const when = (iso: unknown) => (typeof iso === 'string' ? iso.replace('T', ' ').slice(0, 16) : 'never')
+const pad = (n: number) => String(n).padStart(2, '0')
+/** An instant as this computer's clock shows it, `YYYY-MM-DD HH:MM`, for event times. */
+function localTime(iso: unknown): string {
+  const d = typeof iso === 'string' ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return when(iso)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function table(rows: string[][]): string {
   if (!rows.length) return ''
@@ -143,7 +150,7 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       ? `No events from ${d.from} to ${d.to}.`
       : table(
           d.events.map((e: any) => [
-            e.allDay ? `${String(e.start).slice(0, 10)} all day` : when(e.start),
+            e.allDay ? `${String(e.start).slice(0, 10)} all day` : localTime(e.start),
             clean(e.title, 60),
             e.calendar ? `(${clean(e.calendar, 30)})` : '',
           ]),
