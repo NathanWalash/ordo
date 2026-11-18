@@ -49,7 +49,7 @@ export function ianaZone(tzid: string | undefined | null): string | null {
 }
 
 /** Offset of `tz` from UTC at the instant `utcMs`, in milliseconds (positive east of Greenwich). */
-function offsetAt(utcMs: number, tz: string): number {
+export function offsetAt(utcMs: number, tz: string): number {
   const parts = formatter(tz)!.formatToParts(new Date(utcMs))
   const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value)
   const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'))
@@ -70,6 +70,31 @@ export function zonedTimeToUtc(t: WallClock, tz: string): Date {
   const valid = [before, after].map((o) => asUtc - o).filter((utc) => asUtc - offsetAt(utc, tz) === utc)
   // Repeated hour: both are valid, take the earlier. Skipped hour: neither is, use the old offset.
   return new Date(valid.length ? Math.min(...valid) : asUtc - before)
+}
+
+/** What the wall clock reads in IANA zone `tz` at instant `d`. */
+export function utcToZoned(d: Date, tz: string): WallClock {
+  const f = formatter(tz)
+  if (!f) throw new RangeError(`Unknown time zone ${tz}`)
+  const parts = f.formatToParts(d)
+  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value)
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour') % 24,
+    minute: get('minute'),
+    second: get('second'),
+  }
+}
+
+/** The machine's own IANA time zone, or UTC if the runtime can't say. */
+export function localZone(): string {
+  try {
+    return ianaZone(Intl.DateTimeFormat().resolvedOptions().timeZone) ?? 'UTC'
+  } catch {
+    return 'UTC'
+  }
 }
 
 /** Wall-clock time in the machine's own zone (iCalendar "floating" time). */

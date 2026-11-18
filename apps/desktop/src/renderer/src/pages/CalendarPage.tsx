@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AlertCircle, ChevronLeft, ChevronRight, Info, Plus, RefreshCw, X } from 'lucide-react'
 import {
   startOfDay,
   sameDay,
@@ -29,6 +29,7 @@ import { firstDayOfWeek, toItems, viewTitle, type CalendarItem } from '../compon
 import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
 import { CreateCardSheet } from '../components/boards/CreateCardSheet'
 import { useToast } from '../components/boards/UndoToast'
+import { useEventEditing } from '../components/calendar/useEventEditing'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
 interface Props {
@@ -200,6 +201,7 @@ function LiveCalendar({
     <>
       <CalendarBrowser
         listTitle="iCloud"
+        editable={icloud}
         calendars={calendars}
         onToggle={(id, visible) => void toggle(id, visible)}
         onAdd={onAdd}
@@ -321,6 +323,8 @@ function savedView(): CalendarView {
 
 interface BrowserProps {
   listTitle: string
+  /** Events on writable iCloud calendars can be created, changed and deleted. */
+  editable?: boolean
   calendars: CalendarListItem[]
   onToggle: (calendarId: string, visible: boolean) => void
   onAdd?: () => void
@@ -336,6 +340,7 @@ interface BrowserProps {
 /** The calendar list, toolbar and current view, independent of where the events come from. */
 function CalendarBrowser({
   listTitle,
+  editable = false,
   calendars,
   onToggle,
   onAdd,
@@ -356,6 +361,7 @@ function CalendarBrowser({
   const toast = useToast()
   const [overlayKey, setOverlayKey] = useState(0)
   const firstDay = useMemo(() => firstDayOfWeek(), [])
+  const narrow = useNarrow()
   const range = useMemo(() => visibleRange(view, cursor, firstDay), [view, cursor, firstDay])
 
   useEffect(() => {
@@ -376,9 +382,48 @@ function CalendarBrowser({
     return () => clearInterval(id)
   }, [])
 
-  const items = useMemo(() => toItems(events, overlays, calendars), [events, overlays, calendars])
-  const close = useCallback(() => setSelected(null), [])
-  const open = useCallback((item: CalendarItem, anchor: DOMRect) => setSelected({ item, anchor }), [])
+  const rangeRef = useRef(range)
+  useEffect(() => {
+    rangeRef.current = range
+  }, [range])
+  const reload = useCallback(async () => setEvents(await loadEvents(rangeRef.current)), [loadEvents])
+  const editing = useEventEditing({ enabled: editable, calendars, range, reload })
+  const { select, display } = editing
+
+  const items = useMemo(
+    () => toItems(display(events), overlays, calendars),
+    [display, events, overlays, calendars],
+  )
+  const close = useCallback(() => {
+    setSelected(null)
+    select(null)
+  }, [select])
+  const open = useCallback(
+    (item: CalendarItem, anchor: DOMRect) => {
+      setSelected({ item, anchor })
+      select(item)
+    },
+    [select],
+  )
+
+  // Cmd-N (Ctrl-N elsewhere) starts a new event, on today if it's in view.
+  const createRef = useRef(editing.create)
+  useEffect(() => {
+    createRef.current = editing.create
+  })
+  useEffect(() => {
+    if (!editable) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'n') return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      e.preventDefault()
+      const now = new Date()
+      const r = rangeRef.current
+      createRef.current(now >= r.start && now < r.end ? now : r.start)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editable])
 
   const setView = (v: CalendarView) => {
     setViewState(v)
@@ -393,7 +438,12 @@ function CalendarBrowser({
     setCursor((c) => step(view, c, dir))
     setSelected(null)
   }
-  const title = viewTitle(view, cursor, range)
+  const title = viewTitle(view, cursor, range, { short: narrow })
+  /** Double-clicking an event edits it: the popover its first click opened goes. */
+  const editItem = (item: CalendarItem) => {
+    close()
+    void editing.edit(item)
+  }
 
   return (
     <div className="relative flex h-full min-h-0">
@@ -408,6 +458,30 @@ function CalendarBrowser({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {banner && <div className="shrink-0 px-4 pt-3">{banner}</div>}
+        {editing.notice && (
+          <div className="shrink-0 px-4 pt-3">
+            <div
+              role={editing.notice.kind === 'error' ? 'alert' : 'status'}
+              data-kind={editing.notice.kind}
+              className="flex items-start gap-2 rounded-md bg-hover px-3 py-2 text-ink"
+            >
+              {editing.notice.kind === 'error' ? (
+                <AlertCircle size={15} className="mt-px shrink-0 text-danger" aria-label="Error" />
+              ) : (
+                <Info size={15} className="mt-px shrink-0 text-ink-2" aria-hidden="true" />
+              )}
+              <span className="flex-1">{editing.notice.text}</span>
+              <button
+                type="button"
+                onClick={editing.dismissNotice}
+                aria-label="Dismiss"
+                className="no-drag -mr-1 flex size-5 shrink-0 items-center justify-center rounded text-ink-2 hover:bg-selected hover:text-ink"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
         <div className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-sep px-4">
           <h2 className="truncate text-[20px] tracking-tight" data-testid="calendar-title" aria-live="polite">
             <span className="font-semibold">{title.month}</span>{' '}
@@ -415,6 +489,20 @@ function CalendarBrowser({
           </h2>
           <SegmentedControl label="Calendar view" options={VIEWS} value={view} onChange={setView} />
           <div className="flex items-center justify-end gap-1">
+            {editable && (
+              <NavButton
+                label="New event"
+                title={`New event (${navigator.platform.startsWith('Mac') ? '⌘N' : 'Ctrl+N'})`}
+                // Still clickable when there's nowhere to put an event, so it can say why.
+                ariaDisabled={!editing.canCreate}
+                onClick={() => {
+                  const now = new Date()
+                  editing.create(now >= range.start && now < range.end ? now : range.start)
+                }}
+              >
+                <Plus size={16} />
+              </NavButton>
+            )}
             {actions}
             <NavButton label="Previous" onClick={() => go(-1)}>
               <ChevronLeft size={16} />
@@ -444,9 +532,22 @@ function CalendarBrowser({
                 setCursor(d)
                 setView('week')
               }}
+              onCreate={editable ? (d) => editing.create(d) : undefined}
+              onEditItem={editable ? editItem : undefined}
             />
           )}
-          {view === 'week' && <WeekView range={range} today={today} items={items} onOpen={open} />}
+          {view === 'week' && (
+            <WeekView
+              range={range}
+              today={today}
+              items={items}
+              onOpen={open}
+              onCreate={editable ? (at, allDay) => editing.create(at, { allDay, exact: !allDay }) : undefined}
+              onEditItem={editable ? editItem : undefined}
+              canMove={editable ? editing.canMove : undefined}
+              onMove={editable ? editing.move : undefined}
+            />
+          )}
           {view === 'agenda' && <AgendaView range={range} today={today} items={items} onOpen={open} />}
         </div>
       </div>
@@ -455,6 +556,7 @@ function CalendarBrowser({
           item={selected.item}
           anchor={selected.anchor}
           onClose={close}
+          edit={editing.popoverEdit(selected.item, close)}
           onOpenRoute={(route) => {
             window.location.hash = `/${route}`
           }}
@@ -464,6 +566,7 @@ function CalendarBrowser({
           }}
         />
       )}
+      {editing.sheets}
       {creating && (
         <CreateCardSheet
           event={creating.event}
@@ -490,10 +593,15 @@ function CalendarBrowser({
 
 function NavButton({
   label,
+  title = label,
+  ariaDisabled,
   onClick,
   children,
 }: {
   label: string
+  title?: string
+  /** Looks and reads as unavailable but can still be clicked, to explain why. */
+  ariaDisabled?: boolean
   onClick: () => void
   children: ReactNode
 }) {
@@ -502,10 +610,24 @@ function NavButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      title={label}
-      className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+      title={title}
+      aria-disabled={ariaDisabled || undefined}
+      className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
     >
       {children}
     </button>
   )
+}
+
+/** Below about 1100px the toolbar is tight: the title uses the short month ("Nov 2026"). */
+function useNarrow(): boolean {
+  const query = '(max-width: 1099px)'
+  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const on = () => setNarrow(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return narrow
 }

@@ -83,8 +83,8 @@ describe('pairOwnTransfers', () => {
       }
       return best
     }
-    // Four times the rows: about four times the time if linear, sixteen if quadratic.
-    expect(time(16_000) / Math.max(time(4_000), 2)).toBeLessThan(10)
+    // Eight times the rows: about eight times the time if linear, sixty-four if quadratic.
+    expect(time(32_000) / Math.max(time(4_000), 2)).toBeLessThan(24)
   })
 
   it('keeps a category you chose yourself', () => {

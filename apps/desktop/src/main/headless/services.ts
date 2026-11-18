@@ -30,6 +30,11 @@ export function mainServices(): OrdoServices {
       sync: (onProgress) => calendar.sync({}, onProgress),
       calendars: calendar.calendars,
       events: calendar.events,
+      locate: calendar.locateEvent,
+      details: calendar.eventDetails,
+      createEvent: calendar.createEvent,
+      updateEvent: calendar.updateEvent,
+      deleteEvent: calendar.deleteEvent,
     },
     money: {
       overview: money.overview,

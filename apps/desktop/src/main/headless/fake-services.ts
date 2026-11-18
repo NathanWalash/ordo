@@ -71,6 +71,17 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       })),
       calendars: () => [],
       events: () => [],
+      locate: () => [],
+      details: () => null,
+      createEvent: vi.fn(async () => ({ ok: true as const, uid: 'NEW-UID' })),
+      updateEvent: vi.fn(async (input: { ref: { uid: string } }) => ({
+        ok: true as const,
+        uid: input.ref.uid,
+      })),
+      deleteEvent: vi.fn(async (input: { ref: { uid: string } }) => ({
+        ok: true as const,
+        uid: input.ref.uid,
+      })),
     },
     money: {
       overview: async () => ({

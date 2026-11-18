@@ -110,21 +110,23 @@ export function viewTitle(
   view: CalendarView,
   cursor: Date,
   range: DateRange,
+  { short = false } = {},
 ): { month: string; year: string } {
   const year = (d: Date) => String(d.getFullYear())
+  const month = (d: Date) => d.toLocaleDateString(undefined, { month: short ? 'short' : 'long' })
   if (view === 'week') {
     const first = range.start
     const last = addDays(range.end, -1)
     if (first.getMonth() !== last.getMonth()) {
-      const short = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' })
+      const abbr = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' })
       return {
-        month: `${short(first)} – ${short(last)}`,
+        month: `${abbr(first)} – ${abbr(last)}`,
         year: first.getFullYear() === last.getFullYear() ? year(last) : `${year(first)} – ${year(last)}`,
       }
     }
-    return { month: first.toLocaleDateString(undefined, { month: 'long' }), year: year(first) }
+    return { month: month(first), year: year(first) }
   }
-  return { month: cursor.toLocaleDateString(undefined, { month: 'long' }), year: year(cursor) }
+  return { month: month(cursor), year: year(cursor) }
 }
 
 /** The locale's first day of the week (0 = Sunday), Monday if the runtime can't say. */
