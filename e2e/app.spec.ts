@@ -17,7 +17,7 @@ test.afterAll(async () => {
 test('opens on the home screen', async () => {
   await expect(page).toHaveTitle('Ordo')
   await expect(page.getByRole('heading', { level: 1, name: 'Home' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Mail/ })).toBeVisible()
+  await expect(page.getByRole('main').getByRole('button', { name: /Mail/ })).toBeVisible()
 })
 
 test('Unclutter lets you pick senders but never people', async () => {
