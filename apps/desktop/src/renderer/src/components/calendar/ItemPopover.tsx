@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import { MapPin, Repeat, X } from 'lucide-react'
+import { Lock, MapPin, Repeat, X } from 'lucide-react'
+import { Button } from '../Button'
 import { OverlayIcon } from './ItemChips'
 import { describeWhen, type CalendarItem } from './model'
 import { formatAmount, OVERLAY_LABELS } from './overlays'
@@ -7,15 +8,28 @@ import { formatAmount, OVERLAY_LABELS } from './overlays'
 const WIDTH = 300
 const GAP = 8
 
-/** Read-only details for an event or overlay item, beside the element that was clicked. */
+/** Whether the event in a popover can be changed, and how. */
+export interface PopoverEdit {
+  /** `checking` while Ordo looks the event up; `locked` with `reason` when it can't be changed. */
+  state: 'checking' | 'editable' | 'locked'
+  reason?: string
+  /** "Repeats every week", when known. */
+  repeats?: string
+  onEdit: () => void
+  onDelete: () => void
+}
+
+/** Details for an event or overlay item, beside the element that was clicked, with Edit and Delete. */
 export function ItemPopover({
   item,
   anchor,
   onClose,
+  edit,
 }: {
   item: CalendarItem
   anchor: DOMRect
   onClose: () => void
+  edit?: PopoverEdit
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -85,7 +99,7 @@ export function ItemPopover({
         <p className="text-ink-2">{when.time}</p>
         {item.type === 'event' && item.event.recurrenceId && (
           <p className="flex items-center gap-1.5 text-ink-2">
-            <Repeat size={12} /> Repeats
+            <Repeat size={12} /> {edit?.repeats ?? 'Repeats'}
           </p>
         )}
       </div>
@@ -103,6 +117,22 @@ export function ItemPopover({
             <p className="min-h-0 overflow-y-auto whitespace-pre-wrap border-t border-sep px-4 py-3 text-[12px] leading-relaxed text-ink-2 select-text">
               {item.event.notes}
             </p>
+          )}
+          {edit?.state === 'locked' && edit.reason && (
+            <p className="flex items-start gap-1.5 border-t border-sep px-4 py-2.5 text-[12px] leading-snug text-ink-2">
+              <Lock size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              {edit.reason}
+            </p>
+          )}
+          {edit && edit.state !== 'locked' && (
+            <div className="flex justify-end gap-2 border-t border-sep px-4 py-2.5">
+              <Button onClick={edit.onDelete} disabled={edit.state === 'checking'}>
+                Delete…
+              </Button>
+              <Button onClick={edit.onEdit} disabled={edit.state === 'checking'}>
+                Edit…
+              </Button>
+            </div>
           )}
         </>
       ) : (

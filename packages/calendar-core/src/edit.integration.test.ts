@@ -209,6 +209,31 @@ describe.skipIf(!port)('changing events on CalDAV (Radicale)', () => {
     ])
   })
 
+  it('refreshes after a conflict with a provider that never signed in, as the app’s are', async () => {
+    const { uid } = await createEvent(provider, store, id, draft({ title: 'Tea' }), opts())
+    const href = store.resources(id, uid)[0]!.href
+    const current = (await onServer()).find((r) => r.uid === uid)!
+    await admin.updateCalendarObject({
+      calendarObject: {
+        url: href,
+        etag: current.etag,
+        data: createEventIcs(draft({ title: 'Tea at 4' }), { uid }),
+      },
+    })
+    const fresh = new CalDavProvider({ serverUrl, ...credentials })
+    await expect(
+      updateEvent(fresh, store, { calendarId: id, uid }, draft({ title: 'Tea at 3' }), 'all', opts()),
+    ).rejects.toMatchObject({ kind: 'conflict' })
+    expect(mine().find((e) => e.uid === uid)!.title).toBe('Tea at 4')
+    await deleteEvent(
+      new CalDavProvider({ serverUrl, ...credentials }),
+      store,
+      { calendarId: id, uid },
+      'all',
+      opts(),
+    )
+  })
+
   it('refuses to overwrite a change made by another client (HTTP 412), then shows it', async () => {
     const { uid } = await createEvent(provider, store, id, draft({ title: 'Lunch' }), opts())
     // Another device changes the event behind Ordo's back.

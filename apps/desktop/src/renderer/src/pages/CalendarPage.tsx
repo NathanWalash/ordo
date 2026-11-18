@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from 'lucide-react'
 import {
   startOfDay,
   sameDay,
@@ -27,6 +27,7 @@ import { MonthView } from '../components/calendar/MonthView'
 import { WeekView } from '../components/calendar/WeekView'
 import { firstDayOfWeek, toItems, viewTitle, type CalendarItem } from '../components/calendar/model'
 import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
+import { useEventEditing } from '../components/calendar/useEventEditing'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
 interface Props {
@@ -198,6 +199,7 @@ function LiveCalendar({
     <>
       <CalendarBrowser
         listTitle="iCloud"
+        editable={icloud}
         calendars={calendars}
         onToggle={(id, visible) => void toggle(id, visible)}
         onAdd={onAdd}
@@ -319,6 +321,8 @@ function savedView(): CalendarView {
 
 interface BrowserProps {
   listTitle: string
+  /** Events on writable iCloud calendars can be created, changed and deleted. */
+  editable?: boolean
   calendars: CalendarListItem[]
   onToggle: (calendarId: string, visible: boolean) => void
   onAdd?: () => void
@@ -334,6 +338,7 @@ interface BrowserProps {
 /** The calendar list, toolbar and current view, independent of where the events come from. */
 function CalendarBrowser({
   listTitle,
+  editable = false,
   calendars,
   onToggle,
   onAdd,
@@ -371,9 +376,48 @@ function CalendarBrowser({
     return () => clearInterval(id)
   }, [])
 
-  const items = useMemo(() => toItems(events, overlays, calendars), [events, overlays, calendars])
-  const close = useCallback(() => setSelected(null), [])
-  const open = useCallback((item: CalendarItem, anchor: DOMRect) => setSelected({ item, anchor }), [])
+  const rangeRef = useRef(range)
+  useEffect(() => {
+    rangeRef.current = range
+  }, [range])
+  const reload = useCallback(async () => setEvents(await loadEvents(rangeRef.current)), [loadEvents])
+  const editing = useEventEditing({ enabled: editable, calendars, range, reload })
+  const { select, display } = editing
+
+  const items = useMemo(
+    () => toItems(display(events), overlays, calendars),
+    [display, events, overlays, calendars],
+  )
+  const close = useCallback(() => {
+    setSelected(null)
+    select(null)
+  }, [select])
+  const open = useCallback(
+    (item: CalendarItem, anchor: DOMRect) => {
+      setSelected({ item, anchor })
+      select(item)
+    },
+    [select],
+  )
+
+  // Cmd-N (Ctrl-N elsewhere) starts a new event, on today if it's in view.
+  const createRef = useRef(editing.create)
+  useEffect(() => {
+    createRef.current = editing.create
+  })
+  useEffect(() => {
+    if (!editable) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'n') return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      e.preventDefault()
+      const now = new Date()
+      const r = rangeRef.current
+      createRef.current(now >= r.start && now < r.end ? now : r.start)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editable])
 
   const setView = (v: CalendarView) => {
     setViewState(v)
@@ -403,6 +447,21 @@ function CalendarBrowser({
       />
       <div className="flex min-w-0 flex-1 flex-col">
         {banner && <div className="shrink-0 px-4 pt-3">{banner}</div>}
+        {editing.notice && (
+          <div className="shrink-0 px-4 pt-3">
+            <div role="alert" className="flex items-start gap-3 rounded-md bg-hover px-3 py-2 text-danger">
+              <span className="flex-1">{editing.notice}</span>
+              <button
+                type="button"
+                onClick={editing.dismissNotice}
+                aria-label="Dismiss"
+                className="no-drag -mr-1 flex size-5 shrink-0 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
         <div className="grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-sep px-4">
           <h2 className="truncate text-[20px] tracking-tight" data-testid="calendar-title" aria-live="polite">
             <span className="font-semibold">{title.month}</span>{' '}
@@ -410,6 +469,23 @@ function CalendarBrowser({
           </h2>
           <SegmentedControl label="Calendar view" options={VIEWS} value={view} onChange={setView} />
           <div className="flex items-center justify-end gap-1">
+            {editable && (
+              <NavButton
+                label="New event"
+                title={
+                  editing.canCreate
+                    ? `New event (${navigator.platform.startsWith('Mac') ? '⌘N' : 'Ctrl+N'})`
+                    : 'Your iCloud calendars are all read-only, and calendars added by link or file can’t be changed.'
+                }
+                disabled={!editing.canCreate}
+                onClick={() => {
+                  const now = new Date()
+                  editing.create(now >= range.start && now < range.end ? now : range.start)
+                }}
+              >
+                <Plus size={16} />
+              </NavButton>
+            )}
             {actions}
             <NavButton label="Previous" onClick={() => go(-1)}>
               <ChevronLeft size={16} />
@@ -439,23 +515,48 @@ function CalendarBrowser({
                 setCursor(d)
                 setView('week')
               }}
+              onCreate={editable ? (d) => editing.create(d) : undefined}
+              onEditItem={editable ? (i) => void editing.edit(i) : undefined}
             />
           )}
-          {view === 'week' && <WeekView range={range} today={today} items={items} onOpen={open} />}
+          {view === 'week' && (
+            <WeekView
+              range={range}
+              today={today}
+              items={items}
+              onOpen={open}
+              onCreate={editable ? (at, allDay) => editing.create(at, { allDay, exact: !allDay }) : undefined}
+              onEditItem={editable ? (i) => void editing.edit(i) : undefined}
+              canMove={editable ? editing.canMove : undefined}
+              onMove={editable ? (i, span) => void editing.move(i, span) : undefined}
+            />
+          )}
           {view === 'agenda' && <AgendaView range={range} today={today} items={items} onOpen={open} />}
         </div>
       </div>
-      {selected && <ItemPopover item={selected.item} anchor={selected.anchor} onClose={close} />}
+      {selected && (
+        <ItemPopover
+          item={selected.item}
+          anchor={selected.anchor}
+          onClose={close}
+          edit={editing.popoverEdit(selected.item, close)}
+        />
+      )}
+      {editing.sheets}
     </div>
   )
 }
 
 function NavButton({
   label,
+  title = label,
+  disabled,
   onClick,
   children,
 }: {
   label: string
+  title?: string
+  disabled?: boolean
   onClick: () => void
   children: ReactNode
 }) {
@@ -464,8 +565,9 @@ function NavButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      title={label}
-      className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+      title={title}
+      disabled={disabled}
+      className="no-drag flex size-7 items-center justify-center rounded-md text-ink-2 enabled:hover:bg-hover enabled:hover:text-ink disabled:opacity-40"
     >
       {children}
     </button>

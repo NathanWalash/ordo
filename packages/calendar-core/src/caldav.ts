@@ -64,7 +64,11 @@ export class CalDavProvider implements CalendarProvider, WritableCalendarProvide
 
   async connect(): Promise<void> {
     await this.call(() => this.client.login())
+    this.loggedIn = true
   }
+
+  /** Changes don't need the account's calendar list; fetching does, so sign in first if needed. */
+  private loggedIn = false
 
   async listCalendars(): Promise<RemoteCalendar[]> {
     const calendars = await this.call(() =>
@@ -101,7 +105,10 @@ export class CalDavProvider implements CalendarProvider, WritableCalendarProvide
     calendarId: string,
     range: DateRange,
   ): Promise<{ events: CalendarEvent[]; resources: CalendarResource[] }> {
-    if (!this.known.has(calendarId)) await this.listCalendars()
+    if (!this.known.has(calendarId)) {
+      if (!this.loggedIn) await this.connect()
+      await this.listCalendars()
+    }
     const calendar = this.known.get(calendarId)
     if (!calendar) throw new Error(`Unknown calendar ${calendarId}`)
     const objects = await this.call(() =>
