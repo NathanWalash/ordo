@@ -8,6 +8,13 @@ import {
   CalendarAuthError,
   CalendarConnectionError,
   CalendarStore,
+  CalendarWriteError,
+  createEvent as addEvent,
+  deleteEvent as removeEvent,
+  EventChangeError,
+  eventDetails as readDetails,
+  updateEvent as changeEvent,
+  type ChangeOptions,
   checkFeedUrl,
   describeIcs,
   FEED_MAX_BYTES,
@@ -25,10 +32,16 @@ import {
 } from '@ordo/calendar-core/node'
 import {
   AddCalendarLinkSchema,
+  CreateEventSchema,
   DateRangeSchema,
+  DeleteEventSchema,
+  EventRefSchema,
   IPC,
   SetVisibleSchema,
+  UpdateEventSchema,
   type AddCalendarOutcome,
+  type CalendarChangeOutcome,
+  type EventDetails,
   type CalendarEvent,
   type CalendarListItem,
   type CalendarStatus,
@@ -98,7 +111,25 @@ export function status(): CalendarStatus {
  * iCloud's, then those added by link. A link that fails doesn't stop the others; it's listed
  * in `failed`. If iCloud fails, its error is returned after the links have been synced.
  */
-export async function sync(
+export function sync(
+  options?: { force?: boolean },
+  onProgress?: (p: CalendarSyncProgress) => void,
+): Promise<CalendarSyncOutcome> {
+  const p = runSync(options, onProgress)
+  if (!syncing) {
+    syncing = p
+    const done = () => {
+      if (syncing === p) syncing = null
+    }
+    p.then(done, done)
+  }
+  return p
+}
+
+/** The sync in progress, so a change can wait for it rather than be overwritten by stale data. */
+let syncing: Promise<CalendarSyncOutcome> | null = null
+
+async function runSync(
   options?: { force?: boolean },
   onProgress?: (p: CalendarSyncProgress) => void,
 ): Promise<CalendarSyncOutcome> {
@@ -180,6 +211,116 @@ async function fetchCalendars(
   } finally {
     await provider.close().catch(() => {})
   }
+}
+
+// ---- Creating, changing and deleting events -------------------------------------------------
+
+/** An event's details for the editor, and whether Ordo can change it. */
+export function eventDetails(input: unknown): EventDetails | null {
+  const parsed = EventRefSchema.safeParse(input)
+  if (!parsed.success) return null
+  const a = account()
+  const d = readDetails(openStore(), parsed.data, a?.email)
+  if (!d) return null
+  const editable = d.editable && a !== null
+  return {
+    calendarId: d.calendarId,
+    draft: d.draft,
+    recurring: d.recurring,
+    editable,
+    ...(!editable && { reason: d.reason ?? 'Connect your iCloud account to change events.' }),
+  }
+}
+
+function changeFailure(err: unknown): CalendarChangeOutcome {
+  if (err instanceof EventChangeError) return { ok: false, error: err.kind, message: err.message }
+  if (err instanceof CalendarAuthError)
+    return {
+      ok: false,
+      error: 'auth',
+      message:
+        "iCloud didn't accept your app-specific password for Calendar. Reconnect your account and try again.",
+    }
+  if (err instanceof CalendarConnectionError)
+    return {
+      ok: false,
+      error: 'network',
+      message:
+        "Couldn't reach iCloud Calendar, so nothing was changed. Check your internet connection and try again.",
+    }
+  if (err instanceof CalendarWriteError)
+    return {
+      ok: false,
+      error: 'unknown',
+      message: `iCloud couldn’t save the change${err.status ? ` (${err.status})` : ''}. Try again in a moment.`,
+    }
+  return {
+    ok: false,
+    error: 'unknown',
+    message: 'Something went wrong changing your calendar. Try again in a moment.',
+  }
+}
+
+/**
+ * Run one change against iCloud: after any sync in progress, holding the write lock, with the
+ * cache updated from what the server saved. Never throws.
+ */
+async function change(
+  task: string,
+  fn: (provider: CalDavProvider, store: CalendarStore, options: ChangeOptions) => Promise<string>,
+): Promise<CalendarChangeOutcome> {
+  const a = account()
+  if (!a)
+    return { ok: false, error: 'not-connected', message: 'Connect your iCloud account to change events.' }
+  if (syncing) await syncing.catch(() => {})
+  const r = await withWriteLock(task, async (): Promise<CalendarChangeOutcome> => {
+    const provider = new CalDavProvider({ serverUrl: caldavUrl(), username: a.email, password: a.password })
+    try {
+      const uid = await fn(provider, openStore(), { window: syncWindow(), me: a.email })
+      return { ok: true, uid }
+    } catch (err) {
+      return changeFailure(err)
+    } finally {
+      await provider.close().catch(() => {})
+    }
+  })
+  return r instanceof Locked ? { ok: false, error: 'locked', message: r.message } : r
+}
+
+const invalid = (issues: { message: string }[]): CalendarChangeOutcome => ({
+  ok: false,
+  error: 'invalid',
+  message: issues[0]?.message ?? 'That event isn’t complete.',
+})
+
+/** Add an event to a writable iCloud calendar. */
+export async function createEvent(input: unknown): Promise<CalendarChangeOutcome> {
+  const parsed = CreateEventSchema.safeParse(input)
+  if (!parsed.success) return invalid(parsed.error.issues)
+  const { calendarId, draft } = parsed.data
+  return change('adding an event', async (p, s, o) => (await addEvent(p, s, calendarId, draft, o)).uid)
+}
+
+/** Change an event, or one occurrence of a repeating event (`scope: 'this'`). */
+export async function updateEvent(input: unknown): Promise<CalendarChangeOutcome> {
+  const parsed = UpdateEventSchema.safeParse(input)
+  if (!parsed.success) return invalid(parsed.error.issues)
+  const { ref, draft, scope } = parsed.data
+  return change('changing an event', async (p, s, o) => {
+    await changeEvent(p, s, ref, draft, scope, o)
+    return ref.uid
+  })
+}
+
+/** Delete an event, or one occurrence of a repeating event (`scope: 'this'`). */
+export async function deleteEvent(input: unknown): Promise<CalendarChangeOutcome> {
+  const parsed = DeleteEventSchema.safeParse(input)
+  if (!parsed.success) return invalid(parsed.error.issues)
+  const { ref, scope } = parsed.data
+  return change('deleting an event', async (p, s, o) => {
+    await removeEvent(p, s, ref, scope, o)
+    return ref.uid
+  })
 }
 
 export function calendars(): CalendarListItem[] {
@@ -379,4 +520,8 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(IPC.calendarAddLink, (_e, input: unknown) => addLink(input))
   ipcMain.handle(IPC.calendarImportFile, (e) => importIcsFile(BrowserWindow.fromWebContents(e.sender)))
   ipcMain.handle(IPC.calendarRemove, (_e, id: unknown) => removeCalendar(id))
+  ipcMain.handle(IPC.calendarDetails, (_e, ref: unknown) => eventDetails(ref))
+  ipcMain.handle(IPC.calendarCreateEvent, (_e, input: unknown) => createEvent(input))
+  ipcMain.handle(IPC.calendarUpdateEvent, (_e, input: unknown) => updateEvent(input))
+  ipcMain.handle(IPC.calendarDeleteEvent, (_e, input: unknown) => deleteEvent(input))
 }

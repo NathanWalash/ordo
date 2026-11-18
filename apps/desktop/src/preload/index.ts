@@ -63,6 +63,10 @@ const api: OrdoApi = {
     addLink: (input) => ipcRenderer.invoke(IPC.calendarAddLink, input),
     importFile: () => ipcRenderer.invoke(IPC.calendarImportFile),
     remove: (calendarId) => ipcRenderer.invoke(IPC.calendarRemove, calendarId),
+    details: (ref) => ipcRenderer.invoke(IPC.calendarDetails, ref),
+    createEvent: (input) => ipcRenderer.invoke(IPC.calendarCreateEvent, input),
+    updateEvent: (input) => ipcRenderer.invoke(IPC.calendarUpdateEvent, input),
+    deleteEvent: (input) => ipcRenderer.invoke(IPC.calendarDeleteEvent, input),
   },
   cleanup: {
     run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),
