@@ -389,7 +389,7 @@ describe('calendar events', () => {
       const services = fakeServices()
       services.calendar.events = () => [
         {
-          id: 'a',
+          uid: 'a',
           calendarId: 'c',
           title: 'Holiday',
           start: new Date(2026, 6, 10),
@@ -397,7 +397,7 @@ describe('calendar events', () => {
           allDay: true,
         },
         {
-          id: 'b',
+          uid: 'b',
           calendarId: 'c',
           title: 'Dentist',
           start: new Date(2026, 6, 10, 9, 0),
