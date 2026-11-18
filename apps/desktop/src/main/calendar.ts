@@ -11,6 +11,7 @@ import {
   CalendarStore,
   checkFeedUrl,
   describeIcs,
+  readIcs,
   FEED_MAX_BYTES,
   FeedError,
   FeedProvider,
@@ -256,7 +257,7 @@ function feedFailure(err: unknown): AddCalendarOutcome {
  */
 async function addFeed(
   feed: Omit<StoredFeed, 'id' | 'color'> & { color?: string },
-  text: string,
+  calendars: NonNullable<ReturnType<typeof readIcs>>,
 ): Promise<AddCalendarOutcome> {
   const r = await withWriteLock('adding a calendar', async (): Promise<AddCalendarOutcome> => {
     const s = openStore()
@@ -266,7 +267,7 @@ async function addFeed(
     // added (saved, with no events, and "already added" when you try again).
     let events: CalendarEvent[]
     try {
-      events = parseIcs(text, { calendarId: id, range: window })
+      events = parseIcs(calendars, { calendarId: id, range: window })
     } catch {
       return { ok: false, error: 'not-calendar', message: 'Ordo couldn’t read the events in that calendar.' }
     }
@@ -309,8 +310,9 @@ export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
   } catch (err) {
     return feedFailure(err)
   }
-  const info = describeIcs(text)
-  if (!info)
+  const calendars = readIcs(text)
+  const info = calendars && describeIcs(calendars)
+  if (!calendars || !info)
     return {
       ok: false,
       error: 'not-calendar',
@@ -324,17 +326,19 @@ export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
       secret: seal(check.url),
       host: check.host,
     },
-    text,
+    calendars,
   )
 }
 
 /** Add an .ics file's events as a calendar of their own. */
 export async function addIcsText(text: string, fileName: string): Promise<AddCalendarOutcome> {
-  const info = describeIcs(text)
-  if (!info) return { ok: false, error: 'not-calendar', message: `${fileName} isn’t a calendar file.` }
+  const calendars = readIcs(text)
+  const info = calendars && describeIcs(calendars)
+  if (!calendars || !info)
+    return { ok: false, error: 'not-calendar', message: `${fileName} isn’t a calendar file.` }
   account()
   const name = nameFor(info.name, basename(fileName, extname(fileName)) || 'Imported calendar')
-  return addFeed({ kind: 'file', name, color: info.color, ics: text }, text)
+  return addFeed({ kind: 'file', name, color: info.color, ics: text }, calendars)
 }
 
 /** Pick an .ics file and add it. Null when the picker is cancelled. */

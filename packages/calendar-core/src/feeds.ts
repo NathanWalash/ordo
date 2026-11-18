@@ -2,7 +2,6 @@
 // published ICS link, webcal:// feeds) or import once from an .ics file. Read-only.
 
 import { createHash } from 'node:crypto'
-import ICAL from 'ical.js'
 import { normaliseColor } from './caldav'
 import { parseCalendars, parseIcs } from './ics'
 import type { CalendarEvent, CalendarProvider, DateRange, RemoteCalendar } from './types'
@@ -66,13 +65,29 @@ export function checkFeedUrl(input: string, { allowLoopback = false } = {}): Fee
   return { ok: false, message: 'That isn’t a calendar link. It should start with https:// or webcal://.' }
 }
 
-/** Name, colour and number of events of an .ics document, or null if it isn't a calendar. */
-export function describeIcs(text: string): { name?: string; color?: string; events: number } | null {
+type Calendars = ReturnType<typeof parseCalendars>
+
+/** The calendars in an .ics document, parsed once, or null if it isn't a calendar. */
+export function readIcs(text: string): Calendars | null {
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 4096))) return null
   try {
     const cals = parseCalendars(text)
-      .map((r) => new ICAL.Component(r as never))
-      .filter((c) => c.name === 'vcalendar')
+    return cals.length ? cals : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Name, colour and number of events of an .ics document (or of calendars `readIcs` already
+ * parsed), or null if it isn't a calendar.
+ */
+export function describeIcs(
+  doc: string | Calendars,
+): { name?: string; color?: string; events: number } | null {
+  const cals = typeof doc === 'string' ? readIcs(doc) : doc
+  if (!cals) return null
+  try {
     const first = cals[0]
     if (!first) return null
     const prop = (name: string) => {
@@ -223,9 +238,10 @@ export class FeedProvider implements CalendarProvider {
         `Ordo can’t read the saved link for ${feed.name}. Remove it and add it again.`,
       )
     const text = feed.kind === 'file' ? (feed.ics ?? '') : await fetchFeed(feed.url!, this.opts)
-    if (!describeIcs(text))
+    const calendars = readIcs(text)
+    if (!calendars)
       throw new FeedError('not-calendar', `${feed.name} didn’t return a calendar. The link may have changed.`)
-    return parseIcs(text, { calendarId, range })
+    return parseIcs(calendars, { calendarId, range })
   }
 
   async close(): Promise<void> {}
