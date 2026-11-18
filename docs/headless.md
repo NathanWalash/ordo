@@ -119,7 +119,10 @@ you chose with `"categorisedBy": "you"`; the human output adds a `*` to AI categ
 
 Human-readable text by default. Text that came from emails, statements or calendars has control
 characters and bidi overrides removed before it reaches your terminal. With `--json`, stdout
-carries exactly one JSON document and nothing else (progress and logs go to stderr). Errors look
+carries exactly one JSON document and nothing else (progress and logs go to stderr). Control
+characters, C1 controls and bidi characters in it are written as `\u` escapes, so the JSON is safe
+to print in a terminal and still parses to the same text; MCP results are escaped the same way.
+Errors look
 like this, with a non-zero exit code:
 
 ```json
