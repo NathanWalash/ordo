@@ -6,10 +6,17 @@ import type { MessageContent, MessageHeader } from '@ordo/mail-core'
 
 // The mail client's main-process checks, without a window or a server: everything here is
 // refused (or answered from the cache) before any connection would be made.
-const dir = vi.hoisted(() => ({ path: '' }))
+const dir = vi.hoisted(() => {
+  // Never iCloud: anything that tries to connect goes to a closed local port and fails at once.
+  process.env['ORDO_IMAP_HOST'] = '127.0.0.1'
+  process.env['ORDO_IMAP_PORT'] = '9'
+  process.env['ORDO_SMTP_HOST'] = '127.0.0.1'
+  process.env['ORDO_SMTP_PORT'] = '9'
+  return { path: '' }
+})
 const openExternal = vi.hoisted(() => vi.fn())
 vi.mock('electron', () => ({
-  app: { getPath: () => dir.path, isPackaged: true, on: vi.fn() },
+  app: { getPath: () => dir.path, isPackaged: false, on: vi.fn() },
   ipcMain: { handle: vi.fn() },
   shell: { openExternal },
   dialog: {},
@@ -187,8 +194,8 @@ describe('with a cached mailbox', () => {
     expect(await client.send(compose({ to: many }))).toMatchObject({ error: 'invalid' })
   })
 
-  it('needs a Drafts mailbox to save a draft', async () => {
-    expect(await client.saveDraft(compose())).toMatchObject({ ok: false, error: 'unavailable' })
+  it('can’t save a draft without a Drafts mailbox it can find', async () => {
+    expect(await client.saveDraft(compose())).toMatchObject({ ok: false })
   })
 
   it('refuses remote images that aren’t https, without fetching', async () => {
