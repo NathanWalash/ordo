@@ -92,6 +92,61 @@ Answers are cached in `money.sqlite` per merchant (or pair), model and a fingerp
 sent, so running again only asks about new or changed merchants. Listing transactions and bills
 applies cached answers without calling the model; with AI for Money off, they aren't applied.
 
+## Ask Ordo
+
+**Ask Ordo** (Money → Ask Ordo) answers questions about your money, like "How much did Italy cost
+me?" or "What am I holding for other people?", and learns from what you tell it. It uses the
+provider and model chosen in Settings → AI.
+
+**Ordo does the maths.** The model can't see your statements. It answers by calling Ordo's query
+functions, one at a time, in a strict JSON loop:
+
+```json
+{ "type": "call", "tool": "event_cost", "args": { "name": "Italy" } }
+```
+
+Ordo runs the function on your data and sends back the result as data. When the model is ready it
+answers, writing every amount as a placeholder for a number a tool returned:
+
+```json
+{ "type": "answer", "text": "Italy cost you {{r1.netPence}} after {{r1.paidBackPence}} came back." }
+```
+
+Ordo fills the placeholders in itself. An answer with an amount the model wrote (`£30`, `12.50`,
+`1250p`, `30 pounds`) or a placeholder that points nowhere is refused and asked again once. At most
+six tool calls, then the model must answer.
+
+The tools: `find_transactions`, `spending` (between two days, net of paybacks), `compare_months`,
+`events`, `event_cost`, `matches` (paybacks and pass-throughs, with how sure Ordo is), `share_of`
+(your share of one outgoing after paybacks), `loose_ends` (money held for others, money owed to you),
+`people`, `facts` (what you've told Ordo) and `caveats` (how each bank dates payments). Arguments are
+checked with zod; bad ones come back to the model as an error.
+
+**What is sent.** Unlike Sort with AI, Ask Ordo needs real detail: exact amounts, dates, account
+names, merchant and people's names from your statements, and the facts you've saved, as sentences.
+Only what the model asks a tool for is sent, plus your question and the last few questions and
+answers in the conversation. Never your whole statement, files or balances.
+
+- **On this computer (LM Studio, Ollama):** nothing leaves your computer, so nothing more is asked.
+- **Claude Code or Codex CLI:** Ask Ordo needs its own consent, **Send amounts, dates and names to
+  Anthropic (or OpenAI)** in Settings → AI, on top of the consent for sorting. It is off by
+  default, asked for in its own dialog, kept per provider, and cleared when you switch provider.
+  Without it, Ask Ordo is off and says why; Ordo's own questions, loose ends and events still work.
+
+**Remembering.** When you tell Ask Ordo something ("Genest's £30 was for Halloween"), it can suggest
+up to three facts to remember. Ordo checks each one against its schema, drops any that name payments
+or events the tools never showed (or an amount owed that Ordo didn't work out), and shows the rest
+as Ordo's own sentence with Save and Not now. Nothing is saved until you press Save. Clarifying
+questions ("Which trip do you mean?") come with short options that send your choice as the next
+question; turn them off with **Let Ask Ordo ask me back**. **Ask Ordo answers** chooses briefly or
+in detail.
+
+**What Ordo knows** is stored in `money.sqlite` as facts: people (flatmate, friend…), events and
+trips, paybacks, pass-throughs, money held for someone, money owed to you, payments to ignore,
+income sources, how an account dates payments, and notes. Each one is checked again when read; you
+can forget any of them on the Ask Ordo page or with `money forget`. Ordo's own questions (who is
+this, was this a payback) are worked out without a model, from exact amounts and dates.
+
 ## Safety
 
 Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as
@@ -145,6 +200,9 @@ while Ordo is open, press **Check again**.
   sorting to the renderer.
 - `aiCategoriseTransactions` and `aiMatchBills` in `packages/money-core` do Money's;
   `window.ordo.money.aiSort()` runs both, and `money sort` / `ordo_money_sort` in headless mode.
+- `askMoney` and `moneyTools` in `packages/money-core` are Ask Ordo; the engines it calls (ledger,
+  `findMatches`, `eventCost`, `heldBalances`, `owedToYou`, `compareMonthToDate`, `proposeQuestions`)
+  are pure and need no model. `window.ordo.moneyMemory` exposes them to the renderer.
 - Unpackaged builds take `ORDO_LMSTUDIO_URL`, `ORDO_OLLAMA_URL` and `ORDO_AI_CLI_PATH` for tests.
 - `AI_LIVE=lmstudio pnpm vitest run ai.live` sorts made-up senders with a real local model (also
   `ollama` or `claude`). It's skipped by default.

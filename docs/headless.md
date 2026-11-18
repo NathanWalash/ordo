@@ -70,6 +70,13 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `money balances`                                                              | Who owes whom for shared bills                                   |
 | `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                   |
 | `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \*   |
+| `money knows`                                                                 | What you've taught Ordo, and how each bank dates payments        |
+| `money questions`                                                             | Ordo's questions about your money, with answer ids               |
+| `money loose-ends`                                                            | Money you hold for others, and who still owes you                |
+| `money events`                                                                | Events and trips: paid out, paid back and net                    |
+| `money compare [--category <c>] [--account <name>]`                           | This month so far against last month to the same day             |
+| `money answer <question-id> --answer <id> --confirm`                          | Answer one of Ordo's questions; saves what it means \*           |
+| `money forget <fact-id> --confirm`                                            | Forget something Ordo learned \*                                 |
 | `ai status`                                                                   | Model providers and the saved choice                             |
 | `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \*   |
 | `help`, `--help`, `-h`                                                        | The command list                                                 |

@@ -8,6 +8,19 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- **Ask Ordo** (Money, exploratory): a page where Ordo learns how your money works.
+  - Ask a question in your own words. The model answers by calling Ordo's query functions in a strict JSON loop checked with zod; every amount in the answer is a placeholder Ordo fills in from its own sums, so the model never does the maths. Tool results go back to it as data, never instructions. Anything it suggests remembering is shown as Ordo's own sentence and only saved when you press Save.
+  - Questions for you, with one-tap answers and no model needed: is a regular payment from someone money you pass on (Gabe's rent for Patrick), was money in a payback (exact, likely or to check), did it just pass through (a ticket resold and paid straight on), who is someone you pay back and forth with. Answers become facts; "No" and "Not now" stop a question coming back.
+  - Loose ends: money you hold for someone that hasn't gone on yet (not counted as income), money people still owe you, and who you pay and who pays you.
+  - Events and trips across every account with paid out, paid back and net, by type and by account; leave merchants out (Italy without Ryanair). Your share of a cost after paybacks (Ryanair £297.77, Amelie paid £148.80, yours £148.97).
+  - This month so far against last month to the same day, all spending or one category (bank categories like Monzo's Home too), with caveats: HSBC and other banks show posting dates, and a statement that stops early isn't counted.
+  - What Ordo knows: every fact in a plain sentence, with where it came from, and Forget. Set how each bank dates payments. Add a note in your own words.
+  - Teach Ordo: a guided walk through your accounts, people, regular money in and paybacks.
+  - Bills: a shared bill Ordo can work out from what you taught it (a flatmate's money you pass on) shows its split in Detected; confirming saves the bill and the split. The flatmate's held payments count as paying their share, so Bills doesn't say they still owe it.
+- Settings → AI: Ask Ordo answers briefly or in detail, can ask you a short question back (on by default), and, with a cloud model, needs its own consent to send exact amounts, dates and names, separate from the existing cloud consent. Switching provider clears both. A local model needs neither. See [docs/ai.md](docs/ai.md#ask-ordo).
+- `money-core`: a memory store in `money.sqlite` (facts and dismissed questions) and pure engines: ledger, payback and pass-through matching, event cost, held money and owed-to-you, month-to-date comparison, date caveats, questions, bill suggestions and the Ask tool loop.
+- Headless: `money knows`, `money questions`, `money loose-ends`, `money events` and `money compare`, and the matching MCP tools; `money answer` and `money forget` (and `ordo_money_answer`, `ordo_money_forget`) need `--allow-changes` and a confirm.
+
 - `pnpm dev` on macOS shows the app as Ordo in the menu bar, Dock and Cmd-Tab instead of Electron, by renaming the development copy of Electron before it starts. Packaged builds were already named Ordo.
 - Add a calendar by link: paste a calendar's iCal link (Google's **Secret address in iCal format**, Outlook's published ICS link, any `webcal://` or `.ics` link) and Ordo shows it under **Other calendars**, read-only, next to iCloud's. Useful for a Google work calendar that doesn't sync properly into iCloud. Ordo checks the link really is a calendar before saving it, keeps it encrypted with the system keychain, refreshes it with every sync, and says which link stopped working instead of dropping its events. Links must be https, and neither a link nor its redirects may reach this computer or the local network.
 - Import an `.ics` file as a calendar of its own, with its recurring events expanded like any other.
