@@ -58,8 +58,11 @@ test('connects, scans and lists real senders', async () => {
 
 test('disconnecting forgets the account', async () => {
   test.skip(!imapPort, 'Needs the connected account from the previous test')
+  await page.getByRole('navigation').getByRole('button', { name: 'Settings' }).click()
+  const account = page.getByRole('region', { name: 'Account' })
+  await expect(account.getByText(`Connected as ${TEST_ACCOUNT.email}.`, { exact: false })).toBeVisible()
+  await account.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(account.getByRole('button', { name: 'Connect iCloud' })).toBeVisible()
   await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
-  await expect(page.getByRole('heading', { name: `Connected as ${TEST_ACCOUNT.email}` })).toBeVisible()
-  await page.getByRole('button', { name: 'Disconnect' }).click()
   await expect(page.getByRole('heading', { name: 'Connect your iCloud account' })).toBeVisible()
 })
