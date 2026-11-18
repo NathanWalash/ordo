@@ -84,7 +84,7 @@ export function CardTile({
       className={`group/card relative flex w-full flex-col gap-1.5 rounded-[9px] border border-sep bg-card px-3 py-2.5 text-left outline-none transition-[box-shadow,transform] duration-150 focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-accent ${
         lifted
           ? 'rotate-[1.5deg] shadow-[var(--lift-shadow)]'
-          : 'shadow-[var(--card-shadow)] hover:border-[color-mix(in_srgb,var(--ink)_16%,transparent)]'
+          : 'shadow-[var(--tile-shadow)] hover:border-[color-mix(in_srgb,var(--ink)_16%,transparent)]'
       }`}
     >
       {summary && (

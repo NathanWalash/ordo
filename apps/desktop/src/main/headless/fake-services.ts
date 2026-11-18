@@ -126,6 +126,22 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         value: boardCard({ title: input.title }),
       })),
       moveCard: vi.fn(async () => ({ ok: true as const, value: boardCard({ column: 'Doing' }) })),
+      resolve: (q: { board?: string; column?: string; card?: string; labels?: string[] }) =>
+        q.board && q.board !== 'Home'
+          ? {
+              ok: false as const,
+              error: 'not-found' as const,
+              message: `There’s no board called “${q.board}”.`,
+            }
+          : {
+              ok: true as const,
+              value: {
+                board: 'Home',
+                column: q.column ?? (q.card ? 'To do' : null),
+                card: q.card ? boardCard() : null,
+                labels: q.labels ?? [],
+              },
+            },
     },
     lockHolder: () => null,
     ...overrides,

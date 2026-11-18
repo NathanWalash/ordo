@@ -97,7 +97,7 @@ export function NewBoardSheet({
                     <span key={c.name} className="flex flex-1 flex-col gap-[3px]">
                       <span className="h-[3px] rounded-full bg-ink-3/60" />
                       {Array.from({ length: Math.max(1, 3 - i) }, (_, j) => (
-                        <span key={j} className="h-2.5 rounded-[2px] bg-card shadow-[var(--card-shadow)]" />
+                        <span key={j} className="h-2.5 rounded-[2px] bg-card shadow-[var(--tile-shadow)]" />
                       ))}
                     </span>
                   ))}

@@ -32,7 +32,7 @@ import {
 } from '@ordo/boards-core'
 import type {
   BoardView,
-  CardDetail as Detail,
+  BoardCardDetail as Detail,
   SuggestInfo,
   SuggestOutcome,
   SuggestProvider,

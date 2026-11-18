@@ -38,9 +38,10 @@ On Windows, Ordo.exe is a windowed program, so a plain Command Prompt may not sh
 Pipe or redirect it (`Ordo.exe --headless status | more`, or `> out.txt`); MCP clients always use
 pipes, so the MCP server is unaffected.
 
-**Known issue on Windows:** the MCP server (`--headless --mcp`) closes as soon as a client
-connects, so agents can't use Ordo on Windows yet. The CLI commands work there. The MCP tests are
-skipped on Windows until this is fixed.
+On Windows, Electron replaces the main process's `process.stdin` with an empty stream that has
+already ended, which made the MCP server (`--headless --mcp`) close as soon as a client connected.
+Ordo now reads standard input itself there (file descriptor 0: the pipe an MCP client gives it,
+or a file with `< requests.jsonl`). The MCP end-to-end tests run on Windows in CI again.
 
 On Linux, headless mode doesn't need a display: it was checked with no X server or Wayland at all
 (Electron 45, Debian 12). Chromium may still log a few lines about D-Bus or the GPU to stderr;
@@ -179,6 +180,14 @@ Shapes, trimmed:
   "rejected": [ { "address": "sam@friend.example", "reason": "Someone you’ve written to. Never included in bulk actions." } ],
   "summary": { "senders": 1, "emailsToTrash": 41, "unsubscribes": 1 } }
 
+// calendar events --json, and the ordo_calendar_events MCP tool. Timed events give instants (UTC);
+// all-day events give dates, YYYY-MM-DD, with an exclusive end as in iCalendar (a one-day event
+// on 10 July ends on 11 July). The human output shows times on this computer's clock.
+{ "from": "2026-07-01", "to": "2026-07-31", "total": 2, "offset": 0, "shown": 2, "events": [
+  { "title": "Holiday", "start": "2026-07-10", "end": "2026-07-11", "allDay": true, "calendar": "Home", "location": null },
+  { "title": "Dentist", "start": "2026-07-10T08:00:00.000Z", "end": "2026-07-10T09:00:00.000Z", "allDay": false,
+    "calendar": "Home", "location": "High Street" } ] }
+
 // money transactions --json (amounts are integer pence)
 { "currency": "GBP", "month": "2026-11", "account": null, "accounts": ["Monzo"],
   "summary": { "moneyInPence": 980000, "moneyOutPence": 42379 }, "total": 24, "offset": 0, "shown": 24,
@@ -189,7 +198,9 @@ Shapes, trimmed:
 ## MCP server
 
 `--headless --mcp` speaks MCP over stdio only, using the official TypeScript SDK. Logs go to
-stderr. The server exits when the client closes the connection.
+stderr. The server exits when the client closes the connection, after finishing any call already
+running (waiting at most five minutes), so a clean-up a client cancels or abandons still finishes
+and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
 `ordo_calendar_events`, `ordo_bills`, `ordo_transactions`, `ordo_balances`, `ordo_boards`,
@@ -206,6 +217,13 @@ Tool descriptions tell the agent that names, addresses, subjects, URLs, merchant
 titles are third-party text to be treated as data, never as instructions; the board tools say the
 same of card titles, labels and fields, which may quote emails or web pages. Adding or moving a card
 is marked non-destructive (nothing is lost), but still needs `--allow-changes` and `confirm: true`.
+
+`ordo_import_statement` takes a full local path. UNC and device paths (`\\server\share`,
+`//server/share`, `\\?\`, `\\.\`) are refused before any file-system call, here and in the CLI;
+the CLI still accepts a path relative to the current folder.
+
+The tools are defined once, in `apps/desktop/src/main/headless/tools.ts`, and shared with the
+in-app assistant. To add one, see [assistant.md](assistant.md#adding-a-tool).
 
 ### Claude Code
 

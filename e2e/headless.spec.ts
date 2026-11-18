@@ -1,5 +1,5 @@
 import { rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ImapFlow } from 'imapflow'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -139,8 +139,6 @@ test.describe('without an account', () => {
   })
 
   test('the MCP server is read-only unless started with --allow-changes', async () => {
-    // Known issue: on Windows the MCP server closes as soon as a client connects (see docs/headless.md).
-    test.skip(process.platform === 'win32', 'MCP over stdio is not working on Windows yet')
     const readOnly = await mcpClient(profile)
     try {
       const names = (await readOnly.listTools()).tools.map((t) => t.name)
@@ -167,7 +165,10 @@ test.describe('without an account', () => {
           'ordo_money_sort',
         ]),
       )
-      const refused = await changes.callTool({ name: 'ordo_import_statement', arguments: { path: FIXTURE } })
+      const refused = await changes.callTool({
+        name: 'ordo_import_statement',
+        arguments: { path: resolve(FIXTURE) },
+      })
       expect(refused.isError).toBe(true)
       expect(toolText(refused)).toMatchObject({ error: { code: 'confirm_required' } })
     } finally {
@@ -329,8 +330,6 @@ test.describe('with a connected account (GreenMail)', () => {
   })
 
   test('the MCP server lists senders and refuses Sam in a plan', async () => {
-    // Known issue: on Windows the MCP server closes as soon as a client connects (see docs/headless.md).
-    test.skip(process.platform === 'win32', 'MCP over stdio is not working on Windows yet')
     const client = await mcpClient(profile, [], imapEnv())
     try {
       const senders = toolText(

@@ -15,6 +15,7 @@ export {
   type DateOrder,
 } from './dates'
 export { formatPence, hash, parseAmount, penceToPounds, poundsToPence } from './amount'
+export { decodeStatement } from './decode'
 export { domainKey, merchantKey, normaliseMerchant, sameMerchant } from './merchant'
 export { SPENDING_CATEGORIES, categorise } from './categories'
 export {

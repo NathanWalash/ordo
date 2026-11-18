@@ -3,6 +3,7 @@ import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-cor
 import type { SettingsApi } from './settings'
 import type { AiApi } from './ai'
 import type { CleanupApi } from './cleanup'
+import type { AssistantApi } from './assistant'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
 export * from './calendar'
@@ -58,6 +59,7 @@ export type { CategorisedSender, ScanProgress }
 export * from './settings'
 export * from './ai'
 export * from './cleanup'
+export * from './assistant'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -92,6 +94,7 @@ export interface OrdoApi {
   boards: BoardsApi
   calendar: CalendarApi
   cleanup: CleanupApi
+  assistant: AssistantApi
 }
 
 export const IPC = {

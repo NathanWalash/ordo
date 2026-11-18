@@ -7,6 +7,7 @@ import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
+import { registerAssistantIpc, stop as stopAssistant } from './assistant'
 import { closeMoney, registerMoneyIpc } from './money'
 import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
@@ -132,6 +133,8 @@ function startApp(): void {
     setupAppearance()
     initAi()
     registerAiIpc()
+    registerAssistantIpc()
+    app.on('before-quit', stopAssistant)
     createWindow()
     void tidyBoards()
     app.on('activate', () => {

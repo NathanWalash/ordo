@@ -56,6 +56,23 @@ test('connects, scans and lists real senders', async () => {
   await expect(page.getByText("Someone you've written to.").first()).toBeVisible()
 })
 
+test('an unreachable mail server says so, with a next step', async () => {
+  // Port 9 (discard) has nothing listening: the same as iCloud being unreachable.
+  const offline = await launchApp({ ORDO_IMAP_HOST: '127.0.0.1', ORDO_IMAP_PORT: '9' })
+  try {
+    const win = await offline.firstWindow()
+    await win.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+    await win.getByRole('button', { name: 'Connect iCloud' }).click()
+    await win.getByLabel('Apple ID email').fill('you@icloud.com')
+    await win.getByLabel('App-specific password').fill('abcd-efgh-ijkl-mnop')
+    const dialog = win.getByRole('dialog', { name: 'Connect iCloud Mail' })
+    await dialog.getByRole('button', { name: 'Test connection' }).click()
+    await expect(dialog.getByRole('status')).toContainText("Couldn't reach iCloud. Check you're online")
+  } finally {
+    await offline.close()
+  }
+})
+
 test('disconnecting forgets the account', async () => {
   test.skip(!imapPort, 'Needs the connected account from the previous test')
   await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()

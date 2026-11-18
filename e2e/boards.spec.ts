@@ -528,3 +528,33 @@ test('fits a narrow window', async () => {
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1280, height: 800 })
 })
+
+test('works beside the docked assistant: scrolls sideways and drags scroll at the edge', async () => {
+  await page.setViewportSize({ width: 1500, height: 800 })
+  await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Assistant' })).toBeVisible()
+  await expect(column('Backlog')).toBeVisible()
+  const scroller = page.locator('[data-column-id]').first().locator('..')
+  // The board is narrower than its columns, so it scrolls sideways, and stays clear of the panel.
+  const sizes = await scroller.evaluate((el) => ({
+    scroll: el.scrollWidth,
+    client: el.clientWidth,
+    right: el.getBoundingClientRect().right,
+  }))
+  expect(sizes.scroll).toBeGreaterThan(sizes.client)
+  const panelBox = (await page.getByRole('dialog', { name: 'Assistant' }).boundingBox())!
+  expect(sizes.right).toBeLessThanOrEqual(panelBox.x + 1)
+  await shoot('assistant-docked')
+
+  // Hold a card near the right edge of the board: it scrolls along.
+  const from = (await card('Clear the gutters').boundingBox())!
+  await page.mouse.move(from.x + 40, from.y + 10)
+  await page.mouse.down()
+  await page.mouse.move(sizes.right - 20, from.y + 40, { steps: 10 })
+  await expect.poll(() => scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+  await page.keyboard.press('Escape')
+  await page.mouse.up()
+  await expect(card('Clear the gutters')).toBeVisible()
+  await page.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await page.setViewportSize({ width: 1280, height: 800 })
+})

@@ -65,6 +65,7 @@ export function mainServices(): OrdoServices {
         const r = await boards.moveCardByRef(input)
         return r.ok ? { ok: true, value: boards.cardRow(r.value) } : r
       },
+      resolve: (q) => boards.resolveRefs(q),
     },
     lockHolder,
   }

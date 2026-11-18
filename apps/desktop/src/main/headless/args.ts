@@ -29,13 +29,21 @@ const CATEGORY_NAMES = [
   'uncategorised',
 ] as const
 
+/**
+ * A whole number written in plain digits. `z.coerce` used Number(), so `1e3` and `0x10` were
+ * read as 1000 and 16: a mistyped `undo` id could reach a different clean-up.
+ */
+const digits = (schema: z.ZodNumber) =>
+  z.preprocess((v) => (typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : v), schema)
+
 const limit = (fallback: number, max: number) =>
-  z.coerce
-    .number({ error: '--limit must be a number' })
-    .int('--limit must be a whole number')
-    .min(1, '--limit must be at least 1')
-    .max(max, `--limit can be at most ${max}`)
-    .default(fallback)
+  digits(
+    z
+      .number({ error: '--limit must be a number' })
+      .int('--limit must be a whole number')
+      .min(1, '--limit must be at least 1')
+      .max(max, `--limit can be at most ${max}`),
+  ).default(fallback)
 
 const isoDay = (flag: string) =>
   z
@@ -87,7 +95,7 @@ const COMMANDS = {
   undo: {
     args: ['id'],
     flags: z.object({
-      id: z.coerce.number({ error: 'undo needs a clean-up id from `history`' }).int().positive(),
+      id: digits(z.number({ error: 'undo needs a clean-up id from `history`' }).int().positive()),
       confirm: z.boolean().default(false),
     }),
   },
@@ -239,6 +247,11 @@ function tokenize(args: readonly string[]): Tokens {
   const flags = new Map<string, string | string[] | true>()
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
+    // Everything after `--` is an argument, even if it starts with a dash (a file name).
+    if (arg === '--') {
+      positionals.push(...args.slice(i + 1))
+      break
+    }
     if (arg === '-h') {
       flags.set('help', true)
       continue
@@ -289,6 +302,10 @@ export function parseInvocation(args: readonly string[]): Invocation {
   const [first, second] = positionals
   if (!first || first === 'help' || flags.get('help') === true) {
     const topic = first === 'help' ? positionals.slice(1).join(' ') : positionals.join(' ')
+    // Help for something that isn't a command is still an unknown command.
+    const asked = first === 'help' ? positionals[1] : first
+    if (asked && !GROUPS.has(asked) && !(asked in COMMANDS))
+      throw new UsageError(`Unknown command: ${asked}. See \`help\`.`)
     return { kind: 'help', json, ...(topic && { topic }) }
   }
 

@@ -32,10 +32,17 @@ function sortSummary(name: string, r: Extract<MoneyAiOutcome, { ok: true }>): st
   return [...parts, ...r.errors].join(' ')
 }
 
-export function FinancesPage({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export function FinancesPage({
+  onOpenSettings,
+  initialMonth,
+}: {
+  onOpenSettings?: () => void
+  /** Show just this month (YYYY-MM) at first, e.g. when the assistant opens the page. */
+  initialMonth?: string
+}) {
   const [page, setPage] = useState<TransactionPage | null>(null)
   const [account, setAccount] = useState('')
-  const [month, setMonth] = useState('')
+  const [month, setMonth] = useState(initialMonth ?? '')
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

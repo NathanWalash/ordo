@@ -127,6 +127,16 @@ sent, past or impossible dates and repeats are dropped, steps are cleaned of con
 and cut to 120 characters. Suggestions are only shown: nothing is changed until you add one.
 Suggestions aren't cached.
 
+## Assistant
+
+The [assistant](assistant.md) uses the same provider and model, but it looks up much more than
+sorting does: transactions with amounts and dates, balances, bills, calendar events, sender names,
+addresses and subject lines, and your iCloud email address, as well as your questions. So agreeing
+to a cloud CLI here covers sorting only. The assistant asks for its own OK the first time you open
+it with Claude Code or Codex, says exactly what goes to Anthropic or OpenAI, and sends nothing until
+you allow it. **Stop sharing** in the assistant takes the OK back; switching provider asks again.
+With LM Studio or Ollama nothing leaves your computer and there's nothing to agree to.
+
 ## Safety
 
 Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as

@@ -261,7 +261,7 @@ function QuickAdd({
   return (
     <div
       role="listitem"
-      className="rounded-[9px] border border-accent bg-card shadow-[var(--card-shadow)] ring-1 ring-accent"
+      className="rounded-[9px] border border-accent bg-card shadow-[var(--tile-shadow)] ring-1 ring-accent"
     >
       <textarea
         ref={ref}

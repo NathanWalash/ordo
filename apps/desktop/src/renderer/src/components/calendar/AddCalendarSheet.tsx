@@ -28,6 +28,8 @@ export function AddCalendarSheet({ onClose, onAdded }: Props) {
       const r = await window.ordo.calendar.addLink({ url })
       if (r.ok) onAdded(r.calendar)
       else setError(r.message)
+    } catch {
+      setError('Something went wrong adding that calendar. Try again in a moment.')
     } finally {
       setBusy(null)
     }
@@ -42,6 +44,8 @@ export function AddCalendarSheet({ onClose, onAdded }: Props) {
       if (!r) return
       if (r.ok) onAdded(r.calendar)
       else setFileError(r.message)
+    } catch {
+      setFileError('Something went wrong importing that file. Try again in a moment.')
     } finally {
       setBusy(null)
     }

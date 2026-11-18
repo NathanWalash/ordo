@@ -4,6 +4,7 @@ import type { CalendarSyncProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
+import { ASSISTANT_IPC, type AssistantEvent } from '@ordo/shared'
 import { moneyApi } from './money'
 import { boardsApi } from './boards'
 
@@ -77,6 +78,19 @@ const api: OrdoApi = {
   },
   money: moneyApi,
   boards: boardsApi,
+  assistant: {
+    info: () => ipcRenderer.invoke(ASSISTANT_IPC.info),
+    ask: (input) => ipcRenderer.invoke(ASSISTANT_IPC.ask, input),
+    confirm: (input) => ipcRenderer.invoke(ASSISTANT_IPC.confirm, input),
+    setCloudConsent: (input) => ipcRenderer.invoke(ASSISTANT_IPC.consent, input),
+    stop: () => ipcRenderer.invoke(ASSISTANT_IPC.stop),
+    clear: () => ipcRenderer.invoke(ASSISTANT_IPC.clear),
+    onEvent: (listener) => {
+      const handler = (_e: IpcRendererEvent, ev: AssistantEvent) => listener(ev)
+      ipcRenderer.on(ASSISTANT_IPC.event, handler)
+      return () => ipcRenderer.removeListener(ASSISTANT_IPC.event, handler)
+    },
+  },
 }
 
 contextBridge.exposeInMainWorld('ordo', api)

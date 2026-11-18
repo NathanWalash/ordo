@@ -53,7 +53,7 @@ export interface BoardView {
 }
 
 /** A card with its checklist and links looked up again. */
-export interface CardDetail {
+export interface BoardCardDetail {
   card: Card
   checklist: ChecklistItem[]
   links: ResolvedLink[]
@@ -224,7 +224,7 @@ export type SuggestOutcome =
 export interface BoardsApi {
   list(): Promise<BoardSummary[]>
   board(boardId: string): Promise<BoardView | null>
-  card(cardId: string): Promise<CardDetail | null>
+  card(cardId: string): Promise<BoardCardDetail | null>
   /** A board's archived cards, most recently changed first. */
   archived(boardId: string): Promise<Card[]>
 

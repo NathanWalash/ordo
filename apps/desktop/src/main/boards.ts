@@ -48,7 +48,7 @@ import {
   type BoardsApi,
   type BoardsResult,
   type CalendarOverlayItem,
-  type CardDetail,
+  type BoardCardDetail,
   type SuggestInfo,
   type SuggestOutcome,
 } from '@ordo/shared'
@@ -218,7 +218,7 @@ async function gather(kinds: ReadonlySet<LinkKind>, today = toISODate()): Promis
 
 const allCandidates = (sources: LinkSources): LinkCandidate[] => Object.values(toCandidates(sources)).flat()
 
-export async function card(raw: unknown): Promise<CardDetail | null> {
+export async function card(raw: unknown): Promise<BoardCardDetail | null> {
   const parsed = IdSchema.safeParse(raw)
   if (!parsed.success) return null
   const s = boardsStore()
@@ -614,6 +614,55 @@ export function cardsByRef(q: {
       (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0),
   )
   return { ok: true, value: cards }
+}
+
+/**
+ * Names looked up as they are now, changing nothing: for a change's preview, so it shows the board,
+ * column and card from Ordo's own data rather than the words it was asked with.
+ */
+export function resolveRefs(q: {
+  board?: string
+  column?: string
+  card?: string
+  labels?: string[]
+}): BoardsResult<{
+  board: string
+  column: string | null
+  card: ReturnType<typeof cardRow> | null
+  labels: string[]
+}> {
+  const s = boardsStore()
+  let boardId: string | undefined
+  if (q.board) {
+    const b = findBoard(q.board)
+    if (!b.ok) return b
+    boardId = b.value.id
+  }
+  let card: Card | null = null
+  if (q.card) {
+    const c = findCard(q.card, boardId)
+    if (!c.ok) return c
+    card = c.value
+    boardId = c.value.boardId
+  }
+  if (!boardId) return { ok: false, error: 'invalid', message: 'Name a board.' }
+  let column: string | null = null
+  if (q.column) {
+    const col = findColumn(boardId, q.column)
+    if (!col.ok) return col
+    column = col.value.name
+  } else if (!card) column = s.columns(boardId)[0]?.name ?? null
+  const labels = s.labels(boardId)
+  const names: string[] = []
+  for (const name of q.labels ?? []) {
+    const l = pick(labels, name, (x) => x.name, 'label')
+    if (!l.ok) return l
+    names.push(l.value.name)
+  }
+  return {
+    ok: true,
+    value: { board: s.board(boardId)!.name, column, card: card && cardRow(card), labels: names },
+  }
 }
 
 /** Add a card naming its board, column and labels. */
