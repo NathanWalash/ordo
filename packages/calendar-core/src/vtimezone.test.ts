@@ -87,3 +87,37 @@ describe('buildVTimezone', () => {
       }
   })
 })
+
+describe('buildVTimezone with absurd years', () => {
+  const ms = (fn: () => unknown) => {
+    const t = performance.now()
+    fn()
+    return performance.now() - t
+  }
+
+  it('clamps far-off and huge ranges instead of scanning them', () => {
+    const cases: [number, number][] = [
+      [99_999, 99_999],
+      [1, 1_000_000_000],
+      [-50_000, 275_000],
+      [2026, Number.MAX_SAFE_INTEGER],
+    ]
+    for (const [from, to] of cases) {
+      let vtz: ReturnType<typeof buildVTimezone> = null
+      expect(ms(() => (vtz = buildVTimezone('Africa/Casablanca', from, to)))).toBeLessThan(2000)
+      expect(vtz).not.toBeNull()
+    }
+  })
+
+  it('caps the span at 20 years, even for a zone whose changes are listed one by one', () => {
+    // Casablanca changes its clocks around Ramadan, so there's no yearly rule to write.
+    const capped = buildVTimezone('Africa/Casablanca', 2026, 2200)!.getAllSubcomponents()
+    const twenty = buildVTimezone('Africa/Casablanca', 2026, 2046)!.getAllSubcomponents()
+    expect(capped.length).toBe(twenty.length)
+  })
+
+  it('is null for years that aren’t numbers', () => {
+    expect(buildVTimezone('Europe/London', Number.NaN, 2026)).toBeNull()
+    expect(buildVTimezone('Europe/London', 2026, Number.POSITIVE_INFINITY)).toBeNull()
+  })
+})

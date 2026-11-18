@@ -51,7 +51,7 @@ export {
   type EventFacts,
   type EventTarget,
 } from './write'
-export { buildVTimezone } from './vtimezone'
+export { buildVTimezone, VTIMEZONE_MAX_SPAN, VTIMEZONE_MAX_YEAR, VTIMEZONE_MIN_YEAR } from './vtimezone'
 export {
   dayRange,
   daysIn,

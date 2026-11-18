@@ -110,15 +110,27 @@ function observance(kind: 'standard' | 'daylight', start: Wall, from: number, to
   return c
 }
 
+/** Years a VTIMEZONE is built for. Outside them, the nearest year in range is used. */
+export const VTIMEZONE_MIN_YEAR = 1900
+export const VTIMEZONE_MAX_YEAR = 2200
+/** At most this many years are scanned for one VTIMEZONE, whatever the caller asks for. */
+export const VTIMEZONE_MAX_SPAN = 20
+
+const clampYear = (y: number) => Math.min(VTIMEZONE_MAX_YEAR, Math.max(VTIMEZONE_MIN_YEAR, Math.trunc(y)))
+
 /**
  * A VTIMEZONE for IANA zone `tz` that is right for `fromYear` to `toYear` (and, when the zone
  * follows a regular yearly rule, beyond). Null for UTC or a zone the runtime doesn't know.
+ * The years are clamped to 1900–2200 and to a 20-year span, so odd input can't make it slow.
  */
 export function buildVTimezone(
   tz: string,
   fromYear: number,
   toYear: number,
 ): InstanceType<typeof ICAL.Component> | null {
+  if (!Number.isFinite(fromYear) || !Number.isFinite(toYear)) return null
+  fromYear = clampYear(fromYear)
+  toYear = Math.min(clampYear(Math.max(toYear, fromYear)), fromYear + VTIMEZONE_MAX_SPAN)
   const key = `${tz}|${fromYear}|${toYear}`
   let jcal = built.get(key)
   if (jcal === undefined) {

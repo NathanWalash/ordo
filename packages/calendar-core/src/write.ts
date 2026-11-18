@@ -25,7 +25,7 @@ import {
 import { parseIcs } from './ics'
 import { dayKey, ianaZone, localZone, type WallClock } from './time'
 import type { CalendarEvent, DateRange } from './types'
-import { buildVTimezone } from './vtimezone'
+import { buildVTimezone, VTIMEZONE_MAX_YEAR, VTIMEZONE_MIN_YEAR } from './vtimezone'
 
 type Comp = InstanceType<typeof ICAL.Component>
 type ITime = InstanceType<typeof ICAL.Time>
@@ -366,12 +366,19 @@ function stamp(comp: Comp, now: Date, bump: boolean): void {
   }
 }
 
-/** Add a VTIMEZONE for every TZID in use, put them first, and drop ones nothing uses. */
-function tidyTimezones(vcal: Comp): void {
+const plausibleYear = (y: number | undefined): y is number =>
+  y !== undefined && Number.isInteger(y) && y >= VTIMEZONE_MIN_YEAR && y <= VTIMEZONE_MAX_YEAR
+
+/**
+ * Add a VTIMEZONE for every TZID in use, put them first, and drop ones nothing uses. The zones
+ * cover `focusYear` (the year of the event being written) to ten years on; without one, the
+ * earliest plausible start in the document. Years from server data are never trusted for the
+ * range: a DTSTART in year 99999 mustn't make Ordo scan 100,000 years of time zone data.
+ */
+function tidyTimezones(vcal: Comp, focusYear?: number): void {
   const events = vcal.getAllSubcomponents('vevent')
   const used = new Set<string>()
-  let from = Infinity
-  let to = -Infinity
+  let earliest: number | undefined
   const visit = (c: Comp) => {
     for (const p of c.getAllProperties()) {
       const tzid = p.getParameter('tzid')
@@ -381,12 +388,10 @@ function tidyTimezones(vcal: Comp): void {
   }
   for (const e of events) {
     visit(e)
-    const s = readMoment(e, 'dtstart')
-    if (s) {
-      from = Math.min(from, s.wall.year)
-      to = Math.max(to, s.wall.year)
-    }
+    const y = readMoment(e, 'dtstart')?.wall.year
+    if (plausibleYear(y)) earliest = Math.min(earliest ?? y, y)
   }
+  const year = plausibleYear(focusYear) ? focusYear : (earliest ?? new Date().getFullYear())
   const zones = vcal.getAllSubcomponents('vtimezone')
   const have = new Set<string>()
   for (const z of zones) {
@@ -397,8 +402,7 @@ function tidyTimezones(vcal: Comp): void {
   const added: Comp[] = []
   for (const id of used) {
     if (have.has(id) || !ianaZone(id)) continue
-    const year = Number.isFinite(from) ? from : new Date().getFullYear()
-    const vtz = buildVTimezone(id, year, Math.max(year + 10, Number.isFinite(to) ? to : year))
+    const vtz = buildVTimezone(id, year, year + 10)
     if (vtz) added.push(vtz)
   }
   // VTIMEZONEs first, as most clients write them.
@@ -443,7 +447,7 @@ export function createEventIcs(draft: EventDraft, { uid = newUid(), now = new Da
   if (draft.repeat && !draft.repeat.custom) ev.addPropertyWithValue('rrule', buildRrule(draft.repeat, start))
   setAlert(ev, draft.alert)
   vcal.addSubcomponent(ev)
-  tidyTimezones(vcal)
+  tidyTimezones(vcal, start.wall.year)
   return vcal.toString() + '\r\n'
 }
 
@@ -501,7 +505,7 @@ export function updateEventIcs(
     setTimes(own, start, end)
     if (draft.alert !== before.alert) setAlert(own, draft.alert)
     stamp(own, now, true)
-    tidyTimezones(vcal)
+    tidyTimezones(vcal, start.wall.year)
     return vcal.toString() + '\r\n'
   }
 
@@ -586,7 +590,7 @@ export function updateEventIcs(
   }
   stamp(series, now, true)
   for (const o of overrides) if (o !== series && o.parent) stamp(o, now, false)
-  tidyTimezones(vcal)
+  tidyTimezones(vcal, start.wall.year)
   return vcal.toString() + '\r\n'
 }
 

@@ -586,3 +586,60 @@ describe('deleteFromIcs', () => {
     expect(() => new ICAL.Component(ICAL.parse(ics))).not.toThrow()
   })
 })
+
+describe('years from server data', () => {
+  const ms = (fn: () => unknown) => {
+    const t = performance.now()
+    try {
+      fn()
+    } catch {
+      // Refusing quickly is fine too; hanging isn't.
+    }
+    return performance.now() - t
+  }
+  const doc = (dtstart: string, ...extra: string[]) =>
+    cal(
+      'BEGIN:VEVENT',
+      'UID:far',
+      `DTSTART;TZID=Africa/Casablanca:${dtstart}`,
+      ...extra,
+      'SUMMARY:Far',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:near',
+      'DTSTART;TZID=Africa/Casablanca:20261102T090000',
+      'DTEND;TZID=Africa/Casablanca:20261102T100000',
+      'SUMMARY:Near',
+      'END:VEVENT',
+    )
+
+  it('doesn’t scan time zone data for a start in year 9999 or 99999, or a far-off UNTIL', () => {
+    const docs = [
+      doc('99991102T090000'),
+      doc('999991102T090000'),
+      doc('20261102T090000', 'RRULE:FREQ=YEARLY;UNTIL=99991231T235959Z'),
+    ]
+    const near = draft({ timeZone: 'Africa/Casablanca' })
+    for (const d of docs) {
+      expect(ms(() => deleteFromIcs(d, { uid: 'near' }, 'all'))).toBeLessThan(2000)
+      expect(ms(() => updateEventIcs(d, { uid: 'near' }, near, 'all'))).toBeLessThan(2000)
+      expect(ms(() => deleteFromIcs(d, { uid: 'far' }, 'all'))).toBeLessThan(2000)
+    }
+    // The year-9999 event is kept untouched, and the zone still covers the event that was written.
+    const kept = updateEventIcs(docs[0]!, { uid: 'near' }, near, 'all')
+    expect(kept).toContain('DTSTART;TZID=Africa/Casablanca:99991102T090000')
+    expect(kept).toMatch(/DTSTART:2026\d{4}T/)
+  })
+
+  it('builds zones around the event being written, not the document’s oldest event', () => {
+    const old = cal(
+      'BEGIN:VEVENT',
+      'UID:old',
+      'DTSTART;TZID=Africa/Casablanca:19200101T090000',
+      'SUMMARY:Old',
+      'END:VEVENT',
+    )
+    const ics = updateEventIcs(old, { uid: 'old' }, draft({ timeZone: 'Africa/Casablanca' }), 'all')
+    expect(ics).toMatch(/DTSTART:2026\d{4}T/)
+  })
+})
