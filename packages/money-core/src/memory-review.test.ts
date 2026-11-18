@@ -323,3 +323,86 @@ describe('11. Ask can’t write lasting notes', () => {
     expect(system).not.toMatch(/\btrust/i)
   })
 })
+
+describe('security follow-up: names, labels and glue', () => {
+  const ask = (text: string, txs: Transaction[] = [T('a', '2026-11-01', -2000, 'TESCO')]) =>
+    askMoney(
+      'q',
+      model((n) =>
+        n === 1 ? { type: 'call', tool: 'find_transactions', args: {} } : { type: 'answer', text },
+      ),
+      { transactions: txs, facts: [], today: TODAY },
+      { maxSteps: 1 },
+    )
+
+  it('a name that spells out money never fills a placeholder', async () => {
+    for (const name of ['five hundred pounds', 'One Thousand Quid', 'Twenty Grand Ltd']) {
+      const txs = [T('b', '2026-11-02', 1, name)]
+      await expect(ask('You still owe {{r1.items.0.name}}.', txs)).rejects.toMatchObject({
+        code: 'bad-response',
+      })
+      expect(fillAmounts('{{r1.items.0.name}}', [{ items: [{ name }] }])).toHaveProperty('error')
+    }
+  })
+
+  it('the filled-in answer is checked again, outside the spans Ordo filled from numbers', () => {
+    // Each name is fine alone, but together they'd spell an amount.
+    const r = [{ items: [{ name: 'Big' }, { name: 'Pounds Ltd' }], total: 3 }]
+    expect(fillAmounts('{{r1.items.0.name}} owes', r)).toEqual({ text: 'Big owes' })
+    expect(fillAmounts('Seventy {{r1.items.1.name}}', r)).toHaveProperty('error')
+    expect(
+      fillAmounts('You spent {{r1.netPence}}, on {{r1.date}}.', [{ netPence: 500, date: '2026-11-02' }]),
+    ).toEqual({ text: 'You spent £5.00, on 2 Nov.' })
+  })
+
+  it('a proposal label with an amount or a placeholder is replaced with Ordo’s own sentence', async () => {
+    const txs = [T('o', '2026-08-08', -6000, 'RESTAURANT'), T('i', '2026-08-10', 3000, 'SAM SPLITWISE')]
+    for (const label of [
+      'Sam paid you £500',
+      'Sam paid {{r1.totalInPence}}',
+      'Sam paid five hundred pounds',
+    ]) {
+      const r = await askMoney(
+        'q',
+        model((n) =>
+          n === 1
+            ? { type: 'call', tool: 'find_transactions', args: {} }
+            : {
+                type: 'answer',
+                text: 'Noted.',
+                proposals: [{ label, fact: { kind: 'payback', inId: 'i', outIds: ['o'] } }],
+              },
+        ),
+        { transactions: txs, facts: [], today: TODAY },
+      )
+      expect(r.proposals).toHaveLength(1)
+      expect(r.proposals[0]!.label).toBe(
+        'SAM SPLITWISE £30.00 on 10 Aug paid you back for RESTAURANT £60.00 on 8 Aug.',
+      )
+    }
+  })
+
+  it('a placeholder touching letters, a hyphen or a multiplier word is refused', async () => {
+    for (const text of [
+      'You spent {{r1.totalOutPence}}k.',
+      'There were {{r1.total}} thousand of them.',
+      'Roughly {{r1.total}}-odd million.',
+      'About x{{r1.total}} times.',
+      'It came to {{r1.total}} grand.',
+      'It came to {{r1.total}} hundred.',
+    ])
+      await expect(ask(text)).rejects.toMatchObject({ code: 'bad-response' })
+    // Possessives and ordinary punctuation are fine.
+    expect((await ask('{{r1.items.0.name}}’s payment, and ({{r1.total}}) in all.')).answer).toBe(
+      'TESCO’s payment, and (1) in all.',
+    )
+  })
+
+  it('number words on their own are refused in the model’s text', async () => {
+    for (const text of ['About seventy of them.', 'Three hundred, maybe.', 'Nearly a dozen times.'])
+      await expect(ask(text)).rejects.toMatchObject({ code: 'bad-response' })
+    // "one" is plain English; "one pound" is still refused.
+    expect((await ask('That’s the one you asked about.')).answer).toBe('That’s the one you asked about.')
+    await expect(ask('Just one pound.')).rejects.toMatchObject({ code: 'bad-response' })
+  })
+})

@@ -8,7 +8,7 @@ import { AiError, completeJson, type ModelProvider } from '@ordo/ai'
 import { formatPence } from './amount'
 import { dataLine } from './ai-data'
 import { TOOL_HELP, TOOL_LABEL, TOOL_NAMES, moneyTools, type ToolContext, type ToolName } from './ask-tools'
-import { describeFacts } from './describe'
+import { describeFact, describeFacts } from './describe'
 import { isISODate } from './dates'
 import {
   MoneyFactInputSchema,
@@ -78,31 +78,51 @@ const WORDY_MONEY = new RegExp(
   'i',
 )
 
-/** Why the model's own words carry an amount, or null when they don't. */
+/**
+ * Number words that can't appear on their own either ("about seventy", "three hundred"). "one",
+ * "half", "few" and "couple" are left alone because plain English needs them; next to a money word
+ * ("one pound", "half a grand") they're still refused by WORDY_MONEY.
+ */
+const BARE_NUMBER_WORD =
+  /\b(?:zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|dozen|grand|k)\b/i
+
+/** Why some text carries an amount or a number, or null when it doesn't. */
 export function writtenAmount(text: string): string | null {
   const bare = text.replace(PLACEHOLDER, ' ')
   if (DIGIT_OR_CURRENCY.test(bare))
     return 'Write no digits or currency signs: use {{rN.…}} placeholders for every amount, count and date'
   if (WORDY_MONEY.test(bare)) return 'Write no amounts in words: use {{rN.…Pence}} placeholders'
+  if (BARE_NUMBER_WORD.test(bare)) return 'Write no numbers in words: use {{rN.…}} placeholders'
   return null
 }
 
+/** Words that would scale a number written just after it: `{{r1.total}} thousand`, `{{r1.a}} grand`. */
+const MULTIPLIER_AFTER = /^\s*(?:k|thousand|million|billion|hundred|grand|dozen|odd|times)\b/i
+/** What may come straight after a placeholder's closing punctuation: nothing, a space or more punctuation. */
+const SENTENCE_GAP = /^(?:$|[\s.,;:!?)\]”"’'])/
+
 /**
  * A placeholder glued to the model's own characters could build a different number:
- * `£{{r1.total}},000` or `{{r1.a}}{{r1.b}}`. Refuse one that touches a digit, a currency sign or
- * another placeholder, or that has a comma or full stop stuck to more text (`{{r1.a}}.5`).
- * Ordinary punctuation followed by a space or the end ("…{{r1.netPence}}." or ", then") is fine.
+ * `£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.total}}k`, `{{r1.total}}-odd million`. Directly
+ * before a placeholder there may only be the start, a space or an opening bracket or quote. Directly
+ * after it: the end, a space, sentence punctuation followed by a space (or the end), or a possessive
+ * `'s`. Never a letter, digit, hyphen, currency sign or another placeholder, and never a multiplier
+ * word right after it.
  */
 function gluedPlaceholder(text: string): boolean {
   const marked = text.replace(PLACEHOLDER, '\uE000')
   for (let i = 0; i < marked.length; i++) {
     if (marked[i] !== '\uE000') continue
     const before = marked[i - 1] ?? ''
-    const after = marked[i + 1] ?? ''
-    const next = marked[i + 2] ?? ''
-    if (/[\p{Nd}\p{Sc}\uE000.,]/u.test(before)) return true
-    if (/[\p{Nd}\p{Sc}\uE000]/u.test(after)) return true
-    if (/[.,]/.test(after) && next !== '' && !/\s/.test(next)) return true
+    if (before !== '' && !/[\s([“"‘']/.test(before)) return true
+    const rest = marked.slice(i + 1)
+    if (MULTIPLIER_AFTER.test(rest)) return true
+    const after = rest[0] ?? ''
+    if (after === '' || /\s/.test(after)) continue
+    // A possessive: Gabe's, Gabe’s.
+    if (/^['’]s(?:$|[\s.,;:!?)\]”"])/.test(rest)) continue
+    if (/[.,;:!?)\]”"’']/.test(after) && SENTENCE_GAP.test(rest.slice(1))) continue
+    return true
   }
   return false
 }
@@ -233,24 +253,38 @@ function show(value: unknown, key: string): string | null {
     typeof value === 'string' &&
     value.trim().length > 0 &&
     value.length <= 60 &&
-    !/[\p{Nd}\p{Sc}{}<>\p{Cc}]/u.test(value)
+    !/[\p{Nd}\p{Sc}{}<>\p{Cc}]/u.test(value) &&
+    // A name can't spell out an amount either ("five hundred pounds", "One Thousand Quid").
+    writtenAmount(value) === null
   )
     return value
   return null
 }
+
+/** Is this key filled from a number Ordo worked out (an amount, a count or a date)? */
+const numericKey = (key: string) => key.endsWith('Pence') || COUNT_KEYS.has(key) || DATE_KEYS.has(key)
 
 /** Fill in every placeholder, or say which one doesn't point at a value. */
 export function fillAmounts(text: string, results: unknown[]): { text: string } | { error: string } {
   if (gluedPlaceholder(text))
     return { error: 'Put a space or punctuation and a space around each placeholder, never digits or £' }
   let error: string | null = null
-  const filled = text.replace(PLACEHOLDER, (m, n: string, dotted: string) => {
+  // The same text with every amount, count and date Ordo filled in blanked out, to check once more.
+  let words = ''
+  let last = 0
+  const filled = text.replace(PLACEHOLDER, (m, n: string, dotted: string, offset: number) => {
     const path = dotted.slice(1).split('.')
-    const shown = show(pick(results[Number(n) - 1], path), path[path.length - 1]!)
+    const key = path[path.length - 1]!
+    const shown = show(pick(results[Number(n) - 1], path), key)
     if (shown === null) error ??= `${m} does not point at an amount, date, count or name in the results`
+    words += text.slice(last, offset) + (numericKey(key) ? ' ' : (shown ?? ''))
+    last = offset + m.length
     return shown ?? ''
   })
-  return error ? { error } : { text: filled }
+  if (error) return { error }
+  // Defence in depth: names and the model's words together must not spell an amount either.
+  const written = writtenAmount(words + text.slice(last))
+  return written ? { error: written } : { text: filled }
 }
 
 /** Every id and pence value the tools have shown, so proposals can only use what's real. */
@@ -290,7 +324,16 @@ function checkProposal(
     return null
   // An amount someone owes must be one Ordo worked out, not one the model did.
   if (fact.kind === 'owed' && !shown.pence.has(fact.amount)) return null
-  return { label: raw.label, fact }
+  // The label is the model's own words: if it carries an amount or a placeholder, use Ordo's sentence.
+  const label =
+    raw.label.includes('{{') || writtenAmount(raw.label)
+      ? describeFact(
+          fact,
+          new Map(ctx.transactions.map((t) => [t.id, t])),
+          new Map(factsOf(ctx.facts, 'event').map((e) => [e.id, e.name])),
+        )
+      : raw.label
+  return { label, fact }
 }
 
 /**
