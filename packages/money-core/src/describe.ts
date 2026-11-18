@@ -47,7 +47,7 @@ export function describeFact(
     case 'pass-through':
       return `${tx(f.inId)} passed straight through to ${tx(f.outId)}.`
     case 'held':
-      return `Money from ${f.from} is ${f.what ? `${f.what} ` : ''}you hold for ${f.forPerson}, not your income.`
+      return `Money from ${f.from} is ${f.what ? `${f.what} you hold` : 'held'} for ${f.forPerson}, not your income.`
     case 'owed':
       return `${f.person} owes you ${formatPence(f.amount)}${f.note ? ` for ${f.note}` : ''} (since ${shortDate(f.date)}).`
     case 'ignore':

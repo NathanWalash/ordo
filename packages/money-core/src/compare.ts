@@ -64,17 +64,21 @@ export function spendBetween(
     spent += e.spend
     cats.set(c, (cats.get(c) ?? 0) + e.spend)
   }
-  // A payback counts against the category of what it paid back, in the period it came in.
+  // A payback counts where the spending it paid back was: in that period and that category, shared
+  // in proportion when it covered several outgoings. A payback for an event (no outgoings named)
+  // counts when it came in, and only without a category.
   let paidBack = 0
   for (const p of factsOf(facts, 'payback')) {
     const inn = byId.get(p.inId)
-    if (!inn || !within(inn) || ledger.get(inn.id)?.role !== 'payback') continue
-    if (wanted) {
-      const outs = p.outIds.map((id) => byId.get(id)).filter((t): t is Transaction => !!t)
-      const total = outs.reduce((n, o) => n - o.amount, 0)
-      const inCat = outs.filter(inCategory).reduce((n, o) => n - o.amount, 0)
-      paidBack += total > 0 ? Math.round((inn.amount * inCat) / total) : 0
-    } else paidBack += inn.amount
+    if (!inn || ledger.get(inn.id)?.role !== 'payback') continue
+    const outs = p.outIds.map((id) => byId.get(id)).filter((t): t is Transaction => !!t)
+    if (!outs.length) {
+      if (!wanted && within(inn)) paidBack += inn.amount
+      continue
+    }
+    const total = outs.reduce((n, o) => n - o.amount, 0)
+    const here = outs.filter((o) => within(o) && inCategory(o)).reduce((n, o) => n - o.amount, 0)
+    paidBack += total > 0 ? Math.round((inn.amount * here) / total) : 0
   }
   return {
     from,

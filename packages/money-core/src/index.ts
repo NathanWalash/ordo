@@ -122,7 +122,7 @@ export {
   type QuestionKind,
   type QuestionStep,
 } from './questions'
-export { withMemoryBills } from './memory-bills'
+export { heldSettlements, withMemoryBills } from './memory-bills'
 export { describeFact, describeFacts } from './describe'
 export {
   TOOL_ARGS,

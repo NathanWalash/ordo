@@ -22,7 +22,8 @@ import {
 import { buildLedger, totals } from './ledger'
 import { counterparts, heldBalances, owedToYou, regularRuns } from './loose-ends'
 import { MoneyFactInputSchema, involves, type MoneyFact } from './memory'
-import { withMemoryBills } from './memory-bills'
+import { heldSettlements, withMemoryBills } from './memory-bills'
+import { balances } from './split'
 import { candidateKey, findMatches, shareAfterPaybacks } from './paybacks'
 import { proposeQuestions } from './questions'
 import type { DetectedBill, Transaction } from './types'
@@ -431,7 +432,25 @@ describe('month to date', () => {
     expect(c.lastMonth).toMatchObject({ from: '2027-02-01', to: '2027-02-28' })
   })
 
-  it('paybacks reduce spending in the period they arrive, and in the right category', () => {
+  it('a payback counts in the month of what it paid back, not the month it arrived', () => {
+    // Genest paid on 2 Nov for Halloween shopping on 30 and 31 Oct.
+    const p = fact({ kind: 'payback', inId: 'm-genest', outIds: ['m-halloween-1', 'h-halloween-2'] })
+    const l = ledgerWith([p])
+    expect(spendBetween(TRANSACTIONS, l, [p], '2026-11-01', '2026-11-18').paidBack).toBe(0)
+    const oct = spendBetween(TRANSACTIONS, l, [p], '2026-10-01', '2026-10-31')
+    expect(oct.paidBack).toBe(3000)
+    // £35 Shopping and £25 Groceries: the £30 splits £17.50 / £12.50.
+    expect(
+      spendBetween(TRANSACTIONS, l, [p], '2026-10-01', '2026-10-31', { category: 'Groceries' }).paidBack,
+    ).toBe(1250)
+    // An event payback has no outgoings of its own: it counts when it came in.
+    expect(
+      spendBetween(TRANSACTIONS, ledgerWith([GENEST_PAYBACK]), [GENEST_PAYBACK], '2026-11-01', '2026-11-18')
+        .paidBack,
+    ).toBe(3000)
+  })
+
+  it('paybacks reduce spending in the right category', () => {
     const facts = [AMELIE_PAYBACK]
     const all = spendBetween(TRANSACTIONS, ledgerWith(facts), facts, '2026-08-01', '2026-08-31')
     expect(all.paidBack).toBe(14880)
@@ -472,7 +491,7 @@ describe('caveats', () => {
 
   it('warns about posting dates and statements that stop early', () => {
     const notes = periodCaveats(accountCaveats(TRANSACTIONS, []), TODAY)
-    expect(notes).toEqual(["HSBC's statement stops on 2026-11-05, so anything after that isn't counted."])
+    expect(notes).toEqual(["HSBC's statement stops on 5 Nov, so anything after that isn't counted."])
     expect(periodCaveats(accountCaveats(TRANSACTIONS, []), '2026-11-06')).toEqual([
       'HSBC shows posting dates, so the last few days may not be in yet.',
     ])
@@ -630,6 +649,66 @@ describe('memory feeds Bills', () => {
     expect(withMemoryBills([detectedPatrick], TRANSACTIONS, ledgerWith([]), [], TODAY)).toEqual([
       detectedPatrick,
     ])
+  })
+})
+
+describe('held money settles a shared bill', () => {
+  const people = [
+    { id: 'me', name: 'Me' },
+    { id: 'gabe', name: 'Gabe S' },
+  ]
+  const bill = {
+    id: 'rent',
+    name: 'Rent to Patrick O',
+    amount: 59700,
+    cadence: 'monthly' as const,
+    anchorDate: '2026-12-02',
+    source: 'bank' as const,
+    status: 'active' as const,
+    merchantKey: 'patricko',
+  }
+  const split = {
+    billId: 'rent',
+    paidBy: 'me',
+    mode: 'fixed' as const,
+    shares: [
+      { personId: 'me', value: 29850 },
+      { personId: 'gabe', value: 29850 },
+    ],
+    since: '2026-10-02',
+  }
+  const input = {
+    transactions: TRANSACTIONS,
+    ledger: ledgerWith([GABE_FOR_PATRICK]),
+    facts: [GABE_FOR_PATRICK],
+    people,
+    bills: [bill],
+    splits: [split],
+  }
+
+  it('counts Gabe’s held payments since the split started as him paying his share', () => {
+    expect(heldSettlements(input)).toEqual([
+      {
+        id: 'held:m-gabe-nov',
+        from: 'gabe',
+        to: 'me',
+        amount: 29850,
+        date: '2026-11-01',
+        note: 'Held for Patrick O',
+      },
+    ])
+  })
+
+  it('so Bills doesn’t also say he owes it', () => {
+    const base = { bills: [bill], splits: [split], transactions: TRANSACTIONS, today: TODAY }
+    expect(balances({ ...base, settlements: [] }).debts).toEqual([{ from: 'gabe', to: 'me', amount: 29850 }])
+    expect(balances({ ...base, settlements: heldSettlements(input) }).debts).toEqual([])
+  })
+
+  it('nothing without the fact, the person or a split for that bill', () => {
+    expect(heldSettlements({ ...input, facts: [], ledger: ledgerWith([]) })).toEqual([])
+    expect(heldSettlements({ ...input, people: [people[0]!] })).toEqual([])
+    expect(heldSettlements({ ...input, bills: [{ ...bill, merchantKey: 'netflix' }] })).toEqual([])
   })
 })
 

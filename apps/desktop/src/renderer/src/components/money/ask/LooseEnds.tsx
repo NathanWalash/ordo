@@ -39,7 +39,7 @@ export function LooseEndsPanel({
             <div className="text-[12px] text-ink-2">
               {h.what ? `${h.what.charAt(0).toUpperCase()}${h.what.slice(1)} from ` : 'From '}
               {h.from}
-              {h.lastIn && `, last in ${formatDate(h.lastIn, true)}`}
+              {h.lastIn && `, last paid in on ${formatDate(h.lastIn, true)}`}
               {h.holding > 0 ? ' · not passed on yet' : ' · all passed on'}
             </div>
           </li>
@@ -78,8 +78,8 @@ export function LooseEndsPanel({
       </ul>
       {view.people.length > 0 && (
         <div className="border-t border-sep px-4 py-2">
-          <h4 className="mb-1 text-[11px] font-semibold text-ink-3">Back and forth</h4>
-          <ul aria-label="Back and forth" className="flex flex-col gap-0.5">
+          <h4 className="mb-1 text-[11px] font-semibold text-ink-3">People you pay and who pay you</h4>
+          <ul aria-label="People you pay and who pay you" className="flex flex-col gap-0.5">
             {view.people.slice(0, 5).map((p) => (
               <li key={p.key} className="flex items-baseline justify-between gap-2 text-[12px]">
                 <span className="truncate">{p.name}</span>

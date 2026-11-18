@@ -7,8 +7,17 @@ import { addMonths, nextOnOrAfter, type ISODate } from './dates'
 import type { Ledger } from './ledger'
 import { onwardFor, regularRuns, type RegularRun } from './loose-ends'
 import { aliasesFor, factsOf, involves, type MoneyFact } from './memory'
-import { sameMerchant } from './merchant'
-import type { DetectedBill, SuggestedSplit, Transaction } from './types'
+import { merchantKey, sameMerchant } from './merchant'
+import {
+  ME,
+  type DetectedBill,
+  type Person,
+  type Settlement,
+  type Split,
+  type StoredBill,
+  type SuggestedSplit,
+  type Transaction,
+} from './types'
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -153,4 +162,47 @@ function rescale(s: SuggestedSplit, total: number): SuggestedSplit | null {
   const theirs = others.reduce((n, x) => n + x.amount, 0)
   if (theirs > total) return null
   return { ...s, shares: [{ name: 'Me', amount: total - theirs }, ...others] }
+}
+
+/**
+ * Money a flatmate paid you that you hold for someone counts as them paying their share of the
+ * shared bill to that someone, so Bills doesn't say they still owe it. One settlement per held
+ * payment on or after the split started, for splits you pay that include them.
+ */
+export function heldSettlements(input: {
+  transactions: readonly Transaction[]
+  ledger: Ledger
+  facts: readonly MoneyFact[]
+  people: readonly Person[]
+  bills: readonly StoredBill[]
+  splits: readonly Split[]
+}): Settlement[] {
+  const out: Settlement[] = []
+  for (const rule of factsOf(input.facts, 'held')) {
+    const payer = input.people.find((p) => p.name.toLowerCase() === rule.from.toLowerCase())
+    if (!payer || payer.id === ME) continue
+    const forKey = merchantKey(rule.forPerson)
+    const starts = input.splits
+      .filter((s) => s.paidBy === ME && s.shares.some((x) => x.personId === payer.id && x.value > 0))
+      .filter((s) => {
+        const bill = input.bills.find((b) => b.id === s.billId)
+        return !!bill?.merchantKey && sameMerchant(bill.merchantKey, forKey)
+      })
+      .map((s) => s.since)
+      .sort()
+    if (!starts.length) continue
+    for (const t of input.transactions) {
+      const e = input.ledger.get(t.id)
+      if (e?.role !== 'held-in' || e.factId !== rule.id || t.date < starts[0]!) continue
+      out.push({
+        id: `held:${t.id}`,
+        from: payer.id,
+        to: ME,
+        amount: t.amount,
+        date: t.date,
+        note: `Held for ${rule.forPerson}`,
+      })
+    }
+  }
+  return out
 }

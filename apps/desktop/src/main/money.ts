@@ -5,7 +5,10 @@ import {
   ME,
   aiCategoriseTransactions,
   buildLedger,
+  heldSettlements,
   withMemoryBills,
+  type Settlement,
+  type Split,
   type SuggestedSplit,
   aiMatchBills,
   allocate,
@@ -336,6 +339,29 @@ async function detect(today: string) {
   return { txs, hints, detected, mailConnected: headers !== null }
 }
 
+/**
+ * Money a flatmate paid you that you hold for a shared bill's payee counts as their share being
+ * paid (not shown as settlements you can delete). Never fails the overview.
+ */
+function heldPayments(txs: Transaction[], bills: StoredBill[], splits: Split[]): Settlement[] {
+  try {
+    const s = moneyStore()
+    const facts = s.memoryFacts()
+    if (!facts.some((f) => f.kind === 'held')) return []
+    const paired = pairOwnTransfers(txs)
+    return heldSettlements({
+      transactions: paired,
+      ledger: buildLedger(paired, facts),
+      facts,
+      people: s.people(),
+      bills,
+      splits,
+    })
+  } catch {
+    return []
+  }
+}
+
 /** Add what you taught Ordo: shared bills and splits it can now suggest. Never fails detection. */
 function learnedBills(detected: DetectedBill[], txs: Transaction[], today: string): DetectedBill[] {
   try {
@@ -373,7 +399,13 @@ export async function overview(): Promise<MoneyOverview> {
   const c = await current()
   const splits = s.splits()
   const settlements = s.settlements()
-  const { debts } = balances({ bills: c.stored, splits, transactions: c.txs, settlements, today: c.today })
+  const { debts } = balances({
+    bills: c.stored,
+    splits,
+    transactions: c.txs,
+    settlements: [...settlements, ...heldPayments(c.txs, c.stored, splits)],
+    today: c.today,
+  })
   const bySplit = new Map(splits.map((x) => [x.billId, x]))
   const bills = c.bills.map((b): BillView => {
     const split = bySplit.get(b.id)

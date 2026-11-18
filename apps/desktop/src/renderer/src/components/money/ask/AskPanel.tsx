@@ -38,7 +38,10 @@ export function AskPanel({
   const input = useRef<HTMLTextAreaElement>(null)
   const end = useRef<HTMLDivElement>(null)
 
-  useEffect(() => end.current?.scrollIntoView?.({ block: 'nearest' }), [turns.length, busy])
+  // Braces matter: scrollIntoView returns a promise in newer Chromium, and an effect must not return one.
+  useEffect(() => {
+    end.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [turns.length, busy])
 
   const send = async (question: string) => {
     const q = question.trim()

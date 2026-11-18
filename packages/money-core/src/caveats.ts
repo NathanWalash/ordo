@@ -2,7 +2,7 @@
 // day you paid, so the last few days of a period can be missing or land in the next one.
 
 import { daysBetween, type ISODate } from './dates'
-import { factsOf, type MoneyFact } from './memory'
+import { factsOf, shortDate, type MoneyFact } from './memory'
 import type { Transaction } from './types'
 
 export type DateKind = 'posting' | 'transaction' | 'unknown'
@@ -63,7 +63,9 @@ export function periodCaveats(caveats: readonly AccountCaveat[], to: ISODate, ac
     if (account && c.account !== account) continue
     const name = bankName(c.account)
     if (c.lastDate && c.lastDate < to && daysBetween(c.lastDate, to) > 3)
-      notes.push(`${c.account}'s statement stops on ${c.lastDate}, so anything after that isn't counted.`)
+      notes.push(
+        `${c.account}'s statement stops on ${shortDate(c.lastDate)}, so anything after that isn't counted.`,
+      )
     else if (c.dates === 'posting')
       notes.push(`${name} shows posting dates, so the last few days may not be in yet.`)
   }
