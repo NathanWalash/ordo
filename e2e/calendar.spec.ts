@@ -23,7 +23,8 @@ test('Calendar opens from the sidebar with a sample preview', async () => {
   await expect(page.getByText('Sample data. Connect your iCloud account')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Show Work' })).toBeChecked()
 
-  const thisMonth = new Date().toLocaleDateString(undefined, { month: 'long' })
+  // Narrow windows (CI runners' small screens) show the short month, "Nov 2026"; it's in the long one too.
+  const thisMonth = new Date().toLocaleDateString(undefined, { month: 'short' })
   await expect(title()).toContainText(thisMonth)
   await expect(view('Month')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByRole('grid', { name: 'Month' })).toBeVisible()
