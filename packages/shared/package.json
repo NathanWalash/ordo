@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ordo/ai": "workspace:*",
+    "@ordo/boards-core": "workspace:*",
     "@ordo/calendar-core": "workspace:*",
     "@ordo/mail-core": "workspace:*",
     "@ordo/money-core": "workspace:*",
