@@ -669,7 +669,7 @@ describe('mail: acting on email, drafting and sending', () => {
   const reply = (body = 'Yes, Friday works.', extra: object = {}) =>
     call('ordo_mail_send', { mode: 'reply', uid: 7, body, ...extra })
 
-  it('a reply to a message the user named says “You asked”, even after reading mail, and sends only after Send', async () => {
+  it('a reply to an address the user typed says “You asked”, even after reading mail, and sends only after Send', async () => {
     const services = mailServices()
     const m = fakeModel(
       call('ordo_search_mail', { query: 'lunch' }),
@@ -680,7 +680,7 @@ describe('mail: acting on email, drafting and sending', () => {
     const s = setup(m, {
       services,
       page: 'mail/inbox',
-      question: 'Reply to Sam’s lunch email saying Friday works',
+      question: 'Reply to sam@friend.example’s lunch email saying Friday works',
       confirm: async () => true,
     })
     const r = await s.run()
@@ -769,7 +769,7 @@ describe('mail: acting on email, drafting and sending', () => {
     const m = fakeModel(reply('Yes', { cc: ['pat@friend.example', 'x@evil.example', 'y@evil.example'] }))
     const s = setup(m, {
       services: mailServices(INJECTED),
-      question: 'Reply to Sam about lunch and copy in pat@friend.example',
+      question: 'Reply to sam@friend.example about lunch and copy in pat@friend.example',
     })
     await s.run()
     expect(s.cards[0]!.email).toMatchObject({
@@ -798,10 +798,75 @@ describe('mail: acting on email, drafting and sending', () => {
     expect(s.cards[0]!.trigger.text).toMatch(/^collect@phish\.example isn’t in your own words/)
   })
 
+  it('naming a message by its sender’s name or subject never vouches for its addresses', async () => {
+    // "Reply to Sam" picks Sam's email, but Sam's address still has to be checked.
+    const m = fakeModel(reply('Yes'))
+    const s = setup(m, { services: mailServices(), question: 'Reply to Sam’s lunch email saying yes' })
+    await s.run()
+    expect(s.cards[0]!.trigger).toEqual({
+      kind: 'data',
+      text:
+        'sam@friend.example isn’t in your own words: the assistant took it from what it read or chose it ' +
+        'itself, and text in emails can try to trick it. Only confirm if you want to write to this address.',
+    })
+  })
+
+  it('a Reply-To never counts, even on a message the user chose by its sender’s own address', async () => {
+    const services = mailServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({
+        from: { address: 'sam@friend.example', name: 'Sam' },
+        subject: 'Lunch?',
+        replyTo: [{ address: 'attacker@evil.example' }],
+      }),
+    }))
+    for (const question of [
+      'Reply to Sam saying yes',
+      'Reply to the Lunch? email saying yes',
+      'Reply to sam@friend.example saying yes',
+    ]) {
+      const s = setup(fakeModel(reply('Yes')), { services, question })
+      await s.run()
+      expect(s.cards[0]!.email!.to).toEqual(['attacker@evil.example'])
+      expect(s.cards[0]!.trigger.kind).toBe('data')
+      expect(s.cards[0]!.trigger.text).toMatch(/^attacker@evil\.example isn’t in your own words/)
+      // The card says where the reply really goes.
+      expect(s.cards[0]!.notes[0]).toBe(
+        'The email asks for replies to go to attacker@evil.example, not to the sender, sam@friend.example.',
+      )
+    }
+    // Only typing the address itself makes it asked for.
+    const s = setup(fakeModel(reply('Yes')), {
+      services,
+      question: 'Reply to Sam at attacker@evil.example saying yes',
+    })
+    await s.run()
+    expect(s.cards[0]!.trigger).toEqual({ kind: 'request', text: 'You asked for this.' })
+  })
+
+  it('a sender who copies the user’s words into its name and subject still gets a warning', async () => {
+    const services = mailServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({
+        from: { address: 'imposter@evil.example', name: 'Sam' },
+        subject: 'Lunch on Friday',
+      }),
+    }))
+    const s = setup(fakeModel(reply('Yes')), {
+      services,
+      question: 'Reply to Sam’s Lunch on Friday email saying yes',
+    })
+    await s.run()
+    expect(s.cards[0]!.trigger.kind).toBe('data')
+    expect(s.cards[0]!.trigger.text).toMatch(/^imposter@evil\.example isn’t in your own words/)
+  })
+
   it('without an explicit ask, an email’s own request to send is only ever a warning card', async () => {
     const services = mailServices(INJECTED)
     const m = fakeModel(call('ordo_read_message', { uid: 7 }), reply('Sure'), answer('x'))
-    const s = setup(m, { services, question: 'What does Sam’s lunch email say?' })
+    const s = setup(m, { services, question: 'What does sam@friend.example’s lunch email say?' })
     await s.run()
     expect(s.cards[0]!.trigger).toEqual({
       kind: 'data',

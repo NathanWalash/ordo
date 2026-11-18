@@ -91,10 +91,10 @@ export interface MailTargets {
   /** The messages a change acts on (or replies to, or forwards), from Ordo's cache or the message itself. */
   messages: { address: string; name: string | null; subject: string }[]
   /**
-   * Who a draft or an email goes to. `fromMessage` marks the sender or Reply-To of the message being
-   * replied to, which counts as named when the user named that message.
+   * Every address a draft or an email goes to (To and Cc). Each counts as asked for only if the
+   * user typed it: a reply's sender, Reply-To, name and subject are all the sender's to choose.
    */
-  recipients?: { address: string; fromMessage: boolean }[]
+  recipients?: string[]
 }
 
 export interface RunContext {
@@ -750,7 +750,8 @@ const emailInput = (modes: readonly Mode[]) => ({
 })
 
 type Built =
-  { ok: true; compose: ComposeInput; email: EmailPreview; mail: MailTargets } | { ok: false; message: string }
+  | { ok: true; compose: ComposeInput; email: EmailPreview; mail: MailTargets; notes: string[] }
+  | { ok: false; message: string }
 
 /**
  * A draft or an email from the model's arguments: recipients checked, the reply's recipients and
@@ -778,7 +779,8 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
   }
 
   let recipients: { to: string[]; cc: string[] }
-  let fromMessage = new Set<string>()
+  /** Said on the card when a reply goes somewhere other than the sender. */
+  let replyNote: string | null = null
   let subject: string
   let body = plainBody(a.body)
   const when = (d: Date) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
@@ -789,8 +791,11 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     const inSent = services.mail.mailboxes().find((b) => b.path === mailbox)?.role === 'sent'
     const r = replyRecipients(m, own, a.mode === 'reply-all', { inSent })
     recipients = { to: r.to.map((x) => x.address), cc: [...r.cc.map((x) => x.address), ...cc] }
-    // The sender and Reply-To of the message being answered.
-    fromMessage = new Set([...(m.from ? [m.from] : []), ...m.replyTo].map((x) => x.address.toLowerCase()))
+    // The sender chooses Reply-To: say so when it sends the reply somewhere else.
+    const sender = m.from?.address.toLowerCase()
+    const elsewhere = m.replyTo.map((x) => x.address).filter((x) => x.toLowerCase() !== sender)
+    if (sender && elsewhere.length)
+      replyNote = `The email asks for replies to go to ${elsewhere.map((x) => clean(x, 254)).join(', ')}, not to the sender, ${clean(m.from!.address, 254)}.`
     subject = a.subject?.trim() || replySubject(m.subject)
     body += replyBody(m, bodyText(m), when(m.date))
   } else if (a.mode === 'forward') {
@@ -853,11 +858,9 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
             },
           ]
         : [],
-      recipients: everyone.map((address) => ({
-        address,
-        fromMessage: fromMessage.has(address.toLowerCase()),
-      })),
+      recipients: everyone,
     },
+    notes: replyNote ? [replyNote] : [],
   }
 }
 
@@ -1043,7 +1046,10 @@ const MAIL_CHANGE_TOOLS = [
       return {
         title: emailTitle(false, built.email),
         details: [],
-        notes: ['It’s saved to Drafts. Nothing is sent: you can finish it and send it in Mail.'],
+        notes: [
+          ...built.notes,
+          'It’s saved to Drafts. Nothing is sent: you can finish it and send it in Mail.',
+        ],
         email: built.email,
         mail: built.mail,
       }
@@ -1085,7 +1091,7 @@ const MAIL_CHANGE_TOOLS = [
       return {
         title: emailTitle(true, built.email),
         details: [],
-        notes: [SEND_NOTE],
+        notes: [...built.notes, SEND_NOTE],
         email: built.email,
         mail: built.mail,
         ...(!services.mail.send && { blocked: 'Ordo only sends email from the app, after you confirm it.' }),

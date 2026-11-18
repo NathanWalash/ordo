@@ -144,9 +144,10 @@ const listed = (xs: readonly string[]) =>
  * - the user's message has an explicit phrase for this kind of change;
  * - every message it acts on (or replies to, or forwards) is named in the user's own words, by
  *   sender or subject;
- * - every recipient's address is in the user's own words, or is the sender or Reply-To of a
- *   message the user named and asked to reply to.
- * Otherwise "Check this first", naming any recipients that came from what the assistant read.
+ * - every recipient's exact address is in the user's own words. A sender's display name, subject
+ *   and Reply-To are all the sender's to choose, so naming a message by them never makes its
+ *   addresses asked for: "reply to Sam" can't vouch for wherever Sam's email says to reply.
+ * Otherwise "Check this first", naming in full every recipient the user didn't type.
  */
 export function mailTrigger(
   tool: OrdoTool,
@@ -158,14 +159,7 @@ export function mailTrigger(
   const asked = tool.intent?.test(question) ?? false
   const words = [...history.map((t) => t.user), question].join('\n')
   const unnamed = targets.messages.filter((m) => !namesMessage(words, m))
-  const replyNamed = targets.messages.length > 0 && unnamed.length === 0
-  const fromText = [
-    ...new Set(
-      (targets.recipients ?? [])
-        .filter((r) => !mentions(words, r.address) && !(r.fromMessage && replyNamed))
-        .map((r) => r.address),
-    ),
-  ]
+  const fromText = [...new Set((targets.recipients ?? []).filter((a) => !mentions(words, a)))]
   if (asked && unnamed.length === 0 && fromText.length === 0)
     return { kind: 'request', text: 'You asked for this.' }
   if (fromText.length) {

@@ -1,7 +1,7 @@
 # Assistant
 
 Ordo's assistant answers questions about your mail, calendar and money, opens pages for you, and
-makes changes once you confirm them. It uses the model you chose in **Settings → AI**, and the same
+makes changes once you confirm them, including moving, drafting and sending email. It uses the model you chose in **Settings → AI**, and the same
 tools as Ordo's MCP server.
 
 ## Using it
@@ -21,18 +21,32 @@ tools as Ordo's MCP server.
 - **New conversation** (the pencil in the header) forgets the conversation.
 
 Examples: "Which bills are due next?", "How much did I spend last month?", "What's on this week?",
-"What did the bank email me about last week?", "What's overdue on my boards?", "Add a card to Home to book the MOT",
+"What did the bank email me about last week?", "Archive newsletters from this week", "Draft a reply
+to the last email from Sam", "Reply to sam@friend.example saying Friday works", "What's overdue on my boards?", "Add a card to Home to book the MOT",
 "Show me August's spending" (opens Finances on August), "Undo clean-up 4", "Import
 /Users/me/Downloads/monzo.csv".
 
 ## What it can do
 
-| Kind     | Tools                                                                                                                                                                     | How they run                                                      |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Read     | status, senders, clean-up plan, history, mailboxes, messages, search mail, read a message, calendars, calendar events, bills, transactions, balances, boards, board cards | Straight away. They change nothing.                               |
-| Refresh  | scan inbox, check for new mail, sync calendars                                                                                                                            | Straight away. They fetch into Ordo's cache and change no server. |
-| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card              | Only after you press **Confirm** on a card.                       |
-| Navigate | open a page (Finances can open on a month)                                                                                                                                | Straight away. It only moves the window.                          |
+| Kind     | Tools                                                                                                                                                                                                             | How they run                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Read     | status, senders, clean-up plan, history, mailboxes, messages, search mail, read a message, calendars, calendar events, bills, transactions, balances, boards, board cards                                         | Straight away. They change nothing.                                 |
+| Refresh  | scan inbox, check for new mail, sync calendars                                                                                                                                                                    | Straight away. They fetch into Ordo's cache and change no server.   |
+| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card, move, flag or mark email, undo a move, save a draft | Only after you press **Confirm** on a card.                         |
+| Send     | send an email (new, reply or forward), at most one per question; the assistant only                                                                                                                               | Only after you press **Send** on a card that shows the whole email. |
+| Navigate | open a page (Finances can open on a month)                                                                                                                                                                        | Straight away. It only moves the window.                            |
+
+## Email
+
+- **Move, flag, mark and undo.** "Archive the newsletters from this week", "Flag Sam's email",
+  "Undo that". The assistant finds the messages first, then a card lists each one with what will
+  change.
+- **Drafts.** "Draft a reply to the last email from Sam" saves a reply (threaded, with the original
+  quoted) to Drafts, for you to finish and send in Mail. Nothing is sent.
+- **Sending.** "Reply to sam@friend.example saying Friday works" or "Send pat@friend.example a note
+  about the plan". The card shows the whole email and you press **Send**. If you only ask it to
+  write one, it saves a draft instead. It never sends to an address that only
+  appears in an email unless you confirm a card that names that address as one you didn't give.
 
 ## Privacy
 
@@ -42,7 +56,8 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
   assistant sends far more, so the first time you open it with a cloud provider it asks separately
   and says exactly what goes: your questions, and the Ordo data looked up to answer them,
   transactions with amounts and dates, balances, bills, calendar events, sender names, addresses
-  and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. Until you press **Allow**, nothing is sent and
+  and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. It also says
+  that the assistant can move, flag and draft email, and send email you confirm. Until you press **Allow**, nothing is sent and
   there's nothing to type into; Ordo's main process refuses the question too. The OK is for that one
   provider (switching asks again), is kept in `assistant.json` in Ordo's data folder, and **Stop
   sharing** in the panel takes it back. Local models need no OK.
@@ -76,7 +91,9 @@ the assistant treats everything a tool returns as untrusted.
   from its own data, never from the model's words: a dry-run clean-up plan with each sender (address
   first, then the display name in quotes, cut to 60 characters, so a long name can't pose as another
   line) and how it unsubscribes (with the link's host), the clean-up an undo would reverse, the file
-  and account for an import, or which model sorting asks. **Cancel** ends the question without asking
+  and account for an import, or which model sorting asks. The one exception is an email to draft
+  or send, whose subject and body the model writes: the card shows them in full, as exactly what
+  would be saved or sent. **Cancel** ends the question without asking
   the model again, so text in the data can't keep asking. If the change can't go ahead (no model, no
   such clean-up) the card says why, with Open Settings where that helps, and there's nothing to
   confirm.
@@ -100,6 +117,32 @@ the assistant treats everything a tool returns as untrusted.
   `//server`, `\\?\`, `\\.\`) are refused before any file-system call, for MCP and headless too.
   The assistant only accepts a path that appears word for word in your own message, and nothing
   opens the file until you confirm.
+- **Email changes.** Moving, flagging and marking act on at most 20 messages, only ones in Ordo's
+  cache, and the card lists each one from the cached headers: the sender's address, the subject, the
+  date, and where it is now and where it goes (or its state now and after). Folders are checked
+  against the server's list; Drafts is refused. A move can be undone while Ordo is open. For mail
+  changes the card's trigger is about what the change acts on, not what was read (acting on mail
+  means reading it): "You asked for this" needs an explicit phrase in your message and every email
+  it acts on named in your own words, by sender address, sender name or subject.
+- **Sending.** `ordo_mail_send` is marked `assistantOnly` in the registry: it is never an MCP tool,
+  has no headless command, `runTool` refuses it from any caller but the assistant, and only the
+  assistant's services have a send function at all. Its card shows From, every recipient's full
+  address (To and Cc; the assistant can't use Bcc), the subject, the whole body (scrollable), any
+  forwarded attachments and "This sends the email. You can't unsend it." Its **Send** button waits
+  a second and a half before it works. Once sent, the card says **Sent**.
+- **Who an email goes to.** The card says "You asked for this" only when your message asks to send,
+  reply or forward, the message being replied to or forwarded is one you named, and **every
+  recipient's exact address appears in your own words**. A sender picks their own display name,
+  subject and Reply-To, so naming a message by them ("reply to Sam") helps the assistant pick which
+  message to answer but never vouches for its addresses: the card then says **Check this first**
+  and names, in full, every recipient you didn't type. When a reply goes to a Reply-To other than
+  the sender, the card says so. Its button is then **Send anyway**, in red.
+- **One send per question, never twice.** After one email is sent, another send in the same
+  question is refused without a card. The conversation remembers what was sent (a note the model
+  sees with the earlier turn), and the exact same email is refused if asked again later.
+- **The email's text.** Ordo writes a reply's recipients, subject and quoted original itself; the
+  model only gives the body (and, for new mail, the subject). Its text is plain text, with control,
+  bidi and zero-width characters removed, at most 20,000 characters, and the subject is one line.
 - **Confirmed changes are always reported.** If you press Stop, or something fails, after a change
   ran, the reply still says what was changed.
 - **The window.** Only the window that asked can answer its cards. A card nobody answers counts as
@@ -151,6 +194,12 @@ tool({
   exactly what would change, from Ordo's own data, without changing anything. Arguments that are file
   paths go in `localPaths`; a preview must never touch them. `after` names a dry run that must come
   first with the same arguments, and `staleMessage` what to say if the preview moved on.
+- A mail change's preview also returns `mail` (the messages it acts on, and an email's recipients),
+  which decides "You asked for this" instead of what was read, and an email to show in full returns
+  `email`.
+- `assistantOnly: true` keeps a tool out of the MCP server and headless mode: `runTool` refuses it
+  unless the caller is the assistant (`caller: 'assistant'`, set only after its card). Sending
+  mail is the only one.
 - Always run tools through `runTool`, which validates arguments, gates changes (`allowChanges` and
   `confirm`) and hides unexpected errors.
 - To let the assistant open a new page, add it to `ASSISTANT_PAGES` in
@@ -163,7 +212,14 @@ tool({
 
 - `loop.test.ts` drives the loop with a scripted fake model: tool choice, bad JSON, schema
   mismatches and retries, both step caps, prompt injection in results and in history, plan-first,
-  stale previews, cards, Stop after a change, and trust.
+  stale previews, cards, Stop after a change, and trust; and for mail, the send trigger rules
+  (asked, from email text, mixed, Reply-To and look-alike senders), one send per question,
+  history, and injected emails that ask to send, move or draft.
+- `tools.test.ts` covers each mail tool's preview, the change gate and assistant-only send;
+  `mail-client.flow.test.ts` runs the tools against an in-memory IMAP server and a fake SMTP send.
+- `e2e/assistant-mail.spec.ts` runs the app against GreenMail and a fake LM Studio: archive after
+  Confirm and Cancel, a draft reply in Drafts, a threaded reply GreenMail delivers, and an injected
+  email whose warning card is cancelled.
 - `index.test.ts` covers the session: the busy guard, cards answered twice, from another window or
   never, Stop and Clear mid-question, a closed or reloaded window, history, page checks and cloud
   consent.
@@ -179,6 +235,8 @@ tool({
   later change cards say "Check this first" even when you did ask. Start a new conversation for a
   clean slate. The card is the real safeguard: read it before you confirm.
 - Results are cut at 16,000 characters each; the model is told to page with `limit` and `offset`.
-- The assistant reads mail as plain text and never marks it read. It has no tool to send, draft,
-  flag or move email; only the clean-up (with a card) moves mail.
-- The assistant can't connect accounts, change settings or send email. Those stay in the app.
+- The assistant reads mail as plain text and never marks it read. It changes at most 20 messages at
+  a time, only ones Ordo has cached, and undo only covers moves made while Ordo is open.
+- It sends at most one email per question, never with Bcc or attachments of its own (a forward
+  carries the original's), to at most 20 people. It remembers sent emails for the last eight turns.
+- The assistant can't connect accounts or change settings. Those stay in the app.

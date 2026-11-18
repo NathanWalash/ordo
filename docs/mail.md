@@ -96,9 +96,10 @@ so the system checks it before it opens.
 
 New message, Reply, Reply all and Forward open a compose sheet. Messages are plain text.
 
-- **Sending only ever happens when you click Send or press ⌘Return.** Return in a field doesn't
-  send. The preload script refuses a send that doesn't follow a click or key press in the window,
-  and there is no way to send from headless mode or MCP.
+- **Sending only ever happens when you click Send or press ⌘Return**, or press **Send** on the
+  assistant's card that shows the whole email (see [assistant.md](assistant.md#email)). Return in a
+  field doesn't send. The preload script refuses a send that doesn't follow a click or key press in
+  the window, and there is no way to send from headless mode or MCP.
 - Recipients become tokens that always show the address, so a long name can't push it out of
   view. Addresses are checked as you go, and again in the main process. At most 50 people per
   message. Header fields are single lines, so a subject or name can't add hidden headers. Send with
@@ -154,11 +155,20 @@ text of messages you've opened, across every folder. Every word must match. **Se
 iCloud** (or Return) asks the server to search the open folder too, for older mail and the text of
 messages you haven't opened.
 
-## Headless and MCP
+## The assistant, headless mode and MCP
 
 `mail mailboxes`, `mail sync`, `mail list`, `mail search` and `mail read`, and the matching MCP
-tools, are read-only. JSON output escapes control and bidi characters, so it's safe to print. See
-[headless.md](headless.md).
+tools, are read-only. With `--allow-changes` and a confirm on each call, `mail move`, `mail flag`,
+`mail mark` and `mail undo` (and the MCP tools `ordo_mail_move`, `ordo_mail_flag`,
+`ordo_mail_mark`, `ordo_mail_undo` and `ordo_mail_draft`) change at most 20 messages at a time,
+only ones already in Ordo's cache. They go through the same functions as the window, so they take
+the write lock, folders are checked against the server's list, and moves can be undone while that
+Ordo is running. Moving into Drafts is refused. Headless mode and MCP can never send. JSON output
+escapes control and bidi characters, so it's safe to print. See [headless.md](headless.md).
+
+The in-app assistant (⌘K) can do the same, save drafts, and send a new email, a reply or a forward
+after you press Send on a card that shows all of it. After it changes mail, the Mail page reloads in
+place, keeping the folder you're in. See [assistant.md](assistant.md#email).
 
 ## For tests
 

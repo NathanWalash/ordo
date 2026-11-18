@@ -488,9 +488,12 @@ describe('mail change tools', () => {
     )
     expect(p.mail).toEqual({
       messages: [{ address: 'sam@friend.example', name: 'Sam', subject: 'Lunch?' }],
-      recipients: [{ address: 'sam.lists@friend.example', fromMessage: true }],
+      recipients: ['sam.lists@friend.example'],
     })
-    expect(p.notes).toEqual(['It’s saved to Drafts. Nothing is sent: you can finish it and send it in Mail.'])
+    expect(p.notes).toEqual([
+      'The email asks for replies to go to sam.lists@friend.example, not to the sender, sam@friend.example.',
+      'It’s saved to Drafts. Nothing is sent: you can finish it and send it in Mail.',
+    ])
     // A reply goes to the sender: the model can't pick its To.
     const redirected = await previewTool(services, t('ordo_mail_draft'), {
       mode: 'reply',
@@ -517,7 +520,7 @@ describe('mail change tools', () => {
     })
     expect(p.email!.body).toMatch(/^FYI\n\n---------- Forwarded message ----------/)
     expect(p.notes).toEqual([SEND_NOTE])
-    expect(p.mail!.recipients).toEqual([{ address: 'pat@friend.example', fromMessage: false }])
+    expect(p.mail!.recipients).toEqual(['pat@friend.example'])
     const nobody = await previewTool(services, t('ordo_mail_send'), {
       mode: 'new',
       subject: 'Hi',
