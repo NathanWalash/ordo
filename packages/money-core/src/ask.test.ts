@@ -98,12 +98,12 @@ describe('money tools', () => {
 
 describe('fillAmounts', () => {
   const results = [
-    { netPence: 41899, from: '2026-08-28', items: [{ amountPence: -2500, name: 'Tesco' }], count: 3 },
+    { netPence: 41899, from: '2026-08-28', items: [{ amountPence: -2500, name: 'Tesco' }], total: 3 },
   ]
-  it('fills pence as pounds, dates as short dates and other values as they are', () => {
+  it('fills pence as pounds, dates as short dates, counts and names', () => {
     expect(
       fillAmounts(
-        'Net {{r1.netPence}} from {{r1.from}}; {{r1.items.0.name}} {{r1.items.0.amountPence}}, {{ r1.count }} rows',
+        'Net {{r1.netPence}} from {{r1.from}}; {{r1.items.0.name}} {{r1.items.0.amountPence}}, {{ r1.total }} rows',
         results,
       ),
     ).toEqual({
@@ -146,7 +146,7 @@ describe('askMoney', () => {
     const r = await askMoney('What am I holding?', provider, ctx)
     expect(r.answer).toBe('You hold £298.50 for Patrick.')
     expect(calls).toHaveLength(3)
-    expect(calls[2]!.prompt).toContain('Write amounts only as')
+    expect(calls[2]!.prompt).toContain('Write no digits or currency signs')
   })
 
   it('also refuses 12.50, 1250p and 30 pounds', async () => {
