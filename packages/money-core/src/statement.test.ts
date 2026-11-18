@@ -24,6 +24,14 @@ describe('parseCsv', () => {
     expect(r.ok && r.transactions.map((t) => t.amount)).toEqual([-19900, -341, -100])
   })
 
+  it('stays linear on a field full of quotes', () => {
+    for (const text of [`x${'"'.repeat(200_000)}`, `${' '.repeat(100_000)}x${'"'.repeat(100_000)}`]) {
+      const start = performance.now()
+      expect(parseCsv(text)).toHaveLength(1)
+      expect(performance.now() - start).toBeLessThan(1_000)
+    }
+  })
+
   it('reads a semicolon file whose quoted descriptions contain commas, with decimal commas', () => {
     const text =
       'Date;Description;Amount\n13/11/2026;"REWE, BERLIN, DE";-3,41\n14/11/2026;"LIDL, KÖLN";-1.234,56\n'

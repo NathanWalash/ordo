@@ -48,13 +48,17 @@ function clusterByAmount(txs: Transaction[]): Transaction[][] {
 }
 
 /**
- * The payment to count monthly and yearly dates from: the latest one on the run's usual day of
- * the month. A bill on the 31st is paid on the 30th or 28th in shorter months; counting from
- * that payment moved every later due date to the 28th for good.
+ * The payment to count the next due date from: the last one, unless it was a month end cut
+ * short. A bill on the 31st is paid on the 30th or 28th in shorter months, and counting from
+ * that payment moved every later due date to the 28th for good; then the latest payment on the
+ * run's usual (later) day is used instead. A bill whose day really changed (the 15th, now the
+ * 3rd) counts from its last payment.
  */
 function anchorOf(run: Transaction[], cadence: Cadence): ISODate {
   const last = run[run.length - 1]!.date
   if (cadence === 'weekly') return last
+  const lastDay = Number(last.slice(8, 10))
+  if (addDays(last, 1).slice(5, 7) === last.slice(5, 7)) return last // not the end of its month
   const counts = new Map<number, number>()
   for (const t of run) {
     const day = Number(t.date.slice(8, 10))
@@ -63,6 +67,7 @@ function anchorOf(run: Transaction[], cadence: Cadence): ISODate {
   let usual = 0
   for (const [day, n] of counts)
     if (n > (counts.get(usual) ?? 0) || (n === counts.get(usual) && day > usual)) usual = day
+  if (usual <= lastDay) return last
   return [...run].reverse().find((t) => Number(t.date.slice(8, 10)) === usual)?.date ?? last
 }
 

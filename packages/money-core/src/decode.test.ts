@@ -36,4 +36,16 @@ describe('decodeStatement', () => {
     expect(bytes.includes(0xa3)).toBe(true)
     expect(amounts(decodeStatement(bytes))).toEqual([-341, 150000])
   })
+
+  it('keeps a UTF-8 file as UTF-8 when it has one stray Windows byte', () => {
+    const utf8 = (s: string) => [...Buffer.from(s, 'utf8')]
+    const bytes = new Uint8Array([
+      ...utf8('Date,Description,Amount\n01/01/2026,Café,-12.00\n02/01/2026,€ shop,-'),
+      0xa3, // £ in the Windows code page
+      ...utf8('5.00\n'),
+    ])
+    expect(decodeStatement(bytes)).toBe(
+      'Date,Description,Amount\n01/01/2026,Café,-12.00\n02/01/2026,€ shop,-£5.00\n',
+    )
+  })
 })

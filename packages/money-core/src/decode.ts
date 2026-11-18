@@ -21,10 +21,51 @@ export function decodeStatement(bytes: Uint8Array): string {
     if (oddZeros > half * 0.6 && evenZeros < half * 0.1) return new TextDecoder('utf-16le').decode(bytes)
     if (evenZeros > half * 0.6 && oddZeros < half * 0.1) return new TextDecoder('utf-16be').decode(bytes)
   }
+  const body = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? bytes.subarray(3) : bytes
   try {
-    // ignoreBOM: false (the default) drops a UTF-8 byte order mark.
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(body)
   } catch {
-    return new TextDecoder('windows-1252').decode(bytes)
+    return utf8OrWindows(body)
   }
+}
+
+/**
+ * Text that isn't all valid UTF-8: valid UTF-8 sequences are read as UTF-8 and each byte that
+ * isn't part of one as the Windows code page. A Windows file comes out as the Windows code page,
+ * and one stray byte in a UTF-8 file no longer turns all of its `Café` and `€` into mojibake.
+ */
+function utf8OrWindows(bytes: Uint8Array): string {
+  const utf8 = new TextDecoder('utf-8', { ignoreBOM: true })
+  const windows = new TextDecoder('windows-1252')
+  const parts: string[] = []
+  let run = 0
+  for (let i = 0; i < bytes.length;) {
+    const n = sequenceLength(bytes, i)
+    if (n) {
+      i += n
+      continue
+    }
+    parts.push(utf8.decode(bytes.subarray(run, i)), windows.decode(bytes.subarray(i, i + 1)))
+    run = ++i
+  }
+  parts.push(utf8.decode(bytes.subarray(run)))
+  return parts.join('')
+}
+
+/** The length of the valid UTF-8 sequence starting at `i`, or 0 if there isn't one. */
+function sequenceLength(b: Uint8Array, i: number): number {
+  const c = b[i]!
+  const cont = (j: number, lo = 0x80, hi = 0xbf) =>
+    b[i + j] !== undefined && b[i + j]! >= lo && b[i + j]! <= hi
+  if (c < 0x80) return 1
+  if (c >= 0xc2 && c <= 0xdf) return cont(1) ? 2 : 0
+  if (c >= 0xe0 && c <= 0xef) {
+    const [lo, hi] = c === 0xe0 ? [0xa0, 0xbf] : c === 0xed ? [0x80, 0x9f] : [0x80, 0xbf]
+    return cont(1, lo, hi) && cont(2) ? 3 : 0
+  }
+  if (c >= 0xf0 && c <= 0xf4) {
+    const [lo, hi] = c === 0xf0 ? [0x90, 0xbf] : c === 0xf4 ? [0x80, 0x8f] : [0x80, 0xbf]
+    return cont(1, lo, hi) && cont(2) && cont(3) ? 4 : 0
+  }
+  return 0
 }
