@@ -38,9 +38,10 @@ On Windows, Ordo.exe is a windowed program, so a plain Command Prompt may not sh
 Pipe or redirect it (`Ordo.exe --headless status | more`, or `> out.txt`); MCP clients always use
 pipes, so the MCP server is unaffected.
 
-**Known issue on Windows:** the MCP server (`--headless --mcp`) closes as soon as a client
-connects, so agents can't use Ordo on Windows yet. The CLI commands work there. The MCP tests are
-skipped on Windows until this is fixed.
+On Windows, Electron replaces the main process's `process.stdin` with an empty stream that has
+already ended, which made the MCP server (`--headless --mcp`) close as soon as a client connected.
+Ordo now reads standard input itself there (file descriptor 0: the pipe an MCP client gives it,
+or a file with `< requests.jsonl`). The MCP end-to-end tests run on Windows in CI again.
 
 On Linux, headless mode doesn't need a display: it was checked with no X server or Wayland at all
 (Electron 45, Debian 12). Chromium may still log a few lines about D-Bus or the GPU to stderr;
@@ -158,7 +159,8 @@ Shapes, trimmed:
 ## MCP server
 
 `--headless --mcp` speaks MCP over stdio only, using the official TypeScript SDK. Logs go to
-stderr. The server exits when the client closes the connection.
+stderr. The server exits when the client closes the connection, after finishing and answering any
+call already running, so a clean-up a client abandons still finishes and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
 `ordo_calendar_events`, `ordo_bills`, `ordo_transactions`, `ordo_balances`, `ordo_scan`,

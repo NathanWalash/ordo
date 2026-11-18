@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs'
+import { Socket } from 'node:net'
 import type { Readable, Writable } from 'node:stream'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -323,20 +325,71 @@ export function createMcpServer(
   return server
 }
 
-/** Serve MCP on stdin/stdout until the client hangs up. */
+/**
+ * Standard input as a stream. Electron on Windows replaces `process.stdin` with an empty stream
+ * that has already ended (lib/common/init.ts, "Always returns EOF for stdin stream"), so the MCP
+ * server saw end-of-input the moment it started and exited as a client connected. There, read
+ * file descriptor 0 directly, the way Node itself sets up stdin: a socket for the pipe an MCP
+ * client gives us, or a file stream when input is redirected from a file.
+ */
+export function stdinFor(platform: NodeJS.Platform = process.platform, fd = 0): Readable {
+  if (platform !== 'win32') return process.stdin
+  try {
+    return new Socket({ fd, readable: true, writable: false })
+  } catch {
+    // Not a pipe or socket (ERR_INVALID_FD_TYPE): a file, or a console.
+    return createReadStream('', { fd, autoClose: false })
+  }
+}
+
+/**
+ * Serve MCP on stdin/stdout until the client hangs up, then answer every request already
+ * received. A client that hangs up mid-call (a clean-up, an import) mustn't cut it short: Ordo
+ * would exit before saving the record that makes a clean-up undoable.
+ */
 export async function serveMcp(services: OrdoServices, options: McpOptions): Promise<void> {
   const server = createMcpServer(services, options)
-  const stdin = options.stdin ?? process.stdin
-  const transport = new StdioServerTransport(stdin, options.stdout ?? process.stdout)
+  const stdin = options.stdin ?? stdinFor()
+  const stdout = options.stdout ?? process.stdout
+  const transport = new StdioServerTransport(stdin, stdout)
   const closed = new Promise<void>((resolve) => {
     transport.onclose = () => resolve()
     stdin.once('end', () => resolve())
     stdin.once('close', () => resolve())
   })
+
+  // Requests received and not yet answered. Counted before the server sees them (the server
+  // wraps onmessage and calls ours first), and done once the answer has been written.
+  const pending = new Set<string | number>()
+  let answered: (() => void) | null = null
+  transport.onmessage = (message) => {
+    if ('method' in message && 'id' in message) pending.add(message.id)
+    else if ('method' in message && message.method === 'notifications/cancelled') {
+      const id = (message.params as { requestId?: string | number } | undefined)?.requestId
+      if (id !== undefined) pending.delete(id)
+    }
+  }
+  const send = transport.send.bind(transport)
+  transport.send = (message) => {
+    const sent = send(message)
+    if (!('method' in message) && 'id' in message && message.id !== undefined) {
+      pending.delete(message.id)
+      if (!pending.size) answered?.()
+    }
+    return sent
+  }
+
   await server.connect(transport)
   options.log?.(
     `Ordo MCP server ready on stdio (${options.allowChanges ? 'changes allowed, each needs confirm: true' : 'read-only'}).`,
   )
   await closed
+  if (pending.size) await new Promise<void>((resolve) => (answered = resolve))
+  // Let the last answers reach the client (a write's callback runs after the ones before it),
+  // but don't wait long for a client that has gone.
+  await Promise.race([
+    new Promise((resolve) => stdout.write('', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1_000).unref()),
+  ])
   await server.close().catch(() => {})
 }

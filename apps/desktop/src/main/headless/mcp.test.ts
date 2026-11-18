@@ -1,8 +1,12 @@
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { createMcpServer } from './mcp'
+import { createMcpServer, serveMcp, stdinFor } from './mcp'
 import { fakeServices } from './fake-services'
 
 const READ_TOOLS = [
@@ -166,5 +170,91 @@ describe('MCP server', () => {
     })
     expect(r.isError).toBe(true)
     expect(json(r)).toEqual({ error: { code: 'usage', message: '--to must be on or after --from' } })
+  })
+})
+
+describe('serveMcp over stdio', () => {
+  const INIT = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+  }
+  const line = (m: object) => `${JSON.stringify(m)}\n`
+  /** A stdout that keeps everything written to it (read as it comes, so writes never wait). */
+  const collector = () => {
+    const stream = new PassThrough()
+    let text = ''
+    stream.on('data', (chunk) => (text += String(chunk)))
+    const replies = () =>
+      text
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { id?: number; result?: unknown })
+    return { stream, replies }
+  }
+
+  it('on Windows reads standard input itself, since Electron replaces process.stdin with an ended stream', async () => {
+    // Requests redirected from a file: `Ordo.exe --headless --mcp < requests.jsonl`.
+    const dir = mkdtempSync(join(tmpdir(), 'ordo-mcp-'))
+    const file = join(dir, 'requests.jsonl')
+    writeFileSync(
+      file,
+      line(INIT) +
+        line({ jsonrpc: '2.0', method: 'notifications/initialized' }) +
+        line({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    )
+    const fd = openSync(file, 'r')
+    try {
+      const stdin = stdinFor('win32', fd)
+      expect(stdin).not.toBe(process.stdin)
+      const stdout = collector()
+      await serveMcp(fakeServices(), { allowChanges: false, stdin, stdout: stdout.stream })
+      const out = stdout.replies()
+      expect(out.map((r) => r.id)).toEqual([1, 2])
+      expect(JSON.stringify(out[1]!.result)).toContain('ordo_status')
+    } finally {
+      closeSync(fd)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('elsewhere uses process.stdin', () => {
+    expect(stdinFor('darwin')).toBe(process.stdin)
+    expect(stdinFor('linux')).toBe(process.stdin)
+  })
+
+  it('lets a running change finish when the client hangs up, so it can still be undone', async () => {
+    let finish!: () => void
+    const run = vi.fn(
+      () =>
+        new Promise<{ ok: false; error: 'invalid'; message: string }>((resolve) => {
+          finish = () => resolve({ ok: false, error: 'invalid', message: 'done' })
+        }),
+    )
+    const base = fakeServices()
+    const services = fakeServices({ cleanup: { ...base.cleanup, run } })
+    const stdin = new PassThrough()
+    const stdout = collector()
+    let served = false
+    const serving = serveMcp(services, { allowChanges: true, stdin, stdout: stdout.stream }).then(
+      () => (served = true),
+    )
+    stdin.write(line(INIT) + line({ jsonrpc: '2.0', method: 'notifications/initialized' }))
+    stdin.write(
+      line({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'ordo_cleanup_run', arguments: { senders: ['digest@news.example'], confirm: true } },
+      }),
+    )
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    stdin.end()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(served).toBe(false)
+    finish()
+    await serving
+    expect(stdout.replies().map((r) => r.id)).toEqual([1, 2])
   })
 })
