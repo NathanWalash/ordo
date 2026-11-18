@@ -79,7 +79,7 @@ test('the consent is asked for in its own dialog, and can be cancelled', async (
   await page.getByRole('button', { name: 'Allow for Ask Ordo' }).click()
   await expect(toggle).toBeChecked()
   await expect(
-    page.getByText('and, for Ask Ordo, exact amounts, dates and names', { exact: false }),
+    page.getByText('and for Ask Ordo, exact amounts, dates and names', { exact: false }),
   ).toBeVisible()
   const settings = await page.evaluate(() => window.ordo.settings.get())
   expect(settings.ai.moneyDetailsConsent).toBe('claude-cli')
