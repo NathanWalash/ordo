@@ -51,6 +51,13 @@ pnpm caldav:stop
 
 Both servers can run at once; `pnpm test:integration` runs whichever tests have a port set.
 
+Vitest can't reach the real network. `test/network-guard.ts` runs before every test file and
+makes `net`, `tls` and `dns` throw for anything but loopback (127.0.0.0/8, `::1`, `localhost`), so
+`fetch`, `http` and IMAP and SMTP clients fail too. It also points `ORDO_IMAP_HOST`,
+`ORDO_SMTP_HOST` and `ORDO_CALDAV_URL` at a closed port on 127.0.0.1 unless you set them. A test
+that needs a server starts one on 127.0.0.1, or gives a made-up name its own `lookup` that answers
+with a loopback address.
+
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, for example `feat(mail-core): parse List-Id`.

@@ -21,6 +21,7 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Unit tests can never reach the real network: a Vitest setup file blocks `net`, `tls` and `dns` for anything but loopback, and points the iCloud IMAP, SMTP and CalDAV settings at a closed local port by default. See CONTRIBUTING.md.
 - Boards: local kanban boards in the sidebar, kept in their own database on this computer (`boards.sqlite`). Make boards from the Simple, Weekly plan or Project templates; add, rename, reorder and delete boards and columns; give a column a card limit (it turns red when over, nothing is blocked) or mark it as done. See [docs/boards.md](docs/boards.md).
 - Cards have a title, notes in simple markdown (drawn without HTML, https links only), coloured labels, a due date or date range, a checklist and custom fields you define per board: text, number, date, choice, checkbox, link and person. Fields can show on the card.
 - Drag cards between and within columns and drag columns by their header, with a lifted card and a gap where it will land; Escape cancels. Every move also works from the keyboard (⌥ and the arrow keys, arrows alone to move between cards, the card's menu) and is announced to VoiceOver. Order is kept with fractional ranks, so a move rewrites one card.
