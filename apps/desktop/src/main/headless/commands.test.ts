@@ -322,6 +322,11 @@ describe('output', () => {
   it('strips control characters and bidi tricks from third-party text', () => {
     expect(clean('Evil\u001b[2J\r\nCorp‮')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
+    // Right-to-left and left-to-right marks reorder text; line and paragraph separators start lines.
+    const sneaky = ['a', 0x200f, 'b', 0x200e, 'c', 0x061c, 'd', 0x2028, 'e', 0x2029, 'f']
+      .map((p) => (typeof p === 'number' ? String.fromCharCode(p) : p))
+      .join('')
+    expect(clean(sneaky)).toBe('a b c d e f')
     const text = formatHuman('senders', {
       ok: true,
       data: {

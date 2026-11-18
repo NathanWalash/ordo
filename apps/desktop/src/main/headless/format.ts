@@ -7,9 +7,9 @@ import type { CommandResult } from './commands'
  * control characters before it reaches a terminal (no escape sequences, no fake lines).
  */
 
-// C0 and C1 control characters, DEL, and bidi overrides/isolates.
+// C0 and C1 control characters, DEL, bidi marks, overrides and isolates, and Unicode line breaks.
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
 
 export function clean(value: unknown, max = 80): string {
   const s = String(value ?? '').replace(UNSAFE, ' ')
