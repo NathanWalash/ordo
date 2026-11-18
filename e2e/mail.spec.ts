@@ -21,6 +21,7 @@ const run = Date.now().toString(36)
 const NEWS = `Weekly news ${run}`
 const LUNCH = `Lunch on Friday ${run}`
 const OLD = `Old receipt ${run}`
+const PLAIN = `Plain HTML ${run}`
 const FOLDER = `Projects ${run}`
 const shots = process.env['ORDO_E2E_SCREENSHOTS'] === '1'
 const files = mkdtempSync(join(tmpdir(), 'ordo-mail-e2e-'))
@@ -162,6 +163,12 @@ test.beforeAll(async () => {
       'INBOX',
       `From: Order Desk <orders@shop.example>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: ${OLD}\r\n` +
         `Date: Sun, 15 Nov 2026 08:00:00 +0000\r\n\r\nThanks for your order.\r\n`,
+    )
+    // HTML with no colours of its own: it should follow the app into dark mode.
+    await c.append(
+      'INBOX',
+      `From: Pat <pat@friend.example>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: ${PLAIN}\r\n` +
+        `Date: Sat, 14 Nov 2026 08:00:00 +0000\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Just words ${run}</p>\r\n`,
     )
   })
 
@@ -691,6 +698,24 @@ test('fits a small window: the folders become a rail, and Send stays in view', a
   await screenshot('narrow-compose')
   await page.keyboard.press('Escape')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1240, 800))
+})
+
+test('in dark mode, an email without colours of its own goes dark; a designed one stays on white', async () => {
+  await page.evaluate(() => window.ordo.settings.set({ theme: 'dark' }))
+  try {
+    await page
+      .getByRole('complementary', { name: 'Mailboxes' })
+      .getByRole('button', { name: /^Inbox/ })
+      .click()
+    await row(PLAIN).click()
+    await expect(frame().getByText(`Just words ${run}`)).toBeVisible()
+    await expect(frame().locator('body')).toHaveCSS('background-color', 'rgb(30, 30, 30)')
+    await row(`News Desk: ${NEWS}`).click()
+    await expect(frame().locator('h1')).toBeVisible()
+    await expect(frame().locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  } finally {
+    await page.evaluate(() => window.ordo.settings.set({ theme: 'system' }))
+  }
 })
 
 test('your own folders open too', async () => {
