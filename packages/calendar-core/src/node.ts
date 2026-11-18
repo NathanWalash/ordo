@@ -4,6 +4,7 @@ export {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarUnavailableError,
   ICLOUD_CALDAV_URL,
   isReadOnly,
   normaliseColor,

@@ -7,6 +7,7 @@ import {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarUnavailableError,
   CalendarStore,
   checkFeedUrl,
   describeIcs,
@@ -71,12 +72,18 @@ function account() {
   return a
 }
 
-function explain(err: unknown): { error: CalendarSyncError; message: string } {
+export function explain(err: unknown): { error: CalendarSyncError; message: string } {
   if (err instanceof CalendarAuthError)
     return {
       error: 'auth',
       message:
         "iCloud didn't accept your app-specific password for Calendar. Reconnect your account and try again.",
+    }
+  if (err instanceof CalendarUnavailableError)
+    return {
+      error: 'network',
+      message:
+        'iCloud Calendar is busy or limiting requests right now. Wait a few minutes and try again, and check Apple’s System Status page if it keeps happening.',
     }
   if (err instanceof CalendarConnectionError)
     return {

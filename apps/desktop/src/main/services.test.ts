@@ -191,3 +191,57 @@ describe('AI sort', () => {
     })
   })
 })
+
+describe('what connecting to iCloud says when it fails', () => {
+  const coded = (code: string, extra: object = {}) =>
+    Object.assign(new Error('Command failed'), { code, ...extra })
+  const refused = (extra: object = {}) =>
+    Object.assign(new Error('x'), { authenticationFailed: true, ...extra })
+
+  it('a refused password says to use an app-specific password and check iCloud Mail is on', () => {
+    const r = mail.explain(refused(), 'me@icloud.com')
+    expect(r.error).toBe('auth')
+    expect(r.message).toContain("iCloud didn't accept")
+    expect(r.message).toContain('Apple ID password won’t work')
+    expect(r.message).toContain('iCloud Mail is turned on')
+    expect(r.message).not.toContain('@icloud.com address instead')
+  })
+
+  it('an Apple ID that is not an iCloud address gets a hint to use the iCloud one', () => {
+    expect(mail.explain(refused(), 'me@gmail.example').message).toContain(
+      'sign in with your @icloud.com address instead',
+    )
+  })
+
+  it('throttling says iCloud is turning connections away, with what it said', () => {
+    const r = mail.explain(refused({ serverResponseCode: 'UNAVAILABLE', responseText: 'Maintenance' }))
+    expect(r.error).toBe('unavailable')
+    expect(r.message).toContain('turning connections away')
+    expect(r.message).toContain('“Maintenance”')
+    expect(r.message).not.toContain("didn't accept")
+  })
+
+  it('a timeout is not described as being offline', () => {
+    const r = mail.explain(coded('GREETING_TIMEOUT'))
+    expect(r.error).toBe('network')
+    expect(r.message).toContain("didn't answer in time")
+  })
+
+  it('offline, TLS and dropped connections each get their own next step', () => {
+    expect(mail.explain(coded('ENOTFOUND')).message).toContain("Check you're online")
+    expect(mail.explain(coded('CERT_HAS_EXPIRED')).message).toContain('secure connection')
+    expect(mail.explain(coded('ECONNRESET')).message).toContain('closed part way')
+  })
+
+  it('a busy iCloud Calendar is not described as a wrong password or being offline', async () => {
+    const { CalendarUnavailableError } = await import('@ordo/calendar-core/node')
+    const r = calendar.explain(new CalendarUnavailableError('cannot find principalUrl (HTTP 503)'))
+    expect(r.message).toContain('busy or limiting requests')
+  })
+
+  it('anything else names what happened, so it can be reported', () => {
+    const r = mail.explain(coded('WEIRD_THING'))
+    expect(r.error).toBe('unknown')
+    expect(r.message).toContain('(WEIRD_THING)')
+  })
+})

@@ -6,7 +6,10 @@ import {
   ImapMailProvider,
   MailAuthError,
   MailConnectionError,
+  MailUnavailableError,
   MailStore,
+  classifyImapError,
+  type MailConnectionReason,
   scanMailbox,
   testImapLogin,
   type ImapConfig,
@@ -62,18 +65,52 @@ export function imapConfig(user: string, pass: string): ImapConfig {
   return { ...ICLOUD_IMAP, user, pass }
 }
 
-export function explain(err: unknown): { error: ConnectError; message: string } {
-  if (err instanceof MailAuthError)
+const ICLOUD_DOMAINS = /@(icloud|me|mac)\.com$/i
+
+/**
+ * A clear message, with a next step, for each way talking to iCloud Mail can fail. `email` is
+ * the address being connected, to spot an Apple ID that isn't an iCloud Mail address.
+ */
+export function explain(err: unknown, email?: string): { error: ConnectError; message: string } {
+  const e = classifyImapError(err)
+  if (e instanceof MailAuthError)
     return {
       error: 'auth',
-      message: "iCloud didn't accept that email and app-specific password. Check both and try again.",
+      message:
+        "iCloud didn't accept that email and app-specific password. Make sure it's an app-specific password " +
+        'from account.apple.com (your Apple ID password won’t work here) and that iCloud Mail is turned on ' +
+        'for this Apple ID.' +
+        (email && !ICLOUD_DOMAINS.test(email.trim())
+          ? ' If your Apple ID isn’t an iCloud address, sign in with your @icloud.com address instead.'
+          : ''),
     }
-  if (err instanceof MailConnectionError)
+  if (e instanceof MailUnavailableError)
     return {
-      error: 'network',
-      message: "Couldn't reach iCloud. Check your internet connection and try again.",
+      error: 'unavailable',
+      message:
+        'iCloud Mail is turning connections away right now' +
+        (e.serverText ? ` (it said “${e.serverText}”)` : '') +
+        '. This usually passes: wait a few minutes and try again, and check Apple’s System Status page if it keeps happening.',
     }
-  return { error: 'unknown', message: 'Something went wrong talking to iCloud. Try again in a moment.' }
+  if (e instanceof MailConnectionError) {
+    const messages: Record<MailConnectionReason, string> = {
+      offline:
+        "Couldn't reach iCloud. Check you're online, and that a VPN or firewall isn't blocking iCloud Mail.",
+      timeout:
+        "iCloud didn't answer in time. Your connection may be slow, or a VPN or firewall may be blocking iCloud Mail. Try again in a minute.",
+      tls: "Couldn't make a secure connection to iCloud. If you're on public Wi-Fi, sign in to it in your browser first; a VPN or antivirus that inspects traffic can also cause this.",
+      dropped: 'The connection to iCloud closed part way. Check your connection and try again.',
+    }
+    return { error: 'network', message: messages[e.reason] }
+  }
+  const detail = (e as { code?: unknown }).code ?? e.message
+  return {
+    error: 'unknown',
+    message:
+      'Something unexpected went wrong talking to iCloud' +
+      (typeof detail === 'string' && detail ? ` (${detail.slice(0, 120)})` : '') +
+      '. Try again in a moment.',
+  }
 }
 
 async function check(input: ConnectInput): Promise<ConnectResult & { password?: string }> {
@@ -85,7 +122,7 @@ async function check(input: ConnectInput): Promise<ConnectResult & { password?: 
     await testImapLogin(imapConfig(email, password))
     return { ok: true, email, password }
   } catch (err) {
-    return { ok: false, ...explain(err) }
+    return { ok: false, ...explain(err, email) }
   }
 }
 
