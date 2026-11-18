@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { ipcMain } from 'electron'
 import {
   ME,
@@ -10,14 +11,18 @@ import {
   counterparts,
   describeFact,
   describeFacts,
+  eventCost,
   factTransactionIds,
   factsOf,
   heldBalances,
+  inIdTaken,
   owedToYou,
   periodCaveats,
   proposeQuestions,
   toISODate,
+  type FactOf,
   type FactSource,
+  type MoneyFact,
   type MoneyFactData,
   type MonthComparison,
   type Transaction,
@@ -60,8 +65,31 @@ async function data() {
 
 type Data = Awaited<ReturnType<typeof data>>
 
-const questionsFor = (d: Data) =>
-  proposeQuestions({ transactions: d.transactions, ledger: d.ledger, facts: d.facts, dismissed: d.dismissed })
+let questionCache: { key: string; questions: ReturnType<typeof proposeQuestions> } | null = null
+
+/**
+ * Ordo's questions, worked out again only when the transactions, facts or dismissed questions
+ * change: the page, the Ask tools and headless all ask for them often.
+ */
+function questionsFor(d: Data) {
+  const hash = createHash('sha256')
+  for (const t of d.transactions)
+    hash.update(`${t.id}|${t.date}|${t.amount}|${t.category ?? ''}|${t.transferWith ?? ''}\n`)
+  hash.update(JSON.stringify(d.facts))
+  hash.update(JSON.stringify([...d.dismissed].sort()))
+  const key = hash.digest('hex')
+  if (questionCache?.key !== key)
+    questionCache = {
+      key,
+      questions: proposeQuestions({
+        transactions: d.transactions,
+        ledger: d.ledger,
+        facts: d.facts,
+        dismissed: d.dismissed,
+      }),
+    }
+  return questionCache.questions
+}
 
 function compareFor(d: Data, filter: { category?: string; account?: string } = {}): MonthComparison {
   return compareMonthToDate(d.transactions, d.ledger, d.facts, {
@@ -98,7 +126,7 @@ export async function view(): Promise<MemoryView> {
       answers: q.answers.map((a) => ({ id: a.id, label: a.label })),
     })),
     held: heldBalances(d.transactions, d.ledger, d.facts),
-    owed: owedToYou(d.transactions, d.facts),
+    owed: owedToYou(d.transactions, d.facts, d.ledger),
     billsOwed: (o?.debts ?? [])
       .filter((x) => x.to === ME)
       .map((x) => ({ person: names.get(x.from) ?? 'Someone', amount: x.amount })),
@@ -116,12 +144,19 @@ export async function view(): Promise<MemoryView> {
 }
 
 /** Why a fact can't be saved: it names payments or an event that aren't there. Null when fine. */
-function problem(fact: MoneyFactData, transactions: Transaction[], facts: { id: string; kind: string }[]) {
+function problem(fact: MoneyFactData, transactions: Transaction[], facts: MoneyFact[], except?: string) {
   const ids = new Set(transactions.map((t) => t.id))
   if (factTransactionIds(fact).some((id) => !ids.has(id)))
     return 'One of those payments is no longer imported.'
   if ('eventId' in fact && fact.eventId && !facts.some((f) => f.id === fact.eventId && f.kind === 'event'))
     return 'That event no longer exists.'
+  // One payment in is one payback or one pass-through, never two: a double click or a suggestion
+  // for money Ordo already knows about would otherwise count it twice.
+  if (
+    (fact.kind === 'payback' || fact.kind === 'pass-through') &&
+    inIdTaken(facts as MoneyFact[], fact.inId, except)
+  )
+    return 'Ordo already knows what that money in was. Forget the old fact first.'
   return null
 }
 
@@ -138,7 +173,7 @@ export async function saveFact(raw: unknown): Promise<MemoryResult> {
   const result = await withWriteLock('saving what Ordo learned', async () => {
     const d = await data()
     if (id && !d.facts.some((f) => f.id === id)) return fail('That fact no longer exists.')
-    const why = problem(fact, d.transactions, d.facts)
+    const why = problem(fact, d.transactions, d.facts, id)
     if (why) return fail(why)
     saveChecked(d, fact, source, id)
     return { ok: true as const, facts: 1 }
@@ -150,13 +185,50 @@ export async function deleteFact(raw: unknown): Promise<MemoryResult> {
   const id = typeof raw === 'string' && raw.length > 0 && raw.length <= 100 ? raw : null
   if (!id) return fail('That fact no longer exists.')
   const result = await withWriteLock('forgetting a fact', async () => {
-    const s = moneyStore()
-    // Paybacks for a forgotten event would point nowhere: forget them too.
-    const linked = factsOf(s.memoryFacts(), 'payback').filter((p) => p.eventId === id)
-    for (const p of linked) s.deleteMemoryFact(p.id)
-    return s.deleteMemoryFact(id) ? { ok: true as const } : fail('That fact no longer exists.')
+    const d = await data()
+    const fact = d.facts.find((f) => f.id === id)
+    if (!fact) return fail('That fact no longer exists.')
+    if (fact.kind !== 'event')
+      return d.s.deleteMemoryFact(id) ? { ok: true as const } : fail('That fact no longer exists.')
+    const kept = unlinkEvent(d, fact)
+    d.s.deleteMemoryFact(id)
+    if (!kept.paybacks && !kept.owed) return { ok: true as const }
+    const parts = [
+      kept.paybacks && `${kept.paybacks} payback${kept.paybacks === 1 ? '' : 's'}`,
+      kept.owed && `${kept.owed} amount${kept.owed === 1 ? '' : 's'} owed`,
+    ].filter(Boolean)
+    return {
+      ok: true as const,
+      message: `Forgot ${fact.name}. ${parts.join(' and ')} for it ${kept.paybacks + kept.owed === 1 ? 'is' : 'are'} kept, now linked to its payments.`,
+    }
   })
   return result instanceof Locked ? locked(result) : result
+}
+
+/**
+ * Before an event is forgotten, keep the paybacks and money owed that point at it: they're real
+ * money. Each one is linked to the event's payments instead (its own payments when it already
+ * names some). A payback with nothing left to point at is the only thing forgotten with it.
+ */
+function unlinkEvent(d: Data, event: FactOf<'event'>) {
+  const outIds = eventCost(event, d.transactions, d.ledger, d.facts)
+    .outgoings.map((o) => o.id)
+    .slice(0, 50)
+  let paybacks = 0
+  let owed = 0
+  for (const f of d.facts) {
+    if ((f.kind !== 'payback' && f.kind !== 'owed') || f.eventId !== event.id) continue
+    const { id, createdAt: _c, source, eventId: _e, ...rest } = f
+    const linked = { ...rest, outIds: rest.outIds.length ? rest.outIds : outIds }
+    if (f.kind === 'payback' && !linked.outIds.length) {
+      d.s.deleteMemoryFact(id)
+      continue
+    }
+    d.s.saveMemoryFact(linked, source, id)
+    if (f.kind === 'payback') paybacks++
+    else owed++
+  }
+  return { paybacks, owed }
 }
 
 /**

@@ -116,7 +116,8 @@ export interface MemoryView {
 }
 
 export type MemoryResult =
-  | { ok: true; facts?: number }
+  /** `message`: something worth telling you, e.g. what was kept when an event was forgotten. */
+  | { ok: true; facts?: number; message?: string }
   /** `locked`: another Ordo process is writing. */
   | { ok: false; message: string; error?: 'locked' }
 
