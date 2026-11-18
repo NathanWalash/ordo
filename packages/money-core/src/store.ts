@@ -4,6 +4,13 @@ import type { MoneyAiCategoryCache, MoneyAiCategoryRecord, SpendingCategory } fr
 import type { MoneyAiMatchCache, MoneyAiMatchRecord } from './ai-match'
 import type { Cadence, ISODate } from './dates'
 import {
+  FACT_SOURCES,
+  MoneyFactInputSchema,
+  type FactSource,
+  type MoneyFact,
+  type MoneyFactInput,
+} from './memory'
+import {
   ME,
   type BillSource,
   type BillStatus,
@@ -65,6 +72,14 @@ CREATE TABLE IF NOT EXISTS ai_categories (
   fingerprint TEXT NOT NULL,
   PRIMARY KEY (model, merchant_key)
 );
+CREATE TABLE IF NOT EXISTS memory_facts (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  source TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_dismissed (key TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS ai_matches (
   model TEXT NOT NULL,
   pair TEXT NOT NULL,
@@ -390,11 +405,74 @@ export class MoneyStore implements MoneyAiCategoryCache, MoneyAiMatchCache {
     this.db.prepare('DELETE FROM settlements WHERE id = ?').run(id)
   }
 
+  // What Ordo has learned: facts you confirmed, and questions you dismissed.
+
+  /** Saved facts, oldest first. A row that no longer passes the schema is skipped, never trusted. */
+  memoryFacts(): MoneyFact[] {
+    const rows = this.db
+      .prepare('SELECT id, data, source, created_at FROM memory_facts ORDER BY created_at, rowid')
+      .all() as { id: string; data: string; source: string; created_at: string }[]
+    const out: MoneyFact[] = []
+    for (const r of rows) {
+      let raw: unknown
+      try {
+        raw = JSON.parse(r.data)
+      } catch {
+        continue
+      }
+      const parsed = MoneyFactInputSchema.safeParse(raw)
+      if (!parsed.success) continue
+      const source = (FACT_SOURCES as readonly string[]).includes(r.source) ? (r.source as FactSource) : 'you'
+      out.push({ ...parsed.data, id: r.id, createdAt: r.created_at, source })
+    }
+    return out
+  }
+
+  /** Save a new fact, or replace the one with `id` (keeping when it was first learned). */
+  saveMemoryFact(input: MoneyFactInput, source: FactSource, id?: string): MoneyFact {
+    const data = MoneyFactInputSchema.parse(input)
+    const existing = id
+      ? (this.db.prepare('SELECT created_at FROM memory_facts WHERE id = ?').get(id) as
+          { created_at: string } | undefined)
+      : undefined
+    const fact: MoneyFact = {
+      ...data,
+      id: id ?? randomUUID(),
+      createdAt: existing?.created_at ?? new Date().toISOString(),
+      source,
+    }
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO memory_facts (id, kind, data, source, created_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(fact.id, fact.kind, JSON.stringify(data), source, fact.createdAt)
+    return fact
+  }
+
+  deleteMemoryFact(id: string): boolean {
+    return Number(this.db.prepare('DELETE FROM memory_facts WHERE id = ?').run(id).changes) > 0
+  }
+
+  dismissedQuestions(): Set<string> {
+    const rows = this.db.prepare('SELECT key FROM memory_dismissed').all() as { key: string }[]
+    return new Set(rows.map((r) => r.key))
+  }
+
+  dismissQuestion(key: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO memory_dismissed (key) VALUES (?)').run(key)
+  }
+
+  /** Forget everything Ordo learned, keeping statements, bills and people. */
+  clearMemory(): void {
+    this.db.exec('DELETE FROM memory_facts; DELETE FROM memory_dismissed;')
+  }
+
   /** Forget everything except "Me". */
   clear(): void {
     this.db.exec(
       "DELETE FROM transactions; DELETE FROM bills; DELETE FROM dismissed; DELETE FROM splits; DELETE FROM settlements; DELETE FROM people WHERE id <> 'me'; " +
-        'DELETE FROM category_overrides; DELETE FROM ai_categories; DELETE FROM ai_matches;',
+        'DELETE FROM category_overrides; DELETE FROM ai_categories; DELETE FROM ai_matches; ' +
+        'DELETE FROM memory_facts; DELETE FROM memory_dismissed;',
     )
   }
 
