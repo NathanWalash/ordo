@@ -20,6 +20,14 @@ pnpm check      # format check, lint, typecheck, unit tests
 pnpm test:e2e   # builds the app and runs the Playwright tests
 ```
 
+The e2e tests run Ordo as a hidden background app: the window is never shown, and on macOS there's
+no Dock icon and Ordo never becomes the active app, so a test run doesn't pull you away from what
+you're doing. To watch a run instead, set `ORDO_E2E_SHOW=1`:
+
+```bash
+ORDO_E2E_SHOW=1 pnpm test:e2e
+```
+
 To run the IMAP tests (and the full connect-and-scan e2e test) you need Docker:
 
 ```bash

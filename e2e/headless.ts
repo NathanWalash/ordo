@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { BACKGROUND_ENV } from './launch'
 
 /** The Electron binary from node_modules (a path; requiring it downloads it on first use). */
 export const electronPath = createRequire(import.meta.url)('electron') as string
@@ -31,6 +32,7 @@ export function headlessEnv(userData: string, env: Record<string, string> = {}):
     ORDO_USER_DATA: userData,
     // Linux runners have no keyring; same opt-in as the windowed tests.
     ORDO_TEST_PLAINTEXT_SECRETS: '1',
+    ...BACKGROUND_ENV,
     ...env,
   }
 }
