@@ -158,7 +158,11 @@ export function htmlToText(html: string, opts: HtmlToTextOptions = {}): string {
       }
     }
   }
-  return tidy(decodeEntities(out.join(''))).split(OPEN).join('<').split(CLOSE).join('>')
+  return tidy(decodeEntities(out.join('')))
+    .split(OPEN)
+    .join('<')
+    .split(CLOSE)
+    .join('>')
 }
 
 /** Collapse runs of spaces, trim each line and allow at most one blank line in a row. */

@@ -71,17 +71,24 @@ export function decodeCharset(bytes: Uint8Array, charset: string | undefined): s
  */
 export function unflow(text: string, delSp: boolean): string {
   const out: string[] = []
-  let cur: string | null = null
+  const prefix = (depth: number) => (depth ? `${'>'.repeat(depth)} ` : '')
+  let cur: { depth: number; text: string; soft: boolean } | null = null
   for (const line of text.split(/\r?\n/)) {
-    const soft = line.endsWith(' ') && line !== '-- '
-    const piece = soft && delSp ? line.slice(0, -1) : line
-    cur = cur === null ? piece : cur + piece
-    if (!soft) {
-      out.push(cur)
-      cur = null
+    // Quote depth, then the content after one space-stuffing space.
+    let depth = 0
+    while (line[depth] === '>') depth++
+    let content = line.slice(depth)
+    if (content.startsWith(' ')) content = content.slice(1)
+    const soft = content.endsWith(' ') && content !== '-- '
+    const piece = soft && delSp ? content.slice(0, -1) : content
+    if (cur && cur.soft && cur.depth === depth) cur.text += piece
+    else {
+      if (cur) out.push(prefix(cur.depth) + cur.text)
+      cur = { depth, text: piece, soft }
     }
+    cur.soft = soft
   }
-  if (cur !== null) out.push(cur)
+  if (cur) out.push(prefix(cur.depth) + cur.text)
   return out.join('\n')
 }
 

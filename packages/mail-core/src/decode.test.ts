@@ -41,6 +41,18 @@ describe('unflow', () => {
     expect(unflow('This is \r\nflowed.\r\n-- \r\nSam', false)).toBe('This is flowed.\n-- \nSam')
     expect(unflow('Del \nSp', true)).toBe('DelSp')
   })
+
+  it('joins quoted lines only at the same depth, without the next line’s ">" in the middle', () => {
+    expect(unflow('> Are you free \r\n> on Friday?\r\n>> Older \r\n>> text\r\nMine', false)).toBe(
+      '> Are you free on Friday?\n>> Older text\nMine',
+    )
+    // A soft break into a line of a different depth doesn't join.
+    expect(unflow('> quoted \r\nnot quoted', false)).toBe('> quoted \nnot quoted')
+  })
+
+  it('undoes space-stuffing', () => {
+    expect(unflow(' From here\r\n >not a quote', false)).toBe('From here\n>not a quote')
+  })
 })
 
 describe('decodeTextPart', () => {

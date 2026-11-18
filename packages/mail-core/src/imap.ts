@@ -2,7 +2,7 @@ import { ImapFlow, type FetchMessageObject, type FetchQueryObject } from 'imapfl
 import { parseHeaderBlock, SCAN_HEADER_FIELDS, toAddresses, toMessageHeader } from './headers'
 import { toMailboxList } from './mailboxes'
 import { decodeTextPart, decodeTransfer, findPart } from './decode'
-import { planBodyParts, referencedCids, type BodyNode } from './mime'
+import { BODY_PARTS_MAX, chooseInlineImages, planBodyParts, referencedCids, type BodyNode } from './mime'
 import { toUidSet } from './sync'
 import type { FlagUpdate } from './store'
 import type {
@@ -339,38 +339,50 @@ export class ImapMailProvider implements MailProvider {
       const structure = (msg.bodyStructure as BodyNode | undefined) ?? { type: 'text/plain' }
       const plan = planBodyParts(structure)
 
-      let truncated = false
-      const readText = async (part: string | null): Promise<string | null> => {
-        if (!part) return null
-        const node = findPart(structure, part)
-        // Transfer encoding makes the raw part up to a third bigger than the text.
-        const limit = Math.ceil(READ_LIMITS.body * 1.4)
-        const raw = await this.rawPart(uid, part, limit)
-        if (!raw || !node) return null
-        if ((node.size ?? 0) > limit) truncated = true
-        return decodeTextPart(raw, node)
+      // Transfer encoding makes a raw part up to a third bigger than what it holds.
+      const limit = Math.ceil(READ_LIMITS.body * 1.4)
+      const htmlParts = plan.html.slice(0, BODY_PARTS_MAX)
+      const textParts = plan.text.slice(0, BODY_PARTS_MAX)
+      // Every body part in one FETCH, not one round trip each.
+      const raw = await this.rawParts(uid, [...htmlParts, ...textParts], limit)
+      let truncated = plan.html.length > BODY_PARTS_MAX || plan.text.length > BODY_PARTS_MAX
+      const join = (parts: string[], sep: string): string | null => {
+        const pieces: string[] = []
+        for (const part of parts) {
+          const node = findPart(structure, part)
+          const bytes = raw.get(part)
+          if (!node || !bytes) continue
+          if ((node.size ?? 0) > limit) truncated = true
+          pieces.push(decodeTextPart(bytes, node))
+        }
+        return pieces.length ? pieces.join(sep) : null
       }
-      const html = await readText(plan.html)
-      const text = await readText(plan.text)
+      const html = join(htmlParts, '\n')
+      const text = join(textParts, '\n\n')
 
-      // Inline images the HTML actually uses become data: URLs, within a total budget.
+      // Inline images the HTML uses become data: URLs, within a budget, in one more FETCH.
+      // The rest are listed as attachments instead of vanishing.
       const inlineImages: Record<string, string> = {}
-      const used = html ? referencedCids(html) : new Set<string>()
+      const wanted = chooseInlineImages(
+        plan.attachments,
+        html ? referencedCids(html) : new Set(),
+        READ_LIMITS.inlineImages,
+      )
+      const images = await this.rawParts(
+        uid,
+        wanted.map((a) => a.part),
+        Math.ceil(READ_LIMITS.inlineImages * 1.4),
+      )
       let budget: number = READ_LIMITS.inlineImages
-      for (const a of plan.attachments) {
-        const cid = a.contentId?.toLowerCase()
-        if (!a.inline || !cid || !used.has(cid)) {
+      for (const a of wanted) {
+        const node = findPart(structure, a.part)
+        const bytes = node && images.get(a.part) ? decodeTransfer(images.get(a.part)!, node.encoding) : null
+        if (!bytes || bytes.length > budget) {
           a.inline = false
           continue
         }
-        if (a.size > budget * 1.4 || !/^image\/(png|jpeg|gif|webp|bmp)$/.test(a.contentType)) continue
-        const raw = await this.rawPart(uid, a.part, Math.ceil(budget * 1.4))
-        const node = findPart(structure, a.part)
-        if (!raw || !node) continue
-        const bytes = decodeTransfer(raw, node.encoding)
-        if (bytes.length > budget) continue
         budget -= bytes.length
-        inlineImages[cid] = `data:${a.contentType};base64,${bytes.toString('base64')}`
+        inlineImages[a.contentId!.toLowerCase()] = `data:${a.contentType};base64,${bytes.toString('base64')}`
       }
 
       return toContent(msg, mailbox, { html, text, truncated, attachments: plan.attachments, inlineImages })
@@ -381,13 +393,24 @@ export class ImapMailProvider implements MailProvider {
 
   /** A part's raw bytes, still transfer-encoded, at most `maxLength` of them. */
   private async rawPart(uid: number, part: string, maxLength: number): Promise<Buffer | null> {
+    return (await this.rawParts(uid, [part], maxLength)).get(part) ?? null
+  }
+
+  /** Several parts' raw bytes in one FETCH, each at most `maxLength`, by part number. */
+  private async rawParts(uid: number, parts: string[], maxLength: number): Promise<Map<string, Buffer>> {
+    const out = new Map<string, Buffer>()
+    if (!parts.length) return out
     const msg = await this.client.fetchOne(
       String(uid),
-      { uid: true, bodyParts: [{ key: part, maxLength }] },
+      { uid: true, bodyParts: parts.map((key) => ({ key, maxLength })) },
       { uid: true },
     )
-    if (!msg || msg.uid !== uid) return null
-    return msg.bodyParts?.get(part) ?? msg.bodyParts?.get(part.toLowerCase()) ?? null
+    if (!msg || msg.uid !== uid) return out
+    for (const part of parts) {
+      const bytes = msg.bodyParts?.get(part) ?? msg.bodyParts?.get(part.toLowerCase())
+      if (bytes) out.set(part, bytes)
+    }
+    return out
   }
 
   /**

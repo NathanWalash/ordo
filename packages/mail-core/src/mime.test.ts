@@ -1,11 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { planBodyParts, referencedCids, safeFilename, type BodyNode } from './mime'
+import {
+  ATTACHMENTS_MAX,
+  chooseInlineImages,
+  INLINE_IMAGES_MAX,
+  planBodyParts,
+  referencedCids,
+  safeFilename,
+  type BodyNode,
+} from './mime'
+
+/** An attached email, the way imapflow reports it: with the inner message's own parts. */
+const attachedEmail = (part: string): BodyNode => ({
+  part,
+  type: 'message/rfc822',
+  size: 900,
+  childNodes: [
+    {
+      part: `${part}.1`,
+      type: 'multipart/alternative',
+      childNodes: [
+        { part: `${part}.1.1`, type: 'text/plain' },
+        { part: `${part}.1.2`, type: 'text/html' },
+      ],
+    },
+  ],
+})
 
 describe('planBodyParts', () => {
   it('reads a single-part plain text message as part 1', () => {
     expect(planBodyParts({ type: 'text/plain', size: 10 })).toEqual({
-      html: null,
-      text: '1',
+      html: [],
+      text: ['1'],
       attachments: [],
     })
   })
@@ -18,7 +43,7 @@ describe('planBodyParts', () => {
         { part: '2', type: 'text/html' },
       ],
     }
-    expect(planBodyParts(root)).toEqual({ html: '2', text: '1', attachments: [] })
+    expect(planBodyParts(root)).toEqual({ html: ['2'], text: ['1'], attachments: [] })
   })
 
   it('lists attachments, keeps inline images with a Content-ID inline, and names unnamed ones', () => {
@@ -26,6 +51,7 @@ describe('planBodyParts', () => {
       type: 'multipart/mixed',
       childNodes: [
         {
+          part: '1',
           type: 'multipart/related',
           childNodes: [
             { part: '1.1', type: 'text/html' },
@@ -39,13 +65,13 @@ describe('planBodyParts', () => {
           dispositionParameters: { filename: 'Invoice.pdf' },
           size: 5000,
         },
-        { part: '3', type: 'message/rfc822', size: 900 },
+        attachedEmail('3'),
         { part: '4', type: 'text/plain', disposition: 'attachment', parameters: { name: 'notes.txt' } },
       ],
     }
     const plan = planBodyParts(root)
-    expect(plan.html).toBe('1.1')
-    expect(plan.text).toBeNull()
+    expect(plan.html).toEqual(['1.1'])
+    expect(plan.text).toEqual([])
     expect(plan.attachments).toEqual([
       {
         part: '1.2',
@@ -61,15 +87,95 @@ describe('planBodyParts', () => {
     ])
   })
 
-  it('skips a second unnamed text part rather than listing it', () => {
+  it('shows a bounce’s own notice, not the returned message inside it', () => {
+    const bounce: BodyNode = {
+      type: 'multipart/report',
+      childNodes: [
+        { part: '1', type: 'text/plain' },
+        { part: '2', type: 'message/delivery-status', size: 300 },
+        attachedEmail('3'),
+      ],
+    }
+    const plan = planBodyParts(bounce)
+    expect(plan.html).toEqual([])
+    expect(plan.text).toEqual(['1'])
+    expect(plan.attachments.map((a) => [a.part, a.contentType])).toEqual([
+      ['2', 'message/delivery-status'],
+      ['3', 'message/rfc822'],
+    ])
+  })
+
+  it('a message forwarded as an attachment is a file, not the body', () => {
+    const plan = planBodyParts({
+      type: 'multipart/mixed',
+      childNodes: [{ part: '1', type: 'text/plain' }, attachedEmail('2')],
+    })
+    expect(plan).toMatchObject({
+      html: [],
+      text: ['1'],
+      attachments: [{ part: '2', filename: 'attachment.eml' }],
+    })
+  })
+
+  it('keeps every inline text part in order, as Apple Mail sends html, pdf, html', () => {
     const plan = planBodyParts({
       type: 'multipart/mixed',
       childNodes: [
-        { part: '1', type: 'text/plain' },
-        { part: '2', type: 'text/plain' },
+        { part: '1', type: 'text/html' },
+        { part: '2', type: 'application/pdf', disposition: 'inline', parameters: { name: 'a.pdf' } },
+        { part: '3', type: 'text/html' },
+        { part: '4', type: 'text/plain' },
+        { part: '5', type: 'text/plain' },
       ],
     })
-    expect(plan).toEqual({ html: null, text: '1', attachments: [] })
+    expect(plan.html).toEqual(['1', '3'])
+    expect(plan.text).toEqual(['4', '5'])
+    expect(plan.attachments.map((a) => a.part)).toEqual(['2'])
+  })
+
+  it('limits inline images and attachments, so one email can’t tie Ordo up', () => {
+    const images = Array.from({ length: INLINE_IMAGES_MAX + 10 }, (_, i) => ({
+      part: `1.${i + 2}`,
+      type: 'image/png',
+      id: `<i${i}@x>`,
+    }))
+    const files = Array.from({ length: ATTACHMENTS_MAX + 10 }, (_, i) => ({
+      part: `${i + 2}`,
+      type: 'application/pdf',
+      disposition: 'attachment',
+    }))
+    const plan = planBodyParts({
+      type: 'multipart/mixed',
+      childNodes: [
+        { part: '1', type: 'multipart/related', childNodes: [{ part: '1.1', type: 'text/html' }, ...images] },
+        ...files,
+      ],
+    })
+    expect(plan.attachments.filter((a) => a.inline)).toHaveLength(INLINE_IMAGES_MAX)
+    expect(plan.attachments.length).toBeLessThanOrEqual(ATTACHMENTS_MAX)
+  })
+})
+
+describe('chooseInlineImages', () => {
+  it('lists the inline images it won’t show as attachments instead of dropping them', () => {
+    const img = (part: string, contentId: string, contentType = 'image/png', size = 100) => ({
+      part,
+      filename: `${part}.png`,
+      contentType,
+      size,
+      contentId,
+      inline: true,
+    })
+    const all = [
+      img('1', 'used'),
+      img('2', 'unused'),
+      img('3', 'tiff', 'image/tiff'),
+      img('4', 'huge', 'image/png', 4000),
+      img('5', 'also'),
+    ]
+    const chosen = chooseInlineImages(all, new Set(['used', 'tiff', 'huge', 'also']), 1000)
+    expect(chosen.map((a) => a.part)).toEqual(['1', '5'])
+    expect(all.map((a) => a.inline)).toEqual([true, false, false, false, true])
   })
 })
 

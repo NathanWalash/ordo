@@ -15,12 +15,16 @@ export interface BodyNode {
 
 /** Which parts of a message to download to show it. */
 export interface BodyPlan {
-  /** Part number of the HTML body, if any. */
-  html: string | null
-  /** Part number of the plain-text body, if any. */
-  text: string | null
+  /** Part numbers of the HTML body, in order (Apple Mail splits it around inline attachments). */
+  html: string[]
+  /** Part numbers of the plain-text body, in order. */
+  text: string[]
   attachments: AttachmentInfo[]
 }
+
+/** At most this many attachments are listed, and this many inline images shown, per message. */
+export const ATTACHMENTS_MAX = 100
+export const INLINE_IMAGES_MAX = 50
 
 const ATTACHMENT_NAME_MAX = 200
 
@@ -59,32 +63,20 @@ const lower = (s: string | undefined) => (s ?? '').toLowerCase()
  * with a Content-ID are kept as inline attachments, so `cid:` references in the HTML can be shown.
  */
 export function planBodyParts(root: BodyNode): BodyPlan {
-  const plan: BodyPlan = { html: null, text: null, attachments: [] }
-  const visit = (node: BodyNode, isRoot: boolean) => {
-    const type = lower(node.type)
-    if (node.childNodes?.length) {
-      for (const child of node.childNodes) visit(child, false)
-      return
-    }
-    // A single-part message has no part number: its body is part 1.
-    const part = node.part ?? (isRoot ? '1' : null)
-    if (!part) return
+  const plan: BodyPlan = { html: [], text: [], attachments: [] }
+  let inlineImages = 0
+
+  const attach = (node: BodyNode, part: string, type: string) => {
+    if (plan.attachments.length >= ATTACHMENTS_MAX) return
     const disposition = lower(node.disposition)
     const filename = node.dispositionParameters?.['filename'] ?? node.parameters?.['name']
-    const isAttachment = disposition === 'attachment' || (Boolean(filename) && !type.startsWith('text/'))
-    if (!isAttachment && type === 'text/html' && plan.html === null) {
-      plan.html = part
-      return
-    }
-    if (!isAttachment && type === 'text/plain' && plan.text === null) {
-      plan.text = part
-      return
-    }
-    if (type.startsWith('multipart/')) return
-    // A second text part with no name (a signature, a footer) isn't worth listing as a file.
-    if (!isAttachment && type.startsWith('text/') && !filename) return
     const contentId = node.id?.replace(/^<|>$/g, '').trim() || undefined
-    const inline = disposition !== 'attachment' && type.startsWith('image/') && Boolean(contentId)
+    const inline =
+      disposition !== 'attachment' &&
+      type.startsWith('image/') &&
+      Boolean(contentId) &&
+      inlineImages < INLINE_IMAGES_MAX
+    if (inline) inlineImages++
     plan.attachments.push({
       part,
       filename: safeFilename(filename, `attachment${EXTENSIONS[type] ?? ''}`),
@@ -94,8 +86,74 @@ export function planBodyParts(root: BodyNode): BodyPlan {
       inline,
     })
   }
-  visit(root, true)
+
+  const visit = (node: BodyNode, isRoot: boolean, into: BodyPlan) => {
+    const type = lower(node.type)
+    // A single-part message has no part number: its body is part 1.
+    const part = node.part ?? (isRoot ? '1' : null)
+    // An attached or returned email is a file, whatever is inside it.
+    if (type.startsWith('message/')) {
+      if (part) attach(node, part, type)
+      return
+    }
+    if (node.childNodes?.length) {
+      if (type !== 'multipart/alternative') {
+        for (const child of node.childNodes) visit(child, false, into)
+        return
+      }
+      // Alternatives: the last version with HTML and the first with plain text, not all of them.
+      const versions = node.childNodes.map((child) => {
+        const v: BodyPlan = { html: [], text: [], attachments: [] }
+        visit(child, false, v)
+        return v
+      })
+      into.html.push(...([...versions].reverse().find((v) => v.html.length)?.html ?? []))
+      into.text.push(...(versions.find((v) => v.text.length)?.text ?? []))
+      return
+    }
+    if (!part) return
+    const disposition = lower(node.disposition)
+    const filename = node.dispositionParameters?.['filename'] ?? node.parameters?.['name']
+    const isAttachment = disposition === 'attachment' || (Boolean(filename) && !type.startsWith('text/'))
+    if (!isAttachment && type === 'text/html') into.html.push(part)
+    else if (!isAttachment && type === 'text/plain') into.text.push(part)
+    else if (!isAttachment && type.startsWith('text/') && !filename) return
+    else if (!type.startsWith('multipart/')) attach(node, part, type)
+  }
+  visit(root, true, plan)
   return plan
+}
+
+/** At most this many HTML (and this many plain-text) parts are joined into a body. */
+export const BODY_PARTS_MAX = 20
+
+const SHOWN_IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp)$/
+
+/**
+ * The inline images to download and show: ones the HTML uses, of a type Ordo shows, that fit
+ * the budget by their reported size. Every other "inline" image is marked as an attachment, so
+ * it's listed rather than vanishing.
+ */
+export function chooseInlineImages(
+  attachments: AttachmentInfo[],
+  used: Set<string>,
+  budget: number,
+): AttachmentInfo[] {
+  const out: AttachmentInfo[] = []
+  let left = budget
+  for (const a of attachments) {
+    if (!a.inline) continue
+    const cid = a.contentId?.toLowerCase()
+    // Base64 is a third bigger than the image it holds.
+    const size = Math.round((a.size * 3) / 4)
+    if (!cid || !used.has(cid) || !SHOWN_IMAGE_TYPES.test(a.contentType) || size > left) {
+      a.inline = false
+      continue
+    }
+    left -= size
+    out.push(a)
+  }
+  return out
 }
 
 /** Content-IDs the HTML refers to with `cid:` (lower-cased, without angle brackets). */
