@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Inbox, Sparkles, Wallet, ChevronRight, CalendarDays } from 'lucide-react'
+import { Inbox, Sparkles, Wallet, ChevronRight, CalendarDays, SquareKanban } from 'lucide-react'
 import type { Route } from '../routes'
 
 function greeting(d = new Date()) {
@@ -37,6 +37,13 @@ export function HomePage({ onNavigate }: { onNavigate: (r: Route) => void }) {
           title="Calendar"
           detail="Your iCloud calendars by month, week or as an agenda."
           onClick={() => onNavigate('calendar')}
+        />
+        <Row
+          icon={<SquareKanban size={18} />}
+          tint="var(--label-purple)"
+          title="Boards"
+          detail="Kanban boards for plans and projects, with due dates on the Calendar."
+          onClick={() => onNavigate('boards')}
         />
         <Row
           icon={<Wallet size={18} />}

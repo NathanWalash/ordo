@@ -60,7 +60,8 @@ export function toItems(
       key: `overlay|${o.id}`,
       title: o.title,
       start: startOfDay(o.date),
-      end: addDays(startOfDay(o.date), 1),
+      // A card's date range runs to the day after its last day, like an all-day event.
+      end: addDays(startOfDay(o.until && o.until > o.date ? o.until : o.date), 1),
       allDay: true,
       overlay: o,
     })),

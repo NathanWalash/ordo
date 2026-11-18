@@ -78,7 +78,9 @@ function AgendaRow({ item, day, onOpen }: { item: CalendarItem; day: Date; onOpe
   const detail =
     item.type === 'event'
       ? [item.event.location, item.calendar?.name].filter(Boolean).join(' · ')
-      : [OVERLAY_LABELS[item.overlay.kind], formatAmount(item.overlay.amount)].filter(Boolean).join(' · ')
+      : [OVERLAY_LABELS[item.overlay.kind], item.overlay.detail, formatAmount(item.overlay.amount)]
+          .filter(Boolean)
+          .join(' · ')
   return (
     <button
       type="button"

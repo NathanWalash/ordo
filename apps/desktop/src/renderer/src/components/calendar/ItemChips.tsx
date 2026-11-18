@@ -1,11 +1,12 @@
 import type { MouseEvent } from 'react'
-import { Hourglass, Receipt, RefreshCw } from 'lucide-react'
+import { Hourglass, Receipt, RefreshCw, SquareKanban } from 'lucide-react'
 import type { CalendarOverlayItem } from '@ordo/shared'
 import { fill, formatTimeShort, ink, type CalendarItem, type OpenItem } from './model'
 import { formatAmount } from './overlays'
 
 export function OverlayIcon({ kind, size = 11 }: { kind: CalendarOverlayItem['kind']; size?: number }) {
-  const Icon = kind === 'bill' ? Receipt : kind === 'renewal' ? RefreshCw : Hourglass
+  const Icon =
+    kind === 'bill' ? Receipt : kind === 'renewal' ? RefreshCw : kind === 'card' ? SquareKanban : Hourglass
   return <Icon size={size} className="shrink-0" aria-hidden="true" />
 }
 

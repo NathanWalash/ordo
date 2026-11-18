@@ -27,6 +27,7 @@ import { MonthView } from '../components/calendar/MonthView'
 import { WeekView } from '../components/calendar/WeekView'
 import { firstDayOfWeek, toItems, viewTitle, type CalendarItem } from '../components/calendar/model'
 import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
+import { CreateCardSheet } from '../components/boards/CreateCardSheet'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
 interface Props {
@@ -350,6 +351,9 @@ function CalendarBrowser({
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [overlays, setOverlays] = useState<CalendarOverlayItem[]>([])
   const [selected, setSelected] = useState<{ item: CalendarItem; anchor: DOMRect } | null>(null)
+  const [creating, setCreating] = useState<Extract<CalendarItem, { type: 'event' }> | null>(null)
+  const [created, setCreated] = useState<string | null>(null)
+  const [overlayKey, setOverlayKey] = useState(0)
   const firstDay = useMemo(() => firstDayOfWeek(), [])
   const range = useMemo(() => visibleRange(view, cursor, firstDay), [view, cursor, firstDay])
 
@@ -360,7 +364,13 @@ function CalendarBrowser({
     return () => {
       live = false
     }
-  }, [loadEvents, range, reloadKey])
+  }, [loadEvents, range, reloadKey, overlayKey])
+
+  useEffect(() => {
+    if (!created) return
+    const t = setTimeout(() => setCreated(null), 6000)
+    return () => clearTimeout(t)
+  }, [created])
 
   // Keep "today" right if the app stays open past midnight.
   useEffect(() => {
@@ -391,7 +401,7 @@ function CalendarBrowser({
   const title = viewTitle(view, cursor, range)
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="relative flex h-full min-h-0">
       <CalendarList
         title={listTitle}
         calendars={calendars}
@@ -445,7 +455,51 @@ function CalendarBrowser({
           {view === 'agenda' && <AgendaView range={range} today={today} items={items} onOpen={open} />}
         </div>
       </div>
-      {selected && <ItemPopover item={selected.item} anchor={selected.anchor} onClose={close} />}
+      {selected && (
+        <ItemPopover
+          item={selected.item}
+          anchor={selected.anchor}
+          onClose={close}
+          onOpenRoute={(route) => {
+            window.location.hash = `/${route}`
+          }}
+          onCreateCard={(item) => {
+            setSelected(null)
+            setCreating(item)
+          }}
+        />
+      )}
+      {creating && (
+        <CreateCardSheet
+          event={creating.event}
+          calendarName={creating.calendar?.name}
+          onClose={() => setCreating(null)}
+          onCreated={(id) => {
+            setCreating(null)
+            setCreated(id)
+            setOverlayKey((k) => k + 1)
+          }}
+        />
+      )}
+      {created && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center">
+          <div
+            role="status"
+            className="glass-panel pointer-events-auto flex h-10 items-center gap-3 rounded-xl pr-1.5 pl-4 text-[13px]"
+          >
+            Card added to Boards.
+            <button
+              type="button"
+              onClick={() => {
+                window.location.hash = `/boards?card=${encodeURIComponent(created)}`
+              }}
+              className="h-7 rounded-md px-2 font-medium text-accent hover:bg-hover"
+            >
+              Open
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

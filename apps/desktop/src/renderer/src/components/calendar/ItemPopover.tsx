@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import { MapPin, Repeat, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { ArrowRight, MapPin, Repeat, SquareKanban, X } from 'lucide-react'
 import { OverlayIcon } from './ItemChips'
 import { describeWhen, type CalendarItem } from './model'
 import { formatAmount, OVERLAY_LABELS } from './overlays'
@@ -12,10 +12,16 @@ export function ItemPopover({
   item,
   anchor,
   onClose,
+  onOpenRoute,
+  onCreateCard,
 }: {
   item: CalendarItem
   anchor: DOMRect
   onClose: () => void
+  /** Show an overlay item where it came from (it has a `route`). */
+  onOpenRoute?: (route: string) => void
+  /** Offer "Create card…" for events. */
+  onCreateCard?: (item: Extract<CalendarItem, { type: 'event' }>) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
 
@@ -109,11 +115,34 @@ export function ItemPopover({
         <div className="flex items-center gap-2 border-t border-sep px-4 py-2.5 text-[12px] text-ink-2">
           <OverlayIcon kind={item.overlay.kind} size={13} />
           {OVERLAY_LABELS[item.overlay.kind]}
+          {item.overlay.detail && <span className="truncate text-ink-3">· {item.overlay.detail}</span>}
           {item.overlay.amount && (
             <span className="ml-auto tabular-nums text-ink">{formatAmount(item.overlay.amount)}</span>
           )}
         </div>
       )}
+      {item.type === 'overlay' && item.overlay.route && onOpenRoute && (
+        <PopoverAction onClick={() => onOpenRoute(item.overlay.route!)}>
+          <ArrowRight size={13} /> Open in Boards
+        </PopoverAction>
+      )}
+      {item.type === 'event' && onCreateCard && (
+        <PopoverAction onClick={() => onCreateCard(item)}>
+          <SquareKanban size={13} /> Create card from this…
+        </PopoverAction>
+      )}
     </div>
+  )
+}
+
+function PopoverAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 border-t border-sep px-4 py-2.5 text-left text-[12px] font-medium text-accent hover:bg-hover"
+    >
+      {children}
+    </button>
   )
 }

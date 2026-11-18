@@ -1,5 +1,15 @@
 import type { ReactNode } from 'react'
-import { CalendarDays, History, House, Inbox, Receipt, Sparkles, Wallet, Settings } from 'lucide-react'
+import {
+  CalendarDays,
+  History,
+  House,
+  Inbox,
+  Receipt,
+  Sparkles,
+  SquareKanban,
+  Wallet,
+  Settings,
+} from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import type { Route } from '../routes'
 
@@ -26,6 +36,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           label="Calendar"
           active={route === 'calendar'}
           onClick={() => onNavigate('calendar')}
+        />
+        <Item
+          icon={<SquareKanban size={15} />}
+          label="Boards"
+          active={route === 'boards'}
+          onClick={() => onNavigate('boards')}
         />
       </div>
 
