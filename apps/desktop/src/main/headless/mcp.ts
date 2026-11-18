@@ -1,6 +1,7 @@
-import { createReadStream } from 'node:fs'
+import { createReadStream, fstatSync } from 'node:fs'
 import { Socket } from 'node:net'
-import type { Readable, Writable } from 'node:stream'
+import { Readable, type Writable } from 'node:stream'
+import { isatty, ReadStream } from 'node:tty'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -62,7 +63,10 @@ export interface McpOptions {
 
 export function createMcpServer(
   services: OrdoServices,
-  options: Pick<McpOptions, 'allowChanges'>,
+  options: Pick<McpOptions, 'allowChanges'> & {
+    /** Told about each tool's work as it starts, so the server can let it finish before exiting. */
+    track?: (work: Promise<unknown>) => void
+  },
 ): McpServer {
   const server = new McpServer(
     { name: 'ordo', version: services.version },
@@ -85,9 +89,12 @@ export function createMcpServer(
   ): Promise<CallToolResult> => {
     try {
       const command = commandFrom(name, input)
-      return toToolResult(
-        await runCommand(services, command, { allowChanges: options.allowChanges, offset: paging?.offset }),
-      )
+      const work = runCommand(services, command, {
+        allowChanges: options.allowChanges,
+        offset: paging?.offset,
+      })
+      options.track?.(work)
+      return toToolResult(await work)
     } catch (err) {
       if (err instanceof UsageError) return toToolResult({ ok: false, code: 'usage', message: err.message })
       process.stderr.write(`${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`)
@@ -329,26 +336,49 @@ export function createMcpServer(
  * Standard input as a stream. Electron on Windows replaces `process.stdin` with an empty stream
  * that has already ended (lib/common/init.ts, "Always returns EOF for stdin stream"), so the MCP
  * server saw end-of-input the moment it started and exited as a client connected. There, read
- * file descriptor 0 directly, the way Node itself sets up stdin: a socket for the pipe an MCP
- * client gives us, or a file stream when input is redirected from a file.
+ * file descriptor 0 directly, the way Node itself sets up stdin: a file stream for a file
+ * (`< requests.jsonl`), a TTY stream for a console, a socket for the pipe an MCP client gives
+ * us, and an already-ended stream when there's no usable standard input at all.
  */
 export function stdinFor(platform: NodeJS.Platform = process.platform, fd = 0): Readable {
   if (platform !== 'win32') return process.stdin
+  let isFile = false
+  try {
+    isFile = fstatSync(fd).isFile()
+  } catch {
+    // Not a file, or not open: tried as a pipe below.
+  }
+  if (isFile) return createReadStream('', { fd, autoClose: false })
+  if (isatty(fd)) return new ReadStream(fd)
   try {
     return new Socket({ fd, readable: true, writable: false })
   } catch {
-    // Not a pipe or socket (ERR_INVALID_FD_TYPE): a file, or a console.
-    return createReadStream('', { fd, autoClose: false })
+    return Readable.from([])
   }
 }
 
+/** How long to wait, after the client has gone, for calls already running to finish. */
+const DRAIN_MS = 5 * 60_000
+
 /**
- * Serve MCP on stdin/stdout until the client hangs up, then answer every request already
- * received. A client that hangs up mid-call (a clean-up, an import) mustn't cut it short: Ordo
- * would exit before saving the record that makes a clean-up undoable.
+ * Serve MCP on stdin/stdout until the client hangs up, then let the tool calls already running
+ * finish (up to `drainMs`). A client that hangs up or cancels mid-call (a clean-up, an import)
+ * mustn't cut it short: the tools don't stop when cancelled, and Ordo would exit while one was
+ * still moving mail, before saving the record that makes it undoable.
  */
-export async function serveMcp(services: OrdoServices, options: McpOptions): Promise<void> {
-  const server = createMcpServer(services, options)
+export async function serveMcp(
+  services: OrdoServices,
+  options: McpOptions & { drainMs?: number },
+): Promise<void> {
+  const running = new Set<Promise<unknown>>()
+  const server = createMcpServer(services, {
+    allowChanges: options.allowChanges,
+    track: (work) => {
+      running.add(work)
+      const done = () => void running.delete(work)
+      work.then(done, done)
+    },
+  })
   const stdin = options.stdin ?? stdinFor()
   const stdout = options.stdout ?? process.stdout
   const transport = new StdioServerTransport(stdin, stdout)
@@ -356,40 +386,24 @@ export async function serveMcp(services: OrdoServices, options: McpOptions): Pro
     transport.onclose = () => resolve()
     stdin.once('end', () => resolve())
     stdin.once('close', () => resolve())
+    stdin.once('error', () => resolve())
   })
-
-  // Requests received and not yet answered. Counted before the server sees them (the server
-  // wraps onmessage and calls ours first), and done once the answer has been written.
-  const pending = new Set<string | number>()
-  let answered: (() => void) | null = null
-  transport.onmessage = (message) => {
-    if ('method' in message && 'id' in message) pending.add(message.id)
-    else if ('method' in message && message.method === 'notifications/cancelled') {
-      const id = (message.params as { requestId?: string | number } | undefined)?.requestId
-      if (id !== undefined) pending.delete(id)
-    }
-  }
-  const send = transport.send.bind(transport)
-  transport.send = (message) => {
-    const sent = send(message)
-    if (!('method' in message) && 'id' in message && message.id !== undefined) {
-      pending.delete(message.id)
-      if (!pending.size) answered?.()
-    }
-    return sent
-  }
 
   await server.connect(transport)
   options.log?.(
     `Ordo MCP server ready on stdio (${options.allowChanges ? 'changes allowed, each needs confirm: true' : 'read-only'}).`,
   )
   await closed
-  if (pending.size) await new Promise<void>((resolve) => (answered = resolve))
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms).unref())
+  // Requests read just before the end reach their tool, and quick answers get written.
+  await wait(25)
+  if (running.size) {
+    options.log?.(`Waiting for ${running.size} running call(s) to finish before exiting.`)
+    await Promise.race([Promise.allSettled([...running]), wait(options.drainMs ?? DRAIN_MS)])
+    await wait(25)
+  }
   // Let the last answers reach the client (a write's callback runs after the ones before it),
   // but don't wait long for a client that has gone.
-  await Promise.race([
-    new Promise((resolve) => stdout.write('', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 1_000).unref()),
-  ])
+  await Promise.race([new Promise((resolve) => stdout.write('', resolve)), wait(1_000)])
   await server.close().catch(() => {})
 }

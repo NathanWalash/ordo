@@ -159,8 +159,9 @@ Shapes, trimmed:
 ## MCP server
 
 `--headless --mcp` speaks MCP over stdio only, using the official TypeScript SDK. Logs go to
-stderr. The server exits when the client closes the connection, after finishing and answering any
-call already running, so a clean-up a client abandons still finishes and can be undone.
+stderr. The server exits when the client closes the connection, after finishing any call already
+running (waiting at most five minutes), so a clean-up a client cancels or abandons still finishes
+and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
 `ordo_calendar_events`, `ordo_bills`, `ordo_transactions`, `ordo_balances`, `ordo_scan`,
