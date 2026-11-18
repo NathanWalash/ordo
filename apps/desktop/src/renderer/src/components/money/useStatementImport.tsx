@@ -1,4 +1,5 @@
 import { useState, type DragEvent } from 'react'
+import { decodeStatement } from '@ordo/money-core'
 import type { ImportOutcome, StatementFile } from '@ordo/shared'
 import { OverContent } from '../Sheet'
 import { ImportSheet } from './ImportSheet'
@@ -40,7 +41,10 @@ export function useStatementImport(onImported: (o: Extract<ImportOutcome, { ok: 
         setFile({ fileName: f.name, text: '', error: 'That file is too big to be a bank statement export.' })
         return
       }
-      void f.text().then((text) => setFile({ fileName: f.name, text }))
+      void f
+        .arrayBuffer()
+        .then((buffer) => setFile({ fileName: f.name, text: decodeStatement(new Uint8Array(buffer)) }))
+        .catch(() => setFile({ fileName: f.name, text: '', error: 'Ordo couldn’t read that file.' }))
     },
   }
 

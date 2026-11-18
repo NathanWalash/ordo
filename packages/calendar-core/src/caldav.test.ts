@@ -7,6 +7,7 @@ import {
   CalendarConnectionError,
   CalendarWriteError,
   inside,
+  CalendarUnavailableError,
   isReadOnly,
   normaliseColor,
 } from './caldav'
@@ -90,13 +91,20 @@ describe('CalDavProvider writes', () => {
       [404, 'gone'],
       [410, 'gone'],
       [403, 'forbidden'],
-      [500, 'failed'],
+      [400, 'failed'],
     ]
     for (const [code, kind] of kinds) {
       status = code
       const attempt = provider().updateResource(base, `${base}a.ics`, 'x', '"e1"')
       await expect(attempt).rejects.toBeInstanceOf(CalendarWriteError)
       await expect(attempt).rejects.toMatchObject({ kind, status: code })
+    }
+    // Busy or down: nothing was changed, and it's worth trying again.
+    for (const code of [429, 500, 503]) {
+      status = code
+      await expect(provider().updateResource(base, `${base}a.ics`, 'x', '"e1"')).rejects.toBeInstanceOf(
+        CalendarUnavailableError,
+      )
     }
     status = 401
     await expect(provider().deleteResource(base, `${base}a.ics`, '"e1"')).rejects.toBeInstanceOf(
@@ -185,5 +193,55 @@ describe('CalDavProvider errors', () => {
       timeoutMs: 2000,
     })
     await expect(p.connect()).rejects.toBeInstanceOf(CalendarConnectionError)
+  })
+})
+
+describe('CalDavProvider when the server is busy', () => {
+  let server: Server
+  let url: string
+  beforeAll(async () => {
+    // Like iCloud throttling or down for maintenance.
+    server = createServer((_req, res) => {
+      res.writeHead(503, { 'Retry-After': '120' })
+      res.end('Service Unavailable')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('reports it as CalendarUnavailableError, not a wrong password', async () => {
+    const p = new CalDavProvider({
+      serverUrl: url,
+      username: 'you@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+    })
+    const err = await p.connect().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(CalendarUnavailableError)
+    expect(err).not.toBeInstanceOf(CalendarAuthError)
+  })
+})
+
+describe('CalDavProvider when discovery is refused and then the server is busy', () => {
+  let server: Server
+  let url: string
+  beforeAll(async () => {
+    // .well-known isn't supported (405, which discovery tolerates); the account itself is busy.
+    server = createServer((req, res) => {
+      res.writeHead(req.url?.includes('.well-known') ? 405 : 503)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('reports the 503, not the tolerated 405', async () => {
+    const p = new CalDavProvider({
+      serverUrl: url,
+      username: 'you@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+    })
+    await expect(p.connect()).rejects.toBeInstanceOf(CalendarUnavailableError)
   })
 })

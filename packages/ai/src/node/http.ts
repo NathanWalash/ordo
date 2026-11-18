@@ -42,8 +42,13 @@ export async function requestJson(url: string, opts: HttpOptions): Promise<unkno
       body = undefined
     }
     if (!res.ok) {
-      const why = errorText(body) ?? (text.slice(0, 200) || res.statusText)
-      throw new AiError('failed', `${opts.what} returned an error (${res.status}): ${why}`)
+      // The server's own reason, kept short: it helps (a model not loaded) but can be any text.
+      const why = (errorText(body) ?? text.slice(0, 200)).replace(/\s+/g, ' ').trim().slice(0, 80)
+      throw new AiError(
+        'failed',
+        `${opts.what} couldn’t answer (error ${res.status}${why ? `: ${why}` : ''}). ` +
+          `Check it’s running with a model loaded, then try again.`,
+      )
     }
     if (body === undefined) throw new AiError('bad-response', `${opts.what} sent a reply that isn't JSON.`)
     return body

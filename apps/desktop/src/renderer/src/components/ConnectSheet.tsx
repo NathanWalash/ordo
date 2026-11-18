@@ -109,15 +109,14 @@ export function ConnectSheet({ onClose, onConnected }: Props) {
           Saved in your Keychain. Ordo only reads message headers until you choose to clean up.
         </div>
 
-        {result && (
-          <p
-            role="status"
-            className={`flex items-center gap-1.5 text-[12px] ${result.ok ? 'text-ink-2' : 'text-danger'}`}
-          >
-            {result.ok && <CircleCheck size={14} className="text-success" />}
-            {result.ok ? `Signed in as ${result.email}.` : result.message}
-          </p>
-        )}
+        {/* Always in the page, so screen readers announce the result when it appears. */}
+        <p
+          role="status"
+          className={`flex items-start gap-1.5 text-[12px] leading-snug empty:hidden ${result?.ok ? 'text-ink-2' : 'text-danger'}`}
+        >
+          {result?.ok && <CircleCheck size={14} className="mt-px shrink-0 text-success" />}
+          {result && (result.ok ? `Signed in as ${result.email}.` : result.message)}
+        </p>
 
         <div className="flex items-center gap-2 pt-1">
           <Button disabled={busy !== null} onClick={() => void run('test')}>

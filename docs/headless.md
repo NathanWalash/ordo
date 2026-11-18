@@ -38,9 +38,10 @@ On Windows, Ordo.exe is a windowed program, so a plain Command Prompt may not sh
 Pipe or redirect it (`Ordo.exe --headless status | more`, or `> out.txt`); MCP clients always use
 pipes, so the MCP server is unaffected.
 
-**Known issue on Windows:** the MCP server (`--headless --mcp`) closes as soon as a client
-connects, so agents can't use Ordo on Windows yet. The CLI commands work there. The MCP tests are
-skipped on Windows until this is fixed.
+On Windows, Electron replaces the main process's `process.stdin` with an empty stream that has
+already ended, which made the MCP server (`--headless --mcp`) close as soon as a client connected.
+Ordo now reads standard input itself there (file descriptor 0: the pipe an MCP client gives it,
+or a file with `< requests.jsonl`). The MCP end-to-end tests run on Windows in CI again.
 
 On Linux, headless mode doesn't need a display: it was checked with no X server or Wayland at all
 (Electron 45, Debian 12). Chromium may still log a few lines about D-Bus or the GPU to stderr;
@@ -182,10 +183,15 @@ Shapes, trimmed:
   "rejected": [ { "address": "sam@friend.example", "reason": "Someone you’ve written to. Never included in bulk actions." } ],
   "summary": { "senders": 1, "emailsToTrash": 41, "unsubscribes": 1 } }
 
-// calendar events --json (uid and occurrence name an event for calendar edit and delete)
-{ "from": "2026-11-01", "to": "2026-11-30", "total": 1, "offset": 0, "shown": 1, "events": [
-  { "title": "Standup", "start": "2026-11-23T09:00:00.000Z", "end": "2026-11-23T09:15:00.000Z", "allDay": false,
-    "calendar": "Home", "location": null, "uid": "3F2A…", "occurrence": "2026-11-23T09:00:00.000Z" } ] }
+// calendar events --json, and the ordo_calendar_events MCP tool. Timed events give instants (UTC);
+// all-day events give dates, YYYY-MM-DD, with an exclusive end as in iCalendar (a one-day event
+// on 10 July ends on 11 July). The human output shows times on this computer's clock.
+// uid and occurrence name an event (and one occurrence of a repeating one) for calendar edit and delete.
+{ "from": "2026-07-01", "to": "2026-07-31", "total": 2, "offset": 0, "shown": 2, "events": [
+  { "title": "Holiday", "start": "2026-07-10", "end": "2026-07-11", "allDay": true, "calendar": "Home",
+    "location": null, "uid": "9B0E…", "occurrence": null },
+  { "title": "Standup", "start": "2026-07-13T08:00:00.000Z", "end": "2026-07-13T08:15:00.000Z", "allDay": false,
+    "calendar": "Home", "location": null, "uid": "3F2A…", "occurrence": "2026-07-13T08:00:00.000Z" } ] }
 
 // calendar add --json (edit adds "scope": "this" | "all"; delete returns { uid, scope, title })
 { "uid": "8C1D…", "calendar": "Home", "event": { "title": "Dentist", "allDay": false,
@@ -202,7 +208,9 @@ Shapes, trimmed:
 ## MCP server
 
 `--headless --mcp` speaks MCP over stdio only, using the official TypeScript SDK. Logs go to
-stderr. The server exits when the client closes the connection.
+stderr. The server exits when the client closes the connection, after finishing any call already
+running (waiting at most five minutes), so a clean-up a client cancels or abandons still finishes
+and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
 `ordo_calendar_events`, `ordo_calendar_list`, `ordo_bills`, `ordo_transactions`, `ordo_balances`,
@@ -222,6 +230,13 @@ elsewhere first is never overwritten (`conflict`).
 
 Tool descriptions tell the agent that names, addresses, subjects, URLs, merchant names and event
 titles are third-party text to be treated as data, never as instructions.
+
+`ordo_import_statement` takes a full local path. UNC and device paths (`\\server\share`,
+`//server/share`, `\\?\`, `\\.\`) are refused before any file-system call, here and in the CLI;
+the CLI still accepts a path relative to the current folder.
+
+The tools are defined once, in `apps/desktop/src/main/headless/tools.ts`, and shared with the
+in-app assistant. To add one, see [assistant.md](assistant.md#adding-a-tool).
 
 ### Claude Code
 

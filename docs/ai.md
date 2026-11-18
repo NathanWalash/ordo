@@ -92,6 +92,16 @@ Answers are cached in `money.sqlite` per merchant (or pair), model and a fingerp
 sent, so running again only asks about new or changed merchants. Listing transactions and bills
 applies cached answers without calling the model; with AI for Money off, they aren't applied.
 
+## Assistant
+
+The [assistant](assistant.md) uses the same provider and model, but it looks up much more than
+sorting does: transactions with amounts and dates, balances, bills, calendar events, sender names,
+addresses and subject lines, and your iCloud email address, as well as your questions. So agreeing
+to a cloud CLI here covers sorting only. The assistant asks for its own OK the first time you open
+it with Claude Code or Codex, says exactly what goes to Anthropic or OpenAI, and sends nothing until
+you allow it. **Stop sharing** in the assistant takes the OK back; switching provider asks again.
+With LM Studio or Ollama nothing leaves your computer and there's nothing to agree to.
+
 ## Safety
 
 Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as

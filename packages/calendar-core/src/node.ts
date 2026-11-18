@@ -5,6 +5,7 @@ export {
   CalendarAuthError,
   CalendarConnectionError,
   CalendarWriteError,
+  CalendarUnavailableError,
   ICLOUD_CALDAV_URL,
   inside,
   isReadOnly,
@@ -34,6 +35,7 @@ export {
 export {
   checkFeedUrl,
   describeIcs,
+  readIcs,
   FEED_MAX_BYTES,
   LOCAL_ADDRESS_MESSAGE,
   FeedError,

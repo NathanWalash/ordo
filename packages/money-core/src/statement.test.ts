@@ -11,6 +11,35 @@ function parsed(name: string, accountName = 'Test', mapping?: ColumnMapping) {
 }
 
 describe('parseCsv', () => {
+  it('keeps a quote inside an unquoted cell instead of swallowing the rows after it', () => {
+    const text =
+      'Date,Description,Amount\n13/11/2026,ARGOS 32" TV,-199.00\n14/11/2026,TESCO,-3.41\n15/11/2026,ALDI,-1.00\n'
+    expect(parseCsv(text)).toEqual([
+      ['Date', 'Description', 'Amount'],
+      ['13/11/2026', 'ARGOS 32" TV', '-199.00'],
+      ['14/11/2026', 'TESCO', '-3.41'],
+      ['15/11/2026', 'ALDI', '-1.00'],
+    ])
+    const r = parseStatement(text, { accountName: 'Test' })
+    expect(r.ok && r.transactions.map((t) => t.amount)).toEqual([-19900, -341, -100])
+  })
+
+  it('stays linear on a field full of quotes', () => {
+    for (const text of [`x${'"'.repeat(200_000)}`, `${' '.repeat(100_000)}x${'"'.repeat(100_000)}`]) {
+      const start = performance.now()
+      expect(parseCsv(text)).toHaveLength(1)
+      expect(performance.now() - start).toBeLessThan(1_000)
+    }
+  })
+
+  it('reads a semicolon file whose quoted descriptions contain commas, with decimal commas', () => {
+    const text =
+      'Date;Description;Amount\n13/11/2026;"REWE, BERLIN, DE";-3,41\n14/11/2026;"LIDL, KÖLN";-1.234,56\n'
+    expect(parseCsv(text)[1]).toEqual(['13/11/2026', 'REWE, BERLIN, DE', '-3,41'])
+    const r = parseStatement(text, { accountName: 'Test' })
+    expect(r.ok && r.transactions.map((t) => t.amount)).toEqual([-341, -123456])
+  })
+
   it('handles quotes, escaped quotes, CRLF, a BOM and blank lines', () => {
     const text = String.fromCharCode(0xfeff) + 'a,b,c\r\n"1,000","say ""hi""",x\r\n\r\n,,\n4,5,6'
     expect(parseCsv(text)).toEqual([

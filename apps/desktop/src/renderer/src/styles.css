@@ -28,6 +28,12 @@
   --glass-highlight: rgb(255 255 255 / 0.7);
   --glass-edge: rgb(0 0 0 / 0.12);
   --panel-shadow: 0 24px 60px rgb(0 0 0 / 0.2), 0 2px 8px rgb(0 0 0 / 0.08);
+  /* Assistant: a hairline ring plus layered soft shadows, and a tint of the accent. */
+  --accent-tint: color-mix(in srgb, var(--accent) 13%, transparent);
+  --warn: #c93400;
+  --warn-tint: rgb(255 149 0 / 0.12);
+  --card-shadow: 0 0 0 1px var(--sep), 0 12px 32px rgb(0 0 0 / 0.06), 0 2px 6px rgb(0 0 0 / 0.04);
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   color-scheme: light dark;
 }
 
@@ -52,6 +58,9 @@
     --glass-highlight: rgb(255 255 255 / 0.1);
     --glass-edge: rgb(0 0 0 / 0.6);
     --panel-shadow: 0 24px 60px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.3);
+    --warn: #ffb340;
+    --warn-tint: rgb(255 159 10 / 0.14);
+    --card-shadow: 0 0 0 1px var(--sep), 0 12px 32px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.2);
   }
 }
 
@@ -98,6 +107,9 @@
   --color-danger: var(--danger);
   --color-danger-strong: var(--danger-strong);
   --color-success: var(--success);
+  --color-accent-tint: var(--accent-tint);
+  --color-warn: var(--warn);
+  --color-warn-tint: var(--warn-tint);
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
 }
 
@@ -151,10 +163,94 @@ body,
   -webkit-app-region: no-drag;
 }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: 6px;
+/* In the base layer, so a component's own focus style (a utility) wins over it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+
+/* Assistant motion: surfaces pop in, messages rise in, and "Thinking" shimmers while it works. */
+@keyframes assistant-pop {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes assistant-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes assistant-shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+.assistant-pop {
+  animation: assistant-pop 260ms var(--ease-out-strong) both;
+}
+.assistant-rise {
+  animation: assistant-rise 280ms var(--ease-out-strong) both;
+}
+.shimmer-text {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--ink-3) 0%,
+    var(--ink-3) 40%,
+    var(--ink) 50%,
+    var(--ink-3) 60%,
+    var(--ink-3) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  animation: assistant-shimmer 1.8s linear infinite;
+}
+/* The panel takes focus only to hold it; it doesn't need a ring of its own. */
+.assistant-pop:focus-visible {
+  outline: none;
+}
+/* The assistant's panel: frosted, but more opaque than a sheet so text stays easy to read. */
+.assistant-surface {
+  background-color: var(--sheet);
+  border: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .assistant-surface {
+    background-color: color-mix(in srgb, var(--sheet) 92%, transparent);
+    backdrop-filter: var(--glass-filter);
+  }
+}
+.reduce-transparency .assistant-surface {
+  background-color: var(--sheet);
+  backdrop-filter: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .assistant-surface {
+    background-color: var(--sheet);
+    backdrop-filter: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    color: var(--ink-2);
+    background: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
