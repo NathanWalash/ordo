@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useFocusTrap } from './focus'
 
 /**
  * Render over the content area (the app's <main>), whatever is scrolled, leaving the
@@ -20,6 +21,8 @@ interface Props {
   busy?: boolean
   footer: ReactNode
   children: ReactNode
+  /** A selector for what to focus first; the first field by default. */
+  initialFocus?: string
 }
 
 /** Where focus goes when a sheet opens, in order of preference. */
@@ -45,15 +48,20 @@ export function Sheet({
   busy,
   footer,
   children,
+  initialFocus,
 }: Props) {
   const titleId = useId()
   const panel = useRef<HTMLFormElement>(null)
+  useFocusTrap(panel)
 
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const el = panel.current
     if (el && !el.contains(document.activeElement)) {
-      const first = FIRST_FOCUS.map((s) => el.querySelector<HTMLElement>(s)).find(Boolean)
+      // An initialFocus selector first, then an autofocused control, the first field, the default
+      // button, any button, and the sheet itself.
+      const order = initialFocus ? [initialFocus, ...FIRST_FOCUS] : FIRST_FOCUS
+      const first = order.map((s) => el.querySelector<HTMLElement>(s)).find(Boolean)
       ;(first ?? el).focus()
     }
     return () => {
@@ -61,6 +69,8 @@ export function Sheet({
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body))
         before.focus()
     }
+    // Only when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

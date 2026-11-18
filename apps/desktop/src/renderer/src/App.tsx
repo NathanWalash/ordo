@@ -9,6 +9,7 @@ import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancesPage } from './pages/FinancesPage'
 import { BillsPage } from './pages/BillsPage'
 import { CalendarPage } from './pages/CalendarPage'
+import { BoardsPage } from './pages/BoardsPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { routeFromHash, TITLES, type Route } from './routes'
@@ -156,6 +157,7 @@ export function App() {
           )}
           {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
           {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
+          {route === 'boards' && <BoardsPage onNavigate={setRoute} />}
           {route === 'money/finances' && (
             <FinancesPage onOpenSettings={() => setRoute('settings')} initialMonth={financeMonth} />
           )}

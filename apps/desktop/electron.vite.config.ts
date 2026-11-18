@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // Workspace packages ship TypeScript source, so they must be bundled, not externalised.
-const workspace = ['@ordo/shared', '@ordo/mail-core', '@ordo/ai', '@ordo/money-core']
+const workspace = ['@ordo/shared', '@ordo/mail-core', '@ordo/ai', '@ordo/money-core', '@ordo/boards-core']
 
 export default defineConfig({
   main: {

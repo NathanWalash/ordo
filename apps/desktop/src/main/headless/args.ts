@@ -55,6 +55,10 @@ const isoDay = (flag: string) =>
       return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === day
     }, `${flag} isn't a real date`)
 
+/** A board, column, label or card, by name or id. */
+const ref = (flag: string, required = `${flag} needs a value`) =>
+  z.string({ error: required }).trim().min(1, required).max(300, `${flag} is too long`)
+
 const address = z.string().trim().min(3, 'Give a sender address').max(320, 'That address is too long')
 
 /** A day (`2026-11-20`, an all-day event) or a time (`2026-11-20T09:30`). */
@@ -206,6 +210,49 @@ const COMMANDS = {
   'money sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
   'ai status': { args: [], flags: z.object({}) },
   'ai sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
+  'boards list': { args: [], flags: z.object({}) },
+  'boards cards': {
+    args: [],
+    flags: z.object({
+      board: ref('--board').optional(),
+      column: ref('--column').optional(),
+      label: z.array(ref('--label')).max(20, 'At most 20 labels').optional(),
+      archived: z.boolean().default(false),
+      limit: limit(100, 5000),
+    }),
+  },
+  'boards add-card': {
+    args: [],
+    flags: z.object({
+      board: ref('--board', 'boards add-card needs --board <name>'),
+      column: ref('--column').optional(),
+      title: z
+        .string({ error: 'boards add-card needs --title <text>' })
+        .trim()
+        .min(1, 'boards add-card needs --title <text>')
+        .max(300, '--title is too long'),
+      notes: z.string().max(20_000, '--notes is too long').optional(),
+      start: isoDay('--start').optional(),
+      due: isoDay('--due').optional(),
+      label: z.array(ref('--label')).max(20, 'At most 20 labels').optional(),
+      confirm: z.boolean().default(false),
+    }),
+  },
+  'boards move-card': {
+    args: ['card'],
+    flags: z.object({
+      card: ref('boards move-card needs a card id or title', 'boards move-card needs a card id or title'),
+      board: ref('--board').optional(),
+      column: ref('--column').optional(),
+      position: z.coerce
+        .number({ error: '--position must be a number' })
+        .int('--position must be a whole number')
+        .min(1, '--position starts at 1 (the top)')
+        .max(100_000)
+        .optional(),
+      confirm: z.boolean().default(false),
+    }),
+  },
 } as const
 
 type Specs = typeof COMMANDS
@@ -227,12 +274,14 @@ export const CHANGE_COMMANDS: ReadonlySet<CommandName> = new Set([
   'money import',
   'money sort',
   'ai sort',
+  'boards add-card',
+  'boards move-card',
   'calendar add',
   'calendar edit',
   'calendar delete',
 ])
 
-const GROUPS = new Set(['cleanup', 'calendar', 'money', 'ai'])
+const GROUPS = new Set(['cleanup', 'calendar', 'money', 'ai', 'boards'])
 
 /** How each flag is written: a switch, a value, or a value that may repeat. */
 const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
@@ -264,6 +313,12 @@ const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
   month: 'value',
   account: 'value',
   sender: 'list',
+  board: 'value',
+  column: 'value',
+  due: 'value',
+  position: 'value',
+  label: 'list',
+  archived: 'switch',
 }
 const GLOBAL_FLAGS = new Set(['json', 'allow-changes', 'help'])
 /** Flags that may be set to nothing (`--location=`), to clear a field. */

@@ -6,6 +6,7 @@ import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
 import { ASSISTANT_IPC, type AssistantEvent } from '@ordo/shared'
 import { moneyApi } from './money'
+import { boardsApi } from './boards'
 
 const api: OrdoApi = {
   app: {
@@ -80,6 +81,7 @@ const api: OrdoApi = {
     undo: (id) => ipcRenderer.invoke(CLEANUP_IPC.undo, id),
   },
   money: moneyApi,
+  boards: boardsApi,
   assistant: {
     info: () => ipcRenderer.invoke(ASSISTANT_IPC.info),
     ask: (input) => ipcRenderer.invoke(ASSISTANT_IPC.ask, input),

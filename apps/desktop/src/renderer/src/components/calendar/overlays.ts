@@ -16,6 +16,7 @@ export interface CalendarOverlaySource {
 
 export const OVERLAY_SOURCES: readonly CalendarOverlaySource[] = [
   { id: 'money', name: 'Bills and renewals', load: (range) => window.ordo.money.dueDates(range) },
+  { id: 'boards', name: 'Boards', load: (range) => window.ordo.boards.dueDates(range) },
 ]
 
 /** Items from every source in `range`. A failing source is skipped rather than hiding the rest. */
@@ -24,16 +25,20 @@ export async function loadOverlays(
   sources: readonly CalendarOverlaySource[] = OVERLAY_SOURCES,
 ): Promise<CalendarOverlayItem[]> {
   const results = await Promise.allSettled(sources.map((s) => s.load(range)))
-  return results
-    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
-    .filter((i) => i.date >= range.start && i.date < range.end)
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
+  return (
+    results
+      .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+      // A date range overlapping the start of the view still shows.
+      .filter((i) => (i.until ?? i.date) >= range.start && i.date < range.end)
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+  )
 }
 
 export const OVERLAY_LABELS: Record<CalendarOverlayItem['kind'], string> = {
   bill: 'Bill due',
   renewal: 'Renews',
   trial: 'Trial ends',
+  card: 'Card due',
 }
 
 export function formatAmount(amount: CalendarOverlayItem['amount']): string | null {

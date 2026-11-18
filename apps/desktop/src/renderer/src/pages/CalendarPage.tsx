@@ -27,6 +27,8 @@ import { MonthView } from '../components/calendar/MonthView'
 import { WeekView } from '../components/calendar/WeekView'
 import { firstDayOfWeek, toItems, viewTitle, type CalendarItem } from '../components/calendar/model'
 import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
+import { CreateCardSheet } from '../components/boards/CreateCardSheet'
+import { useToast } from '../components/boards/UndoToast'
 import { useEventEditing } from '../components/calendar/useEventEditing'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
@@ -355,6 +357,9 @@ function CalendarBrowser({
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [overlays, setOverlays] = useState<CalendarOverlayItem[]>([])
   const [selected, setSelected] = useState<{ item: CalendarItem; anchor: DOMRect } | null>(null)
+  const [creating, setCreating] = useState<Extract<CalendarItem, { type: 'event' }> | null>(null)
+  const toast = useToast()
+  const [overlayKey, setOverlayKey] = useState(0)
   const firstDay = useMemo(() => firstDayOfWeek(), [])
   const narrow = useNarrow()
   const range = useMemo(() => visibleRange(view, cursor, firstDay), [view, cursor, firstDay])
@@ -366,7 +371,7 @@ function CalendarBrowser({
     return () => {
       live = false
     }
-  }, [loadEvents, range, reloadKey])
+  }, [loadEvents, range, reloadKey, overlayKey])
 
   // Keep "today" right if the app stays open past midnight.
   useEffect(() => {
@@ -441,7 +446,7 @@ function CalendarBrowser({
   }
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="relative flex h-full min-h-0">
       <CalendarList
         title={listTitle}
         calendars={calendars}
@@ -552,9 +557,36 @@ function CalendarBrowser({
           anchor={selected.anchor}
           onClose={close}
           edit={editing.popoverEdit(selected.item, close)}
+          onOpenRoute={(route) => {
+            window.location.hash = `/${route}`
+          }}
+          onCreateCard={(item) => {
+            setSelected(null)
+            setCreating(item)
+          }}
         />
       )}
       {editing.sheets}
+      {creating && (
+        <CreateCardSheet
+          event={creating.event}
+          calendarName={creating.calendar?.name}
+          onClose={() => setCreating(null)}
+          onCreated={(id, boardName) => {
+            setCreating(null)
+            setOverlayKey((k) => k + 1)
+            toast.show(`Added to ${boardName}`, {
+              action: {
+                label: 'Open',
+                onClick: () => {
+                  window.location.hash = `/boards?card=${encodeURIComponent(id)}`
+                },
+              },
+            })
+          }}
+        />
+      )}
+      {toast.node}
     </div>
   )
 }

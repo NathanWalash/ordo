@@ -23,6 +23,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  SquareKanban,
   SquarePen,
   Square,
   Wallet,
@@ -64,6 +65,7 @@ const SUGGESTION_ICONS: Record<SuggestionIcon, ReactNode> = {
   money: <Wallet size={14} />,
   bills: <Receipt size={14} />,
   sparkles: <Sparkles size={14} />,
+  boards: <SquareKanban size={14} />,
 }
 
 /** Clicks on a card this soon after it appears are ignored, so a double press can't confirm it. */

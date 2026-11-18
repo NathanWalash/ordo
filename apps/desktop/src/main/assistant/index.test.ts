@@ -82,6 +82,7 @@ const local: AiSettings = {
   model: 'fake-model',
   sortSenders: false,
   money: false,
+  boards: false,
   cloudConsent: null,
 }
 
@@ -243,6 +244,7 @@ describe('cloud consent for the assistant', () => {
     model: 'haiku',
     sortSenders: true,
     money: true,
+    boards: false,
     cloudConsent: 'claude-cli',
   }
 

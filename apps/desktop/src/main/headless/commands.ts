@@ -1,5 +1,7 @@
 import type {
   AccountStatus,
+  BoardSummary,
+  BoardsResult,
   AiProviderStatus,
   AiSettings,
   AiSortOutcome,
@@ -79,8 +81,59 @@ export interface OrdoServices {
     status(): Promise<AiProviderStatus[]>
     sort(onProgress?: (p: AiSortProgress) => void): Promise<AiSortOutcome>
   }
+  boards: {
+    list(): BoardSummary[]
+    /** Cards by board, column and label names (or ids). */
+    cards(query: {
+      board?: string
+      column?: string
+      labels?: string[]
+      archived?: boolean
+    }): BoardsResult<BoardCardRow[]>
+    addCard(input: {
+      board: string
+      column?: string
+      title: string
+      notes?: string
+      start?: string
+      due?: string
+      labels?: string[]
+    }): Promise<BoardsResult<BoardCardRow>>
+    /** `position` 1 is the top of the column; without it the card goes to the end. */
+    moveCard(input: {
+      card: string
+      board?: string
+      column?: string
+      position?: number
+    }): Promise<BoardsResult<BoardCardRow>>
+    /**
+     * Look names up without changing anything, for a change's preview: the board, the column (or the
+     * card's own column), the card and labels, as Ordo has them.
+     */
+    resolve(query: { board?: string; column?: string; card?: string; labels?: string[] }): BoardsResult<{
+      board: string
+      column: string | null
+      card: BoardCardRow | null
+      labels: string[]
+    }>
+  }
   /** Who holds the write lock right now, if anyone. */
   lockHolder(): LockHolder | null
+}
+
+/** A card as headless mode shows it: board, column, label and field names rather than ids. */
+export interface BoardCardRow {
+  id: string
+  title: string
+  board: string | null
+  column: string | null
+  start: string | null
+  due: string | null
+  labels: string[]
+  checklist: { done: number; total: number }
+  links: number
+  fields: Record<string, string>
+  archived: boolean
 }
 
 /** Progress for long-running commands; the CLI prints it to stderr. */
@@ -143,7 +196,14 @@ const KNOWN_CODES = new Set<string>([
   'unknown',
 ])
 const fromService = (r: { error?: string; message: string }): CommandResult =>
-  fail(r.error && KNOWN_CODES.has(r.error) ? (r.error as ErrorCode) : 'failed', r.message)
+  fail(
+    r.error === 'not-found' || r.error === 'limit'
+      ? 'invalid'
+      : r.error && KNOWN_CODES.has(r.error)
+        ? (r.error as ErrorCode)
+        : 'failed',
+    r.message,
+  )
 
 /** A calendar change that didn't happen, as a headless error code. */
 function fromChange(r: Extract<CalendarChangeOutcome, { ok: false }>): CommandResult {
@@ -807,6 +867,61 @@ export async function runCommand(
           })),
         },
       }
+    }
+
+    case 'boards list':
+      return {
+        ok: true,
+        data: {
+          boards: services.boards
+            .list()
+            .map((b) => ({ id: b.id, name: b.name, cards: b.cards, overdue: b.overdue })),
+        },
+      }
+
+    case 'boards cards': {
+      const r = services.boards.cards({
+        board: command.board,
+        column: command.column,
+        labels: command.label,
+        archived: command.archived,
+      })
+      if (!r.ok) return fromService(r)
+      const p = page(r.value, command.limit, offset)
+      return {
+        ok: true,
+        data: {
+          board: command.board ?? null,
+          column: command.column ?? null,
+          total: p.total,
+          offset: p.offset,
+          shown: p.shown,
+          cards: p.items,
+        },
+      }
+    }
+
+    case 'boards add-card': {
+      const r = await services.boards.addCard({
+        board: command.board,
+        column: command.column,
+        title: command.title,
+        notes: command.notes,
+        start: command.start,
+        due: command.due,
+        labels: command.label,
+      })
+      return r.ok ? { ok: true, data: { card: r.value } } : fromService(r)
+    }
+
+    case 'boards move-card': {
+      const r = await services.boards.moveCard({
+        card: command.card,
+        board: command.board,
+        column: command.column,
+        position: command.position,
+      })
+      return r.ok ? { ok: true, data: { card: r.value } } : fromService(r)
     }
 
     case 'ai sort': {

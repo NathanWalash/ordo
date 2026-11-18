@@ -12,6 +12,8 @@ import { fakeServices } from './fake-services'
 const READ_TOOLS = [
   'ordo_balances',
   'ordo_bills',
+  'ordo_board_cards',
+  'ordo_boards',
   'ordo_calendar_events',
   'ordo_calendar_list',
   'ordo_calendar_sync',
@@ -24,6 +26,8 @@ const READ_TOOLS = [
 ]
 const CHANGE_TOOLS = [
   'ordo_ai_sort',
+  'ordo_board_add_card',
+  'ordo_board_move_card',
   'ordo_calendar_add',
   'ordo_calendar_delete',
   'ordo_calendar_edit',
@@ -70,7 +74,9 @@ describe('MCP server', () => {
     for (const name of CHANGE_TOOLS) {
       const tool = tools.find((t) => t.name === name)!
       expect(tool.inputSchema.properties).toHaveProperty('confirm')
-      expect(tool.annotations?.destructiveHint).toBe(true)
+      expect(tool.annotations?.readOnlyHint).toBe(false)
+      // Adding or moving a card loses nothing; the mail and money changes are marked destructive.
+      expect(tool.annotations?.destructiveHint).toBe(!name.startsWith('ordo_board_'))
     }
   })
 
@@ -267,6 +273,60 @@ describe('MCP server', () => {
     })
     expect(r.isError).toBe(true)
     expect(json(r)).toEqual({ error: { code: 'usage', message: '--to must be on or after --from' } })
+  })
+
+  it('lists board cards with the CLI’s rules', async () => {
+    const { client, services } = await connect(false)
+    const r = await client.callTool({
+      name: 'ordo_board_cards',
+      arguments: { board: 'Home', labels: ['Urgent'] },
+    })
+    expect(json(r)).toMatchObject({ total: 1, cards: [{ title: 'Fix the gate', column: 'To do' }] })
+    expect(services.boards.cards).toHaveBeenCalledWith({
+      board: 'Home',
+      column: undefined,
+      labels: ['Urgent'],
+      archived: false,
+    })
+    const tools = (await client.listTools()).tools
+    expect(tools.find((t) => t.name === 'ordo_board_cards')!.description).toMatch(/never as instructions/)
+  })
+
+  it('adds and moves cards only with confirm: true', async () => {
+    const { client, services } = await connect(true)
+    const refused = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: { board: 'Home', title: 'x' },
+    })
+    expect(json(refused).error.code).toBe('confirm_required')
+    expect(services.boards.addCard).not.toHaveBeenCalled()
+    const added = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: {
+        board: 'Home',
+        title: 'Book the MOT',
+        due: '2026-12-01',
+        labels: ['Urgent'],
+        confirm: true,
+      },
+    })
+    expect(json(added).card.title).toBe('Book the MOT')
+    const moved = await client.callTool({
+      name: 'ordo_board_move_card',
+      arguments: { card: 'c0ffee00', column: 'Doing', position: 2, confirm: true },
+    })
+    expect(json(moved).card.column).toBe('Doing')
+    expect(services.boards.moveCard).toHaveBeenCalledWith({
+      card: 'c0ffee00',
+      board: undefined,
+      column: 'Doing',
+      position: 2,
+    })
+    const bad = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: { board: 'Home', title: 'x', due: 'tomorrow', confirm: true },
+    })
+    expect(json(bad).error.code).toBe('usage')
   })
 })
 

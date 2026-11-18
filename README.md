@@ -59,6 +59,9 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: change a transaction's category yourself                                 | Done    |
 | Money: HSBC and Monzo app exports; transfers between your accounts              | Done    |
 | Headless mode: a CLI and an MCP server for scripts and AI agents                | Done    |
+| Boards: local kanban with drag and drop, custom fields and templates            | Done    |
+| Boards: link cards to events, emails, bills and cards; due on Calendar          | Done    |
+| Boards: Suggest with AI (due date, checklist, labels and links)                 | Done    |
 
 ## Headless mode and MCP
 
@@ -117,6 +120,8 @@ packages/shared       Module registry and the typed IPC contract
 packages/mail-core    Mail logic with no Electron dependency, fully unit-tested
 packages/ai           Model providers (LM Studio, Ollama, Claude Code and Codex CLIs)
 packages/calendar-core  CalDAV and calendar links, iCalendar parsing and recurrence, calendar cache and layout
+packages/money-core   Bank statements, bills, splits and Money's AI sorting
+packages/boards-core  Kanban boards: ordering, store, fields, notes, filters, links and AI suggestions
 e2e/                  Playwright tests that launch the built app
 docs/design.md        Design decisions and roadmap
 ```
@@ -133,9 +138,10 @@ Playwright, electron-builder, pnpm workspaces.
 1. **Unclutter for real:** iCloud connection, header scan into SQLite, rule and model-based sorting, review, unsubscribe, move to Trash, history.
 2. **Reading mail:** folders, threads, a safe HTML reader with remote images blocked, search.
 3. **Writing mail:** compose, reply, drafts, attachments.
-4. **Finance** and other modules.
+4. **Finance** and other modules. Money and Boards are in; see [docs/boards.md](docs/boards.md).
 
 More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
+Boards are described in [docs/boards.md](docs/boards.md).
 
 ## Contributing
 

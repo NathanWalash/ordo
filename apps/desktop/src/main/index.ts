@@ -9,6 +9,7 @@ import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { registerAssistantIpc, stop as stopAssistant } from './assistant'
 import { closeMoney, registerMoneyIpc } from './money'
+import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
 import { headlessArgs } from './headless/args'
 import { runHeadless } from './headless/run'
@@ -119,10 +120,12 @@ function startApp(): void {
   registerCalendarIpc()
   registerCleanupIpc()
   registerMoneyIpc()
+  registerBoardsIpc()
 
   app.on('before-quit', () => mail.closeMail())
   app.on('before-quit', () => closeCalendar())
   app.on('before-quit', () => closeMoney())
+  app.on('before-quit', () => closeBoards())
   app.whenReady().then(() => {
     applyTestOverrides()
     // Only the windowed app: headless mode hides the Dock icon instead.
@@ -133,6 +136,7 @@ function startApp(): void {
     registerAssistantIpc()
     app.on('before-quit', stopAssistant)
     createWindow()
+    void tidyBoards()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })

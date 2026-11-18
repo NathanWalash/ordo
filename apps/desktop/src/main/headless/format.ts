@@ -28,6 +28,9 @@ export function pounds(pence: number | null | undefined): string {
   return `${sign}£${(Math.abs(pence) / 100).toFixed(2)}`
 }
 
+/** The first eight characters of an id: enough to name a card in `boards move-card`. */
+const shortId = (id: unknown) => clean(id, 40).slice(0, 8)
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const when = (iso: unknown) => (typeof iso === 'string' ? iso.replace('T', ' ').slice(0, 16) : 'never')
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -284,6 +287,35 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   'ai sort': (d) =>
     `Checked ${plural(d.checked, 'sender')}: ${d.changed} sorted, ${d.cached} from earlier answers, ${d.failed} failed.` +
     (d.errors.length ? `\n${d.errors.map((e: string) => clean(e, 200)).join('\n')}` : ''),
+
+  'boards list': (d) =>
+    d.boards.length === 0
+      ? 'No boards yet. Make one in the app, under Boards.'
+      : table([
+          ['CARDS', 'OVERDUE', 'ID', 'BOARD'],
+          ...d.boards.map((b: any) => [String(b.cards), String(b.overdue), shortId(b.id), clean(b.name, 60)]),
+        ]),
+
+  'boards cards': (d) =>
+    d.total === 0
+      ? 'No cards.'
+      : table([
+          ['ID', 'COLUMN', 'DUE', 'CARD'],
+          ...d.cards.map((c: any) => [
+            shortId(c.id),
+            clean(d.board ? c.column : `${c.board} › ${c.column}`, 40),
+            c.due ? (c.start ? `${c.start}…${c.due}` : c.due) : '',
+            clean(c.title, 60) +
+              (c.labels.length ? `  [${c.labels.map((l: string) => clean(l, 20)).join(', ')}]` : '') +
+              (c.checklist.total ? `  ${c.checklist.done}/${c.checklist.total}` : ''),
+          ]),
+        ]) + more(d, 'cards'),
+
+  'boards add-card': (d) =>
+    `Added “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)} (${shortId(d.card.id)}).`,
+
+  'boards move-card': (d) =>
+    `Moved “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)}.`,
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -339,6 +371,14 @@ Money:
   money import <file.csv> [--account <name>] --confirm   Import a bank statement *
   money sort --confirm                          Categorise merchants in Other and match bills
                                                 to email with the saved model (AI for Money) *
+
+Boards:
+  boards list                                   Boards, with card and overdue counts
+  boards cards [--board <name>] [--column <name>] [--label <name>]... [--archived] [--limit <n>]
+  boards add-card --board <name> --title <text> [--column <name>] [--due YYYY-MM-DD]
+          [--start YYYY-MM-DD] [--notes <text>] [--label <name>]... --confirm   Add a card *
+  boards move-card <card> [--column <name>] [--position <n>] [--board <name>] --confirm
+                                                Move a card (id, first 8 of its id, or title) *
 
 AI:
   ai status                                     Providers and the saved choice

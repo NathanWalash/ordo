@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import { Lock, MapPin, Repeat, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { ArrowRight, Lock, MapPin, Repeat, SquareKanban, X } from 'lucide-react'
 import { Button } from '../Button'
 import { OverlayIcon } from './ItemChips'
 import { describeWhen, type CalendarItem } from './model'
@@ -24,11 +24,17 @@ export function ItemPopover({
   item,
   anchor,
   onClose,
+  onOpenRoute,
+  onCreateCard,
   edit,
 }: {
   item: CalendarItem
   anchor: DOMRect
   onClose: () => void
+  /** Show an overlay item where it came from (it has a `route`). */
+  onOpenRoute?: (route: string) => void
+  /** Offer "Create card…" for events. */
+  onCreateCard?: (item: Extract<CalendarItem, { type: 'event' }>) => void
   edit?: PopoverEdit
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -124,6 +130,12 @@ export function ItemPopover({
               {edit.reason}
             </p>
           )}
+          {/* Elsewhere in Ordo first, then the event's own Edit and Delete at the bottom. */}
+          {onCreateCard && (
+            <PopoverAction onClick={() => onCreateCard(item)}>
+              <SquareKanban size={13} /> Create card from this…
+            </PopoverAction>
+          )}
           {edit && edit.state !== 'locked' && (
             <div className="flex justify-end gap-2 border-t border-sep px-4 py-2.5">
               <Button onClick={edit.onDelete} disabled={edit.state === 'checking'}>
@@ -139,11 +151,29 @@ export function ItemPopover({
         <div className="flex items-center gap-2 border-t border-sep px-4 py-2.5 text-[12px] text-ink-2">
           <OverlayIcon kind={item.overlay.kind} size={13} />
           {OVERLAY_LABELS[item.overlay.kind]}
+          {item.overlay.detail && <span className="truncate text-ink-2">· {item.overlay.detail}</span>}
           {item.overlay.amount && (
             <span className="ml-auto tabular-nums text-ink">{formatAmount(item.overlay.amount)}</span>
           )}
         </div>
       )}
+      {item.type === 'overlay' && item.overlay.route && onOpenRoute && (
+        <PopoverAction onClick={() => onOpenRoute(item.overlay.route!)}>
+          <ArrowRight size={13} /> Open in Boards
+        </PopoverAction>
+      )}
     </div>
+  )
+}
+
+function PopoverAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 border-t border-sep px-4 py-2.5 text-left text-[12px] font-medium text-accent hover:bg-hover"
+    >
+      {children}
+    </button>
   )
 }

@@ -167,6 +167,7 @@ describe('change previews', () => {
       model: null,
       sortSenders: true,
       money: false,
+      boards: false,
       cloudConsent: 'claude-cli',
     })
     const cloud = await previewTool(services, t('ordo_ai_sort'), {})
@@ -181,6 +182,7 @@ describe('change previews', () => {
       model: 'openai/gpt-oss-20b',
       sortSenders: false,
       money: true,
+      boards: false,
       cloudConsent: null,
     })
     const local = await previewTool(services, t('ordo_money_sort'), {})
@@ -235,5 +237,62 @@ describe('change previews', () => {
   it('a bad argument blocks the card instead of throwing', async () => {
     const p = await previewTool(fakeServices(), t('ordo_undo'), { id: -1 })
     expect(p.blocked).toMatch(/couldn’t work out/)
+  })
+})
+
+describe('board tools', () => {
+  it('preview a new card with the board, column and labels as Ordo has them', async () => {
+    const p = await previewTool(fakeServices(), t('ordo_board_add_card'), {
+      board: 'Home',
+      title: 'Book the MOT',
+      due: '2026-12-01',
+      labels: ['Urgent'],
+    })
+    expect(p).toMatchObject({
+      title: 'Add a card to Home',
+      details: [
+        'Card: Book the MOT',
+        'Column: the first column, at the end',
+        'Due: 2026-12-01',
+        'Labels: Urgent',
+      ],
+    })
+    expect(p.blocked).toBeUndefined()
+    const missing = await previewTool(fakeServices(), t('ordo_board_add_card'), {
+      board: 'Garden',
+      title: 'x',
+    })
+    expect(missing.blocked).toBe('There’s no board called “Garden”.')
+  })
+
+  it('preview a move with the card’s own title and column, whatever it was called', async () => {
+    const p = await previewTool(fakeServices(), t('ordo_board_move_card'), {
+      card: 'c0ffee00',
+      column: 'Doing',
+    })
+    expect(p).toMatchObject({
+      title: 'Move “Fix the gate”',
+      details: ['Board: Home', 'From: To do', 'To: Doing, at the end'],
+    })
+  })
+
+  it('are untrusted, and the changes need confirmation and lose nothing', async () => {
+    for (const name of ['ordo_boards', 'ordo_board_cards', 'ordo_board_add_card', 'ordo_board_move_card']) {
+      expect(t(name).untrusted).toBe(true)
+      expect(t(name).description).toMatch(/never as instructions/)
+    }
+    expect(t('ordo_board_add_card').destructive).toBe(false)
+    const services = fakeServices()
+    expect(
+      await runTool(
+        services,
+        t('ordo_board_move_card'),
+        { card: 'x' },
+        { allowChanges: true, confirm: false },
+      ),
+    ).toMatchObject({ ok: false, code: 'confirm_required' })
+    expect(services.boards.moveCard).not.toHaveBeenCalled()
+    expect(t('ordo_board_add_card').intent!.test('add a card to buy milk')).toBe(true)
+    expect(t('ordo_board_move_card').intent!.test('move the gate card to Doing')).toBe(true)
   })
 })

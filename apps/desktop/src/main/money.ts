@@ -192,6 +192,11 @@ export async function importStatementFile(path: string, accountName?: string): P
   return importStatement({ fileName: read.fileName, text: read.text, accountName })
 }
 
+/** Every imported transaction as stored, newest first: no categorising, for linking from Boards. */
+export function storedTransactions(): Transaction[] {
+  return moneyStore().transactions()
+}
+
 /** How much is stored, for `status`. */
 export function counts(): { transactions: number; accounts: number; bills: number } {
   const s = moneyStore()

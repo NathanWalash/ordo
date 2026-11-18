@@ -11,8 +11,30 @@ const item = (id: string, day: number, kind: CalendarOverlayItem['kind'] = 'bill
 const range = { start: new Date(2026, 10, 1), end: new Date(2026, 11, 1) }
 
 describe('loadOverlays', () => {
-  it('ships with Money as the only source', () => {
-    expect(OVERLAY_SOURCES.map((s) => s.id)).toEqual(['money'])
+  it('ships with Money and Boards as sources', () => {
+    expect(OVERLAY_SOURCES.map((s) => s.id)).toEqual(['money', 'boards'])
+  })
+
+  it('keeps a date range that started before the view', async () => {
+    const card: CalendarOverlayItem = {
+      ...item('trip', 1, 'card'),
+      date: new Date(2026, 9, 28),
+      until: new Date(2026, 10, 2),
+    }
+    const ended: CalendarOverlayItem = { ...card, id: 'ended', until: new Date(2026, 9, 30) }
+    const sources = [{ id: 'b', name: 'B', load: async () => [card, ended] }]
+    expect((await loadOverlays(range, sources)).map((i) => i.id)).toEqual(['trip'])
+  })
+
+  it('keeps a range whose last day is the first day of the view', async () => {
+    const edge: CalendarOverlayItem = {
+      ...item('edge', 1, 'card'),
+      date: new Date(2026, 9, 29),
+      until: range.start,
+    }
+    const before: CalendarOverlayItem = { ...edge, id: 'before', until: new Date(2026, 9, 31) }
+    const sources = [{ id: 'b', name: 'B', load: async () => [edge, before] }]
+    expect((await loadOverlays(range, sources)).map((i) => i.id)).toEqual(['edge'])
   })
 
   it('returns nothing when there are no sources', async () => {

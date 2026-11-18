@@ -94,8 +94,18 @@ test('picking LM Studio preselects gpt-oss-20b and saves it', async () => {
     model: 'openai/gpt-oss-20b',
     sortSenders: false,
     money: false,
+    boards: false,
     cloudConsent: null,
   })
+
+  // AI for Boards is its own switch, off by default, saying exactly what Suggest sends.
+  const boards = page.getByRole('switch', { name: 'Use AI for Boards (Suggest on a card)' })
+  await expect(boards).not.toBeChecked()
+  await expect(ai().getByText(/Suggest sends the card you’re on/)).toBeVisible()
+  await boards.click()
+  await expect.poll(() => savedAi().boards).toBe(true)
+  await boards.click()
+  await expect.poll(() => savedAi().boards).toBe(false)
 
   const toggle = page.getByRole('switch', { name: "Use AI to sort senders Ordo isn't sure about" })
   await toggle.click()

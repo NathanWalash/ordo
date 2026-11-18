@@ -1,6 +1,6 @@
 import type { Route } from '../../routes'
 
-export type SuggestionIcon = 'mail' | 'calendar' | 'money' | 'bills' | 'sparkles'
+export type SuggestionIcon = 'mail' | 'calendar' | 'money' | 'bills' | 'sparkles' | 'boards'
 
 export interface Suggestion {
   text: string
@@ -29,6 +29,11 @@ const BY_ROUTE: Record<Route, Suggestion[]> = {
     { text: 'What’s on my calendar this week?', icon: 'calendar' },
     { text: 'What have I got tomorrow?', icon: 'calendar' },
     { text: 'When is my next free evening?', icon: 'calendar' },
+  ],
+  boards: [
+    { text: 'What’s overdue on my boards?', icon: 'boards' },
+    { text: 'What’s in progress?', icon: 'boards' },
+    { text: 'Add a card to buy milk', icon: 'boards' },
   ],
   'money/finances': [
     { text: 'How much did I spend last month?', icon: 'money' },

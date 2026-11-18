@@ -54,7 +54,7 @@ export function createMcpServer(
     { name: 'ordo', version: services.version },
     {
       instructions:
-        'Ordo is the user’s personal admin app: iCloud Mail clean-up, Calendar and Money. ' +
+        'Ordo is the user’s personal admin app: iCloud Mail clean-up, Calendar, Money and Boards. ' +
         'Read tools change nothing. ' +
         (options.allowChanges
           ? 'Change tools need confirm: true; show the user ordo_cleanup_plan before ordo_cleanup_run. '
@@ -82,7 +82,11 @@ export function createMcpServer(
       {
         description,
         ...(Object.keys(inputSchema).length > 0 && { inputSchema }),
-        annotations: annotations[tool.kind],
+        // A change that loses nothing (adding or moving a card) says so; it still needs confirm.
+        annotations:
+          tool.kind === 'change' && tool.destructive === false
+            ? { ...annotations.change, destructiveHint: false, openWorldHint: false }
+            : annotations[tool.kind],
       },
       async (...params: unknown[]): Promise<CallToolResult> => {
         // With no input schema the SDK passes only `extra`.

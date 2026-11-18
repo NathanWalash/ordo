@@ -15,6 +15,7 @@ export const ASSISTANT_PAGES = {
   },
   'mail/history': { title: 'Clean-up history', about: 'Mail → History: past clean-ups, with undo' },
   calendar: { title: 'Calendar', about: 'Calendar: month, week and agenda views' },
+  boards: { title: 'Boards', about: 'Boards: kanban boards of cards in columns, with due dates and labels' },
   'money/finances': {
     title: 'Finances',
     about: 'Money → Finances: spending by category and month, every transaction; can filter to one month',

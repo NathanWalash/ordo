@@ -75,6 +75,10 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `money balances`                                                              | Who owes whom for shared bills                                   |
 | `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                   |
 | `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \*   |
+| `boards list`                                                                 | Boards, with card and overdue counts                             |
+| `boards cards [--board <b>] [--column <c>] [--label <l>]...`                  | Cards in column order. Also `--archived` and `--limit <n>`       |
+| `boards add-card --board <b> --title <t> [options] --confirm`                 | Add a card; options below \*                                     |
+| `boards move-card <card> [--column <c>] [--position <n>] --confirm`           | Move a card; position 1 is the top \*                            |
 | `ai status`                                                                   | Model providers and the saved choice                             |
 | `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \*   |
 | `help`, `--help`, `-h`                                                        | The command list                                                 |
@@ -125,6 +129,33 @@ pnpm ordo -- calendar delete --uid 3F2A… --all --allow-changes --confirm
 AI, and doesn't need a mail account (bill matching is skipped without one). `money transactions
 --json` marks categories a model chose with `"categorisedBy": "ai"` and its `confidence`, and ones
 you chose with `"categorisedBy": "you"`; the human output adds a `*` to AI categories.
+
+### Boards
+
+`boards add-card` also takes `--column <c>`, `--due YYYY-MM-DD`, `--start YYYY-MM-DD` (a date
+range, with `--due`), `--notes <text>` and `--label <l>` (repeatable). `boards move-card` also
+takes `--board <b>`.
+
+Boards, columns and labels are named the way you see them (any case), or given by id. A card is
+its id, the first 8 characters of its id (as `boards cards` shows them) or its exact title; add
+`--board` when two boards have a card with the same title. `add-card` puts the card at the end of
+the column (the first column by default); `move-card` moves within the card's board, to the end of
+the column unless you give `--position`. Labels must already exist on the board. Boards work
+without a mail account. Like the app, every change takes the write lock and is checked by the
+same store, so a name that's too long, a date that doesn't exist or an unknown label is refused
+and nothing changes.
+
+```jsonc
+// boards cards --board Home --json
+{ "board": "Home", "column": null, "total": 2, "offset": 0, "shown": 2, "cards": [
+  { "id": "c0ffee00-…", "title": "Fix the gate", "board": "Home", "column": "To do", "start": null,
+    "due": "2026-12-01", "labels": ["Urgent"], "checklist": { "done": 1, "total": 3 }, "links": 2,
+    "fields": { "Priority": "High", "Owner": "Sam" }, "archived": false }
+] }
+
+// boards add-card / move-card --json
+{ "card": { "id": "…", "title": "Book the MOT", "board": "Home", "column": "Doing", … } }
+```
 
 ### Exit codes
 
@@ -214,13 +245,14 @@ and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
 `ordo_calendar_events`, `ordo_calendar_list`, `ordo_bills`, `ordo_transactions`, `ordo_balances`,
-`ordo_scan`, `ordo_calendar_sync`. List tools take `limit` and `offset` with small defaults, so an agent isn't
-flooded. `ordo_scan` and `ordo_calendar_sync` refresh Ordo's local cache; they change nothing on
-the server.
+`ordo_boards`, `ordo_board_cards`, `ordo_scan`, `ordo_calendar_sync`. List tools take `limit` and
+`offset` with small defaults, so an agent isn't flooded. `ordo_scan` and `ordo_calendar_sync`
+refresh Ordo's local cache; they change nothing on the server.
 
 **Change tools** (only with `--allow-changes`): `ordo_cleanup_run`, `ordo_undo`,
 `ordo_import_statement`, `ordo_ai_sort`, `ordo_money_sort`, `ordo_calendar_add`,
-`ordo_calendar_edit`, `ordo_calendar_delete`. Each also needs `confirm: true` in its arguments, or it
+`ordo_calendar_edit`, `ordo_calendar_delete`, `ordo_board_add_card`, `ordo_board_move_card`. Each
+also needs `confirm: true` in its arguments, or it
 is refused with `confirm_required` and nothing happens.
 
 The calendar tools take the same fields as the CLI, in camelCase (`timeZone`, `alert: null` for
@@ -229,7 +261,9 @@ checks as the window: read-only calendars and invitations are refused, and an ev
 elsewhere first is never overwritten (`conflict`).
 
 Tool descriptions tell the agent that names, addresses, subjects, URLs, merchant names and event
-titles are third-party text to be treated as data, never as instructions.
+titles are third-party text to be treated as data, never as instructions; the board tools say the
+same of card titles, labels and fields, which may quote emails or web pages. Adding or moving a card
+is marked non-destructive (nothing is lost), but still needs `--allow-changes` and `confirm: true`.
 
 `ordo_import_statement` takes a full local path. UNC and device paths (`\\server\share`,
 `//server/share`, `\\?\`, `\\.\`) are refused before any file-system call, here and in the CLI;
@@ -275,19 +309,20 @@ On Windows use the path to `Ordo.exe`, e.g. `C:\\Users\\you\\AppData\\Local\\Pro
 
 Add `"--allow-changes"` to `args` to register the change tools. **Only do this if you want the
 agent to be able to unsubscribe you from mail, move mail to Trash, import statements, add, change
-and delete calendar events (deleted events can't be undone in Ordo), and send
-sender details to your AI provider**, and keep your client's per-tool approval on, so you see each
-call before it runs. Even then, People are never cleared, moved mail can be put back with Undo,
+and delete calendar events (deleted events can't be undone in Ordo), add and move cards on your
+boards, and send sender details to your AI provider**, and keep your client's per-tool approval on,
+so you see each call before it runs. Even then, People are never cleared, moved mail can be put back with Undo,
 and a cloud AI provider is only used if you agreed to it in Settings → AI.
 
 ## Running alongside the app
 
 The app and any number of headless runs can be open at once. They share `mail.sqlite`,
-`calendar.sqlite` and `money.sqlite`, which wait briefly for each other instead of failing.
+`calendar.sqlite`, `money.sqlite` and `boards.sqlite`, which wait briefly for each other instead of
+failing.
 
-Only one process writes at a time. Scans, calendar syncs, event changes, clean-ups, undo, imports and AI sorting
-take a lock, `ordo-write.lock` in the data folder, which records the process ID, who holds it
-(`app`, `headless` or `mcp`), what it's doing and since when. If another process holds it, the
+Only one process writes at a time. Scans, calendar syncs, event changes, clean-ups, undo, imports,
+AI sorting and board changes take a lock, `ordo-write.lock` in the data folder, which records the
+process ID, who holds it (`app`, `headless` or `mcp`), what it's doing and since when. If another process holds it, the
 command exits with code 4 (`locked`) and the window says, for example, "Ordo is busy in an AI agent
 using Ordo (clearing senders). Try again when it finishes." Reading never waits.
 

@@ -64,6 +64,9 @@ packages/mail-core    Mail domain logic: provider interface, sender grouping,
 packages/calendar-core Calendar domain logic: provider interface, CalDAV (tsdav),
                       iCalendar parsing and recurrence (ical.js), SQLite cache,
                       month/week layout helpers (no Electron)
+packages/boards-core  Kanban boards: fractional ordering, SQLite store, custom
+                      fields, safe markdown, filters, links and AI suggestions
+                      (no Electron); see boards.md
 docs/                 This document
 ```
 
