@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { CategorisedSender } from '@ordo/shared'
-import type { OrdoServices } from './commands'
+import type { BoardCardRow, OrdoServices } from './commands'
 
 /** A sender as the analysis would return it. */
 export function sender(address: string, extra: Partial<CategorisedSender> = {}): CategorisedSender {
@@ -16,6 +16,24 @@ export function sender(address: string, extra: Partial<CategorisedSender> = {}):
     bulk: false,
     automated: false,
     category: 'uncategorised',
+    ...extra,
+  }
+}
+
+/** A board card as headless mode shows it. */
+export function boardCard(extra: Partial<BoardCardRow> = {}): BoardCardRow {
+  return {
+    id: 'c0ffee00-1111-2222-3333-444455556666',
+    title: 'Fix the gate',
+    board: 'Home',
+    column: 'To do',
+    start: null,
+    due: '2026-11-20',
+    labels: ['Urgent'],
+    checklist: { done: 1, total: 3 },
+    links: 0,
+    fields: {},
+    archived: false,
     ...extra,
   }
 }
@@ -89,6 +107,24 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       }),
       status: async () => [],
       sort: vi.fn(async () => ({ ok: false as const, message: 'Choose a model in Settings → AI first.' })),
+    },
+    boards: {
+      list: () => [
+        {
+          id: 'board-1-uuid',
+          name: 'Home',
+          rank: 'V',
+          createdAt: '2026-11-01T10:00:00.000Z',
+          cards: 2,
+          overdue: 1,
+        },
+      ],
+      cards: vi.fn(() => ({ ok: true as const, value: [boardCard()] })),
+      addCard: vi.fn(async (input: { title: string }) => ({
+        ok: true as const,
+        value: boardCard({ title: input.title }),
+      })),
+      moveCard: vi.fn(async () => ({ ok: true as const, value: boardCard({ column: 'Doing' }) })),
     },
     lockHolder: () => null,
     ...overrides,
