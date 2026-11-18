@@ -22,6 +22,7 @@ import {
   loadRemoteImages,
   MailAuthError,
   reconcileFolder,
+  scanMailbox,
   sendMessage,
   syncFolder,
   type ImageFetch,
@@ -361,8 +362,10 @@ export async function undoMove(input: unknown): Promise<MailOutcome<{ restored: 
       moves.delete(id.data)
       const store = mailStore()
       store.deleteMessages(record.to, present)
-      // The messages have new UIDs back where they came from; fetch them into the cache.
-      if (store.mailboxState(record.from)) await syncFolder(p, store, record.from).catch(() => {})
+      // The messages have new UIDs back where they came from; fetch them into the cache. The
+      // inbox goes through the full scan so Unclutter's cache stays complete.
+      if (record.from === INBOX) await scanMailbox(p, store, { mailbox: INBOX }).catch(() => {})
+      else if (store.mailboxState(record.from)) await syncFolder(p, store, record.from).catch(() => {})
       await updateCounts(p, record.from).catch(() => {})
       await updateCounts(p, record.to).catch(() => {})
       return { ok: true, restored: res.uidMap ? res.uidMap.size : present.length }
@@ -533,7 +536,8 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
     try {
       sent = await sendMessage(smtpConfig(account.email, account.password), built.message)
     } catch (err) {
-      if (err instanceof MailAuthError || /auth|535|534/i.test(String((err as Error).message)))
+      const e = err as { code?: string; message?: string }
+      if (err instanceof MailAuthError || e.code === 'EAUTH' || /\b(535|534)\b/.test(String(e.message)))
         return fail(
           'auth',
           'iCloud didn’t accept your app-specific password for sending. Reconnect your account and try again.',

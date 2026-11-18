@@ -278,6 +278,21 @@ test('links ask first, warn about lookalikes and open in the browser, never in O
   ])
   // The frame stayed on the message.
   await expect(frame().getByRole('heading', { name: `Hello from the newsletter ${run}` })).toBeVisible()
+
+  // Even a navigation the window didn't catch is refused by the main process: the request to
+  // load a page into the frame never leaves Ordo.
+  const before = imageHits.length
+  await page.evaluate((port) => {
+    const f = document.querySelector<HTMLIFrameElement>('iframe[title="Message"]')!
+    f.contentWindow!.location.href = `http://127.0.0.1:${port}/elsewhere`
+  }, imagePort)
+  await page.waitForTimeout(500)
+  expect(imageHits.length).toBe(before)
+  expect(page.frames().map((f) => f.url())).not.toContain(`http://127.0.0.1:${imagePort}/elsewhere`)
+  // Show the message again for the next tests.
+  await row(LUNCH).click()
+  await row(NEWS).click()
+  await expect(frame().getByRole('heading', { name: `Hello from the newsletter ${run}` })).toBeVisible()
 })
 
 test('a mailto: link starts a message, without the hidden Bcc', async () => {

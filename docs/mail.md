@@ -29,8 +29,8 @@ Email HTML comes from strangers, so Ordo treats it as hostile, in layers:
    `<meta>` and anything else that can run code or send data. Link addresses that aren't http,
    https or mailto are dropped.
 2. **Sandboxed.** The message is shown in an `<iframe sandbox="allow-same-origin">`: no scripts, no
-   forms, no pop-ups, no top-level navigation. The main process also refuses any navigation of a
-   frame inside the window, so even a link Ordo missed can't load in the app.
+   forms, no pop-ups, no top-level navigation. The main process also cancels any request to load a page into a
+   frame, so even a link or redirect Ordo missed can't load in the app.
 3. **Strict Content Security Policy.** `default-src 'none'; img-src data:; style-src 'unsafe-inline';
 font-src data:; form-action 'none'`, on top of the app's own policy. The message can't connect
    anywhere: no remote images, fonts, stylesheets or requests.

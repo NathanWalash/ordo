@@ -11,7 +11,7 @@ import DOMPurify from 'dompurify'
  *    remote images, fonts or styles, on top of the app's own policy.
  * 4. It's shown in an <iframe sandbox> without allow-scripts, allow-forms, allow-popups or
  *    top navigation; links are handled by the window (see MessageFrame), and the main process
- *    refuses any navigation of the frame.
+ *    cancels any request to load a page into the frame (blockFrameLoads in main).
  */
 
 export const MESSAGE_CSP =

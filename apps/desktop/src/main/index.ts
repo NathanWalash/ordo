@@ -1,6 +1,15 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  safeStorage,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
@@ -79,9 +88,10 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
-  // Email is shown in a sandboxed frame inside the window. It may load its own srcdoc and
-  // nothing else: a link clicked there never navigates in the app (the window asks first and
-  // opens it in the browser).
+  // Email is shown in a sandboxed frame inside the window. It may show its own srcdoc and
+  // nothing else: link clicks are caught by the window (which asks, then opens the browser),
+  // this refuses the frame navigations Chromium reports here, and blockFrameLoads() cancels the
+  // request for any other way of loading a page into the frame.
   win.webContents.on('will-frame-navigate', (e) => {
     if (!e.isMainFrame && e.url !== 'about:srcdoc' && e.url !== 'about:blank') e.preventDefault()
   })
@@ -94,6 +104,17 @@ function createWindow(): BrowserWindow {
   if (!app.isPackaged && devUrl) void win.loadURL(`${devUrl}#/${route}`)
   else void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/${route}` })
   return win
+}
+
+/**
+ * The only frame in the window is the message frame, which shows its own srcdoc and nothing
+ * else. Refuse every request to load a page into a frame (http, https or file), whoever starts
+ * it: a link the window missed, a script, a refresh. Images and styles aren't affected.
+ */
+function blockFrameLoads(): void {
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) =>
+    callback({ cancel: details.resourceType === 'subFrame' }),
+  )
 }
 
 /** Start-up overrides for tests, honoured identically by the app and headless mode. */
@@ -139,6 +160,7 @@ function startApp(): void {
     // Only the windowed app: headless mode hides the Dock icon instead.
     if (devIcon && isMac) app.dock?.setIcon(devIcon)
     setupAppearance()
+    blockFrameLoads()
     initAi()
     registerAiIpc()
     createWindow()
