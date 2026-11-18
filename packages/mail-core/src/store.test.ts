@@ -131,6 +131,7 @@ const content = (uid: number, mailbox = 'INBOX'): MessageContent => ({
   bcc: [],
   replyTo: [],
   messageId: '<m@x.example>',
+  inReplyTo: null,
   references: [],
   seen: false,
   flagged: false,

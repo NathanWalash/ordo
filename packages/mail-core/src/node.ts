@@ -19,10 +19,12 @@ export { runCleanup, undoCleanup, type CleanupOptions } from './cleanup'
 export {
   buildMessage,
   checkOutgoing,
+  RecipientsRefused,
   createMailtoSender,
   ICLOUD_SMTP,
   sendMessage,
   type OutgoingMessage,
+  type SendTransport,
   type SmtpConfig,
 } from './smtp'
 export { READ_LIMITS, messageIds } from './imap'

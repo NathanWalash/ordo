@@ -50,6 +50,7 @@ export function content(extra: Partial<MessageContent> = {}): MessageContent {
     bcc: [],
     replyTo: [],
     messageId: '<lunch@friend.example>',
+    inReplyTo: null,
     references: [],
     seen: false,
     flagged: true,

@@ -30,9 +30,9 @@ describe.skipIf(!port)('IMAP integration (GreenMail)', () => {
     const c = new ImapFlow({ ...cfg, auth: { user: cfg.user, pass: cfg.pass }, logger: false })
     await c.connect()
     const boxes = await c.list()
-    if (!boxes.some((b) => b.path === 'Sent')) await c.mailboxCreate('Sent')
+    if (!boxes.some((b) => b.path === 'Sent')) await c.mailboxCreate('Sent').catch(() => {})
     // GreenMail starts with INBOX only; imapflow recognises a mailbox named Trash as \Trash.
-    if (!boxes.some((b) => b.path === 'Trash')) await c.mailboxCreate('Trash')
+    if (!boxes.some((b) => b.path === 'Trash')) await c.mailboxCreate('Trash').catch(() => {})
     await c.append(
       'INBOX',
       raw(

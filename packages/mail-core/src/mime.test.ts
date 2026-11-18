@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ATTACHMENTS_MAX,
+  budgetParts,
   chooseInlineImages,
   INLINE_IMAGES_MAX,
   planBodyParts,
@@ -153,6 +154,39 @@ describe('planBodyParts', () => {
     })
     expect(plan.attachments.filter((a) => a.inline)).toHaveLength(INLINE_IMAGES_MAX)
     expect(plan.attachments.length).toBeLessThanOrEqual(ATTACHMENTS_MAX)
+  })
+})
+
+describe('budgetParts', () => {
+  it('shares one byte budget across all the parts, using their reported sizes', () => {
+    const nodes = [
+      { part: '1', size: 400 },
+      { part: '2', size: 500 },
+      { part: '3', size: 300 },
+      { part: '4', size: 10 },
+    ]
+    expect(budgetParts(nodes, 1000)).toEqual({
+      fetch: [
+        { key: '1', maxLength: 400 },
+        { key: '2', maxLength: 500 },
+        { key: '3', maxLength: 100 },
+      ],
+      truncated: true,
+    })
+    expect(budgetParts(nodes.slice(0, 2), 1000)).toEqual({
+      fetch: [
+        { key: '1', maxLength: 400 },
+        { key: '2', maxLength: 500 },
+      ],
+      truncated: false,
+    })
+  })
+
+  it('never asks for more than the budget in all, even for parts of unknown size', () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ part: String(i + 1) }))
+    const r = budgetParts(many, 1000)
+    expect(r.fetch.reduce((n, p) => n + p.maxLength, 0)).toBeLessThanOrEqual(1000)
+    expect(r.truncated).toBe(true)
   })
 })
 

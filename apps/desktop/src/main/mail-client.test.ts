@@ -81,6 +81,7 @@ describe('with a cached mailbox', () => {
       bcc: [],
       replyTo: [],
       messageId: '<m3@x.example>',
+      inReplyTo: null,
       references: [],
       seen: true,
       flagged: false,

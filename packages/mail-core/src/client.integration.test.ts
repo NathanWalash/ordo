@@ -4,7 +4,7 @@
 // (SMTP_TEST_PORT defaults to 3025, which `pnpm imap:start` also opens.)
 import { ImapFlow } from 'imapflow'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ImapMailProvider } from './imap'
+import { ImapMailProvider, READ_LIMITS } from './imap'
 import { buildMessage, sendMessage } from './smtp'
 import { MailStore } from './store'
 import { syncFolder } from './sync'
@@ -34,6 +34,7 @@ const rich = (subject: string) =>
     'Date: Mon, 16 Nov 2026 10:00:00 +0000',
     'Message-ID: <rich-' + run + '@store.example>',
     'References: <a-' + run + '@store.example>',
+    'In-Reply-To: <b-' + run + '@store.example>',
     'MIME-Version: 1.0',
     'Content-Type: multipart/mixed; boundary="mixed"',
     '',
@@ -80,7 +81,7 @@ describe.skipIf(!port)('mail client against GreenMail', () => {
     await admin.connect()
     const boxes = await admin.list()
     for (const name of ['Sent', 'Trash', 'Drafts', 'Archive', FOLDER])
-      if (!boxes.some((b) => b.path === name)) await admin.mailboxCreate(name)
+      if (!boxes.some((b) => b.path === name)) await admin.mailboxCreate(name).catch(() => {}) // the other integration file may create it at the same moment
     await admin.append(FOLDER, rich(`Rich ${run}`))
     for (const n of [1, 2, 3])
       await admin.append(
@@ -132,7 +133,8 @@ describe.skipIf(!port)('mail client against GreenMail', () => {
       subject: `Rich ${run}`,
       from: { address: `shop-${run}@store.example`, name: 'Shop' },
       messageId: `<rich-${run}@store.example>`,
-      references: [`<a-${run}@store.example>`],
+      references: [`<a-${run}@store.example>`, `<b-${run}@store.example>`],
+      inReplyTo: `<b-${run}@store.example>`,
       seen: false,
       truncated: false,
     })
@@ -146,6 +148,31 @@ describe.skipIf(!port)('mail client against GreenMail', () => {
     // Still unread on the server.
     expect((await provider.fetchFlags(FOLDER, [uid!]))[0]?.seen).toBe(false)
     expect(await provider.fetchMessage(FOLDER, 999_999)).toBeNull()
+  })
+
+  it('reads at most the body limit however many parts an email splits its HTML into', async () => {
+    const piece = `<p>${'x'.repeat(1024 * 1024)}</p>`
+    const parts = Array.from({ length: 4 }, () =>
+      ['--mixed', 'Content-Type: text/html; charset=utf-8', '', piece].join('\r\n'),
+    )
+    await admin.append(
+      FOLDER,
+      [
+        `From: Big <big-${run}@store.example>`,
+        `Subject: Huge ${run}`,
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="mixed"',
+        '',
+        ...parts,
+        '--mixed--',
+        '',
+      ].join('\r\n'),
+    )
+    const [h] = await provider.search(FOLDER, ['Huge', run], 1)
+    const m = await provider.fetchMessage(FOLDER, h!.uid)
+    expect(m!.truncated).toBe(true)
+    expect(m!.html!.length).toBeLessThanOrEqual(Math.ceil(READ_LIMITS.body * 1.4) + 100)
+    expect(m!.html!.length).toBeGreaterThan(2 * 1024 * 1024)
   })
 
   it('searches the server for every word, in bodies too', async () => {

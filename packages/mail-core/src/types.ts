@@ -87,6 +87,8 @@ export interface MessageContent {
   bcc: Address[]
   replyTo: Address[]
   messageId: string | null
+  /** The In-Reply-To header: the message this one answers, if it says. */
+  inReplyTo: string | null
   /** In-Reply-To and References, oldest first, for threading a reply. */
   references: string[]
   seen: boolean

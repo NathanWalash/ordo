@@ -146,20 +146,53 @@ export async function buildMessage(
 export async function sendMessage(
   cfg: SmtpConfig,
   m: OutgoingMessage,
-): Promise<{ sentCopy: Buffer; messageId: string }> {
+  deps: { transport?: SendTransport } = {},
+): Promise<{ sentCopy: Buffer; messageId: string; rejected: string[] }> {
   const problem = checkOutgoing(m, { needRecipients: true })
   if (problem) throw new Error(problem)
   const date = new Date()
   const sent = await buildMessage(m, { keepBcc: false, date })
   const copy = await buildMessage(m, { keepBcc: true, date, messageId: sent.messageId })
-  const transport = transportFor(cfg, false)
+  const transport = deps.transport ?? (transportFor(cfg, false) as unknown as SendTransport)
+  let info: unknown
   try {
-    await transport.sendMail({
+    info = await transport.sendMail({
       envelope: { from: m.from.address, to: [...m.to, ...m.cc, ...m.bcc].map((a) => a.address) },
       raw: sent.raw,
     })
+  } catch (err) {
+    const e = err as { code?: string; rejected?: unknown }
+    if (e?.code === 'EENVELOPE') throw new RecipientsRefused(addressesIn(e.rejected))
+    throw err
   } finally {
     transport.close()
   }
-  return { sentCopy: copy.raw, messageId: sent.messageId }
+  return {
+    sentCopy: copy.raw,
+    messageId: sent.messageId,
+    rejected: addressesIn((info as { rejected?: unknown } | undefined)?.rejected),
+  }
+}
+
+/** What sendMessage needs from a nodemailer transport; tests pass a fake. */
+export interface SendTransport {
+  sendMail(mail: { envelope: { from: string; to: string[] }; raw: Buffer }): Promise<unknown>
+  close(): void
+}
+
+/** The server refused every recipient (or the sender), so nothing was sent. */
+export class RecipientsRefused extends Error {
+  override name = 'RecipientsRefused'
+  constructor(readonly recipients: string[]) {
+    super(recipients.length ? `Refused: ${recipients.join(', ')}` : 'The server refused the recipients')
+  }
+}
+
+/** Addresses from nodemailer's accepted/rejected lists, which hold strings or {address}. */
+function addressesIn(list: unknown): string[] {
+  if (!Array.isArray(list)) return []
+  return list
+    .map((x) => (typeof x === 'string' ? x : typeof x?.address === 'string' ? (x.address as string) : ''))
+    .filter((a) => a && !hasControlChars(a))
+    .slice(0, COMPOSE_LIMITS.recipients)
 }

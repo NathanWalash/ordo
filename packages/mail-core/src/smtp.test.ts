@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { buildMessage, checkOutgoing, createMailtoSender, sendMessage, type OutgoingMessage } from './smtp'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  buildMessage,
+  checkOutgoing,
+  createMailtoSender,
+  RecipientsRefused,
+  sendMessage,
+  type OutgoingMessage,
+} from './smtp'
 
 const message = (o: Partial<OutgoingMessage> = {}): OutgoingMessage => ({
   from: { address: 'me@icloud.example', name: 'Me' },
@@ -81,6 +88,35 @@ describe('buildMessage', () => {
 
   it('refuses an unsafe message before building it', async () => {
     await expect(buildMessage(message({ subject: 'a\nb' }), { keepBcc: false })).rejects.toThrow(/subject/)
+  })
+})
+
+describe('sendMessage and refused recipients', () => {
+  const cfg = { host: '127.0.0.1', port: 9, secure: false, requireTLS: true, user: 'u', pass: 'p' }
+  const transport = (result: () => Promise<unknown>) => ({ sendMail: vi.fn(result), close: vi.fn() })
+
+  it('reports the recipients the server refused when it took the rest', async () => {
+    const t = transport(async () => ({
+      accepted: ['sam@friend.example'],
+      rejected: ['nobody@friend.example'],
+    }))
+    const r = await sendMessage(cfg, message({ cc: [{ address: 'nobody@friend.example' }] }), {
+      transport: t,
+    })
+    expect(r.rejected).toEqual(['nobody@friend.example'])
+    expect(t.close).toHaveBeenCalled()
+  })
+
+  it('says which recipients were refused when nobody could be sent to', async () => {
+    const t = transport(async () => {
+      throw Object.assign(new Error('Can’t send mail - all recipients were rejected'), {
+        code: 'EENVELOPE',
+        rejected: ['sam@friend.example', 'secret@friend.example'],
+      })
+    })
+    const err = await sendMessage(cfg, message(), { transport: t }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(RecipientsRefused)
+    expect((err as RecipientsRefused).recipients).toEqual(['sam@friend.example', 'secret@friend.example'])
   })
 })
 

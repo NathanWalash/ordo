@@ -127,6 +127,32 @@ export function planBodyParts(root: BodyNode): BodyPlan {
 /** At most this many HTML (and this many plain-text) parts are joined into a body. */
 export const BODY_PARTS_MAX = 20
 
+/**
+ * Which body parts to fetch, and how much of each, so that together they never exceed `budget`
+ * bytes: parts are taken in order by their reported size, the last one cut short and the rest
+ * left out. A part of unknown size gets whatever is left. `truncated` when anything was cut.
+ */
+export function budgetParts(
+  nodes: readonly { part: string; size?: number }[],
+  budget: number,
+): { fetch: { key: string; maxLength: number }[]; truncated: boolean } {
+  const fetch: { key: string; maxLength: number }[] = []
+  let left = budget
+  let truncated = false
+  for (const n of nodes) {
+    if (left <= 0) {
+      truncated = true
+      break
+    }
+    const size = n.size && n.size > 0 ? n.size : left
+    if (size > left) truncated = true
+    const maxLength = Math.min(size, left)
+    fetch.push({ key: n.part, maxLength })
+    left -= maxLength
+  }
+  return { fetch, truncated }
+}
+
 const SHOWN_IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|bmp)$/
 
 /**

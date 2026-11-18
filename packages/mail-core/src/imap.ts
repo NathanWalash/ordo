@@ -2,7 +2,14 @@ import { ImapFlow, type FetchMessageObject, type FetchQueryObject } from 'imapfl
 import { parseHeaderBlock, SCAN_HEADER_FIELDS, toAddresses, toMessageHeader } from './headers'
 import { toMailboxList } from './mailboxes'
 import { decodeTextPart, decodeTransfer, findPart } from './decode'
-import { BODY_PARTS_MAX, chooseInlineImages, planBodyParts, referencedCids, type BodyNode } from './mime'
+import {
+  BODY_PARTS_MAX,
+  budgetParts,
+  chooseInlineImages,
+  planBodyParts,
+  referencedCids,
+  type BodyNode,
+} from './mime'
 import { toUidSet } from './sync'
 import type { FlagUpdate } from './store'
 import type {
@@ -339,26 +346,31 @@ export class ImapMailProvider implements MailProvider {
       const structure = (msg.bodyStructure as BodyNode | undefined) ?? { type: 'text/plain' }
       const plan = planBodyParts(structure)
 
-      // Transfer encoding makes a raw part up to a third bigger than what it holds.
-      const limit = Math.ceil(READ_LIMITS.body * 1.4)
-      const htmlParts = plan.html.slice(0, BODY_PARTS_MAX)
-      const textParts = plan.text.slice(0, BODY_PARTS_MAX)
-      // Every body part in one FETCH, not one round trip each.
-      const raw = await this.rawParts(uid, [...htmlParts, ...textParts], limit)
-      let truncated = plan.html.length > BODY_PARTS_MAX || plan.text.length > BODY_PARTS_MAX
-      const join = (parts: string[], sep: string): string | null => {
+      // One budget for all the HTML parts and one for all the plain-text parts, in raw bytes:
+      // transfer encoding makes a part up to a third bigger than what it holds.
+      const bodyBudget = Math.ceil(READ_LIMITS.body * 1.4)
+      const sized = (parts: string[]) =>
+        parts.slice(0, BODY_PARTS_MAX).map((part) => ({ part, size: findPart(structure, part)?.size }))
+      const htmlPlan = budgetParts(sized(plan.html), bodyBudget)
+      const textPlan = budgetParts(sized(plan.text), bodyBudget)
+      // Every body part in one FETCH, not one round trip each, each asking only for its share.
+      const raw = await this.rawParts(uid, [...htmlPlan.fetch, ...textPlan.fetch])
+      const truncated =
+        htmlPlan.truncated ||
+        textPlan.truncated ||
+        plan.html.length > BODY_PARTS_MAX ||
+        plan.text.length > BODY_PARTS_MAX
+      const join = (parts: { key: string }[], sep: string): string | null => {
         const pieces: string[] = []
-        for (const part of parts) {
-          const node = findPart(structure, part)
-          const bytes = raw.get(part)
-          if (!node || !bytes) continue
-          if ((node.size ?? 0) > limit) truncated = true
-          pieces.push(decodeTextPart(bytes, node))
+        for (const { key } of parts) {
+          const node = findPart(structure, key)
+          const bytes = raw.get(key)
+          if (node && bytes) pieces.push(decodeTextPart(bytes, node))
         }
         return pieces.length ? pieces.join(sep) : null
       }
-      const html = join(htmlParts, '\n')
-      const text = join(textParts, '\n\n')
+      const html = join(htmlPlan.fetch, '\n')
+      const text = join(textPlan.fetch, '\n\n')
 
       // Inline images the HTML uses become data: URLs, within a budget, in one more FETCH.
       // The rest are listed as attachments instead of vanishing.
@@ -368,10 +380,13 @@ export class ImapMailProvider implements MailProvider {
         html ? referencedCids(html) : new Set(),
         READ_LIMITS.inlineImages,
       )
+      // Images share one budget too: never more than it in all.
       const images = await this.rawParts(
         uid,
-        wanted.map((a) => a.part),
-        Math.ceil(READ_LIMITS.inlineImages * 1.4),
+        budgetParts(
+          wanted.map((a) => ({ part: a.part, size: a.size })),
+          Math.ceil(READ_LIMITS.inlineImages * 1.4),
+        ).fetch,
       )
       let budget: number = READ_LIMITS.inlineImages
       for (const a of wanted) {
@@ -393,22 +408,27 @@ export class ImapMailProvider implements MailProvider {
 
   /** A part's raw bytes, still transfer-encoded, at most `maxLength` of them. */
   private async rawPart(uid: number, part: string, maxLength: number): Promise<Buffer | null> {
-    return (await this.rawParts(uid, [part], maxLength)).get(part) ?? null
+    return (await this.rawParts(uid, [{ key: part, maxLength }])).get(part) ?? null
   }
 
-  /** Several parts' raw bytes in one FETCH, each at most `maxLength`, by part number. */
-  private async rawParts(uid: number, parts: string[], maxLength: number): Promise<Map<string, Buffer>> {
+  /** Several parts' raw bytes in one FETCH, each at most its own `maxLength`, by part number. */
+  private async rawParts(
+    uid: number,
+    parts: readonly { key: string; maxLength: number }[],
+  ): Promise<Map<string, Buffer>> {
     const out = new Map<string, Buffer>()
-    if (!parts.length) return out
+    const wanted = parts.filter((p) => p.maxLength > 0)
+    if (!wanted.length) return out
     const msg = await this.client.fetchOne(
       String(uid),
-      { uid: true, bodyParts: parts.map((key) => ({ key, maxLength })) },
+      { uid: true, bodyParts: wanted.map(({ key, maxLength }) => ({ key, maxLength })) },
       { uid: true },
     )
     if (!msg || msg.uid !== uid) return out
-    for (const part of parts) {
-      const bytes = msg.bodyParts?.get(part) ?? msg.bodyParts?.get(part.toLowerCase())
-      if (bytes) out.set(part, bytes)
+    for (const { key, maxLength } of wanted) {
+      const bytes = msg.bodyParts?.get(key) ?? msg.bodyParts?.get(key.toLowerCase())
+      // Never keep more than was asked for, whatever the server sent.
+      if (bytes) out.set(key, bytes.length > maxLength ? bytes.subarray(0, maxLength) : bytes)
     }
     return out
   }
@@ -584,6 +604,7 @@ function toContent(
     // Servers fill the envelope's Reply-To with From when there is none: only keep a real one.
     replyTo: toAddresses(env?.replyTo).filter((a) => a.address.toLowerCase() !== from?.address.toLowerCase()),
     messageId: env?.messageId?.trim() || null,
+    inReplyTo: messageIds(h['in-reply-to'] ?? env?.inReplyTo)[0] ?? null,
     references: [...new Set(references)],
     seen: msg.flags?.has('\\Seen') ?? false,
     flagged: msg.flags?.has('\\Flagged') ?? false,
