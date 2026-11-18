@@ -1,20 +1,23 @@
 import type { ComponentPropsWithRef, ReactNode } from 'react'
 
 interface Props extends ComponentPropsWithRef<'button'> {
-  variant?: 'primary' | 'secondary'
+  /** Primary is the one main action in a view; destructive is the button that deletes. */
+  variant?: 'primary' | 'secondary' | 'destructive'
   icon?: ReactNode
 }
 
-/** macOS-style push button. Primary is for the one main action in a view. */
+const LOOKS = {
+  primary: 'bg-accent text-white enabled:hover:brightness-110 enabled:active:brightness-95',
+  destructive: 'bg-danger-strong text-white enabled:hover:brightness-110 enabled:active:brightness-95',
+  secondary: 'bg-field text-ink border border-sep shadow-[0_1px_1px_rgb(0_0_0/0.06)] enabled:hover:bg-hover',
+}
+
+/** macOS-style push button. */
 export function Button({ variant = 'secondary', icon, className = '', children, ...rest }: Props) {
-  const look =
-    variant === 'primary'
-      ? 'bg-accent text-white enabled:hover:brightness-110 enabled:active:brightness-95'
-      : 'bg-field text-ink border border-sep shadow-[0_1px_1px_rgb(0_0_0/0.06)] enabled:hover:bg-hover'
   return (
     <button
       type="button"
-      className={`no-drag inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-50 ${look} ${className}`}
+      className={`no-drag inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-50 aria-disabled:opacity-50 ${LOOKS[variant]} ${className}`}
       {...rest}
     >
       {icon}

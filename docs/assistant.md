@@ -26,12 +26,12 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
 
 ## What it can do
 
-| Kind     | Tools                                                                                            | How they run                                                      |
-| -------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Read     | status, senders, clean-up plan, history, calendar events, bills, transactions, balances          | Straight away. They change nothing.                               |
-| Refresh  | scan inbox, sync calendars                                                                       | Straight away. They fetch into Ordo's cache and change no server. |
-| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2) | Only after you press **Confirm** on a card.                       |
-| Navigate | open a page (Finances can open on a month)                                                       | Straight away. It only moves the window.                          |
+| Kind     | Tools                                                                                                                                    | How they run                                                      |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Read     | status, senders, clean-up plan, history, calendars, calendar events, bills, transactions, balances                                       | Straight away. They change nothing.                               |
+| Refresh  | scan inbox, sync calendars                                                                                                               | Straight away. They fetch into Ordo's cache and change no server. |
+| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event | Only after you press **Confirm** on a card.                       |
+| Navigate | open a page (Finances can open on a month)                                                                                               | Straight away. It only moves the window.                          |
 
 ## Privacy
 

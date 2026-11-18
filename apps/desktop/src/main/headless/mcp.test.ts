@@ -13,6 +13,7 @@ const READ_TOOLS = [
   'ordo_balances',
   'ordo_bills',
   'ordo_calendar_events',
+  'ordo_calendar_list',
   'ordo_calendar_sync',
   'ordo_cleanup_plan',
   'ordo_history',
@@ -23,6 +24,9 @@ const READ_TOOLS = [
 ]
 const CHANGE_TOOLS = [
   'ordo_ai_sort',
+  'ordo_calendar_add',
+  'ordo_calendar_delete',
+  'ordo_calendar_edit',
   'ordo_cleanup_run',
   'ordo_import_statement',
   'ordo_money_sort',
@@ -175,6 +179,84 @@ describe('MCP server', () => {
     const r = await client.callTool({ name: 'ordo_undo', arguments: { id: 3, confirm: true } })
     expect(json(r)).toEqual({ id: 3, restored: 2, missing: 0, reason: null })
     expect(services.cleanup.undo).toHaveBeenCalledWith(3)
+  })
+
+  it('calendar tools map onto the same commands, and need confirm', async () => {
+    const services = fakeServices()
+    services.calendar = {
+      ...services.calendar,
+      calendars: () => [{ id: 'cal-1', name: 'Home', readOnly: false, visible: true, source: 'icloud' }],
+      locate: () => ['cal-1'],
+      details: () => ({
+        calendarId: 'cal-1',
+        recurring: true,
+        editable: true,
+        draft: {
+          title: 'Standup',
+          allDay: false,
+          start: '2026-11-02T09:00',
+          end: '2026-11-02T09:30',
+          timeZone: 'Europe/London',
+          location: '',
+          notes: '',
+          repeat: { frequency: 'weekly' },
+          alert: 5,
+        },
+      }),
+    }
+    const { client } = await connect(true, services)
+
+    const refused = await client.callTool({
+      name: 'ordo_calendar_add',
+      arguments: { calendar: 'Home', title: 'Gym', start: '2026-11-20T18:00' },
+    })
+    expect(json(refused).error.code).toBe('confirm_required')
+    expect(services.calendar.createEvent).not.toHaveBeenCalled()
+
+    const added = await client.callTool({
+      name: 'ordo_calendar_add',
+      arguments: {
+        calendar: 'Home',
+        title: 'Gym',
+        start: '2026-11-20T18:00',
+        timeZone: 'UTC',
+        alert: null,
+        confirm: true,
+      },
+    })
+    expect(json(added)).toMatchObject({ uid: 'NEW-UID', calendar: 'Home' })
+    expect(services.calendar.createEvent).toHaveBeenCalledWith({
+      calendarId: 'cal-1',
+      draft: expect.objectContaining({ title: 'Gym', end: '2026-11-20T19:00', timeZone: 'UTC', alert: null }),
+    })
+
+    await client.callTool({
+      name: 'ordo_calendar_edit',
+      arguments: {
+        uid: 'ev-1',
+        occurrence: '2026-11-09T09:00:00.000Z',
+        title: 'Late standup',
+        confirm: true,
+      },
+    })
+    expect(services.calendar.updateEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'this',
+        draft: expect.objectContaining({ title: 'Late standup', alert: 5 }),
+      }),
+    )
+
+    await client.callTool({
+      name: 'ordo_calendar_delete',
+      arguments: { uid: 'ev-1', all: true, confirm: true },
+    })
+    expect(services.calendar.deleteEvent).toHaveBeenCalledWith({
+      ref: { calendarId: 'cal-1', uid: 'ev-1' },
+      scope: 'all',
+    })
+
+    const { tools } = await client.listTools()
+    expect(tools.find((t) => t.name === 'ordo_calendar_edit')!.description).toMatch(/untrusted/)
   })
 
   it('validates arguments with the CLI rules', async () => {

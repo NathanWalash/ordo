@@ -1,6 +1,16 @@
 import { z } from 'zod'
 import { CHANGE_COMMANDS, commandFrom, MAX_EVENT_DAYS, UsageError, type CommandName } from './args'
-import { gate, runCommand, type CommandResult, type OrdoServices } from './commands'
+import {
+  draftFromFlags,
+  gate,
+  pickCalendar,
+  pickEvent,
+  runCommand,
+  type CommandResult,
+  type EventFlags,
+  type OrdoServices,
+} from './commands'
+import { checkDraft, localZone, type EventDraft } from '@ordo/calendar-core'
 import { clean } from './format'
 import { pathProblem } from '../paths'
 
@@ -181,6 +191,111 @@ function splitPath(path: string) {
   return { file, folder, short }
 }
 
+// ---- Calendar events -------------------------------------------------------------------------
+
+const when = 'A day YYYY-MM-DD (all-day event) or a local time YYYY-MM-DDTHH:MM in timeZone'
+const eventFields = {
+  title: z.string().max(500).optional().describe('Title'),
+  start: z.string().max(16).optional().describe(`Start: ${when}`),
+  end: z
+    .string()
+    .max(16)
+    .optional()
+    .describe('End, in the same form as start (all-day: the last day). Default: an hour, or one day'),
+  timeZone: z
+    .string()
+    .max(64)
+    .optional()
+    .describe('IANA zone such as Europe/London (default: this computer’s)'),
+  location: z.string().max(1000).optional(),
+  notes: z.string().max(10_000).optional(),
+  until: z.string().max(10).optional().describe('Last day a repeat can happen, YYYY-MM-DD'),
+  count: z.number().int().min(1).max(1000).optional().describe('Or how many times it happens in all'),
+  alert: z
+    .number()
+    .int()
+    .min(-10_080)
+    .max(40_320)
+    .nullable()
+    .optional()
+    .describe('Alert this many minutes before the start; null for none'),
+}
+type EventArgs = {
+  title?: string
+  start?: string
+  end?: string
+  timeZone?: string
+  location?: string
+  notes?: string
+  until?: string
+  count?: number
+  alert?: number | null
+  repeat?: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'none'
+}
+/** The tool's arguments as the CLI's flags. */
+const eventFlags = (a: EventArgs) => ({
+  title: a.title,
+  start: a.start,
+  end: a.end,
+  'time-zone': a.timeZone,
+  location: a.location,
+  notes: a.notes,
+  until: a.until,
+  count: a.count,
+  alert: a.alert === null ? 'none' : a.alert,
+  repeat: a.repeat,
+})
+const whichEvent = {
+  uid: z.string().min(1).max(1024).describe('The event’s uid, from ordo_calendar_events'),
+  occurrence: z
+    .string()
+    .max(40)
+    .optional()
+    .describe('For one occurrence of a repeating event: its occurrence id, from ordo_calendar_events'),
+  all: z.boolean().default(false).describe('For a repeating event: change every occurrence'),
+  calendar: z.string().max(2048).optional().describe('Calendar name or id, if the uid is in more than one'),
+}
+type WhichArgs = { uid: string; occurrence?: string; all: boolean; calendar?: string }
+
+/** "Friday 20 November 2026, 09:00 – 10:00 (London time)", from a draft's own fields. */
+function whenLine(d: EventDraft): string {
+  const day = (s: string) => {
+    const [y, m, dd] = s.slice(0, 10).split('-').map(Number) as [number, number, number]
+    return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString('en-GB', {
+      timeZone: 'UTC',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+  }
+  if (d.allDay)
+    return d.start === d.end ? `${day(d.start)}, all day` : `${day(d.start)} to ${day(d.end)}, all day`
+  const time = (s: string) => s.slice(11, 16)
+  const zone = d.timeZone ? ` (${clean(d.timeZone.split('/').pop()!.replace(/_/g, ' '), 40)} time)` : ''
+  return d.start.slice(0, 10) === d.end.slice(0, 10)
+    ? `${day(d.start)}, ${time(d.start)} – ${time(d.end)}${zone}`
+    : `${day(d.start)} ${time(d.start)} to ${day(d.end)} ${time(d.end)}${zone}`
+}
+
+const repeatLine = (d: EventDraft) =>
+  !d.repeat
+    ? 'Doesn’t repeat'
+    : d.repeat.custom
+      ? 'Repeats as set in another app'
+      : `Repeats ${d.repeat.frequency}${d.repeat.until ? ` until ${d.repeat.until}` : d.repeat.count ? `, ${plural(d.repeat.count, 'time')}` : ''}`
+const alertLine = (d: EventDraft) => (d.alert === null ? 'No alert' : `Alert ${d.alert} minutes before`)
+
+const PERMANENT = 'This deletes it from iCloud and all your devices. You can’t undo this.'
+const blockedCard = (title: string, blocked: string): ChangePreview => ({
+  title,
+  details: [],
+  notes: [],
+  blocked,
+})
+const failure = (r: CommandResult) => (r.ok ? 'Ordo couldn’t work out what this would change.' : r.message)
+const NO_ICLOUD = 'No iCloud account is connected. Connect one in Mail first.'
+
 export const TOOLS: readonly OrdoTool[] = [
   tool({
     name: 'ordo_status',
@@ -275,6 +390,21 @@ export const TOOLS: readonly OrdoTool[] = [
       input: { from: a.from, to: a.to, limit: a.limit },
       offset: a.offset,
     })),
+  }),
+
+  tool({
+    name: 'ordo_calendar_list',
+    kind: 'read',
+    label: 'Reading your calendars',
+    done: (d) => `Read ${plural(num(d, 'calendars'), 'calendar')}`,
+    command: 'calendar list',
+    description:
+      'The user’s calendars: id, name, where each comes from (iCloud, a link or a file) and whether it is ' +
+      'read-only. Only writable iCloud calendars take new or changed events.',
+    untrusted: true,
+    reads: 'your calendars',
+    input: {},
+    run: viaCommand('calendar list', () => ({ input: {} })),
   }),
 
   tool({
@@ -571,6 +701,163 @@ export const TOOLS: readonly OrdoTool[] = [
           (!services.account().connected && {
             blocked: 'No iCloud account is connected. Connect one in Mail first.',
           })),
+      }
+    },
+  }),
+
+  tool({
+    name: 'ordo_calendar_add',
+    kind: 'change',
+    label: 'Adding an event',
+    done: () => 'Added an event',
+    command: 'calendar add',
+    intent:
+      /\b(?:add|create|schedule|book|put|set up|make)\b.{0,80}\b(?:events?|meetings?|appointments?|calendar|diary|reminders?|calls?)\b/i,
+    named: (a: { title: string }) => [a.title.trim()].filter(Boolean),
+    description:
+      'Add an event to one of the user’s writable iCloud calendars (see ordo_calendar_list). Optionally ' +
+      'repeating daily, weekly, monthly or yearly, until a day or for a number of times.',
+    untrusted: true,
+    reads: 'your calendar',
+    input: {
+      calendar: z.string().min(1).max(2048).describe('Calendar name or id, from ordo_calendar_list'),
+      ...eventFields,
+      title: z.string().max(500).describe('Title'),
+      start: z.string().max(16).describe(`Start: ${when}`),
+      repeat: z.enum(['daily', 'weekly', 'monthly', 'yearly']).optional(),
+    },
+    run: viaCommand('calendar add', (a: EventArgs & { calendar: string }) => ({
+      input: { ...eventFlags(a), calendar: a.calendar },
+    })),
+    async preview(services, a) {
+      const title = 'Add an event'
+      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
+      const picked = pickCalendar(services, a.calendar)
+      if (!picked.ok) return blockedCard(title, failure(picked.result))
+      const cal = picked.calendar
+      if (cal.readOnly)
+        return blockedCard(title, `“${clean(cal.name, 60)}” is read-only, so events can’t be added to it.`)
+      const draft = draftFromFlags(null, eventFlags(a) as EventFlags, localZone())
+      if (typeof draft === 'string') return blockedCard(title, draft)
+      const problem = checkDraft(draft)
+      if (problem) return blockedCard(title, problem)
+      return {
+        title: `Add “${clean(draft.title || 'New Event', 80)}” to ${clean(cal.name, 60)}`,
+        details: [
+          whenLine(draft),
+          repeatLine(draft),
+          alertLine(draft),
+          ...(draft.location ? [`Location: ${clean(draft.location, 120)}`] : []),
+        ],
+        notes: [
+          'It’s added to iCloud, so it shows on the user’s other devices too. It can be deleted from Calendar.',
+        ],
+      }
+    },
+  }),
+
+  tool({
+    name: 'ordo_calendar_edit',
+    kind: 'change',
+    label: 'Changing an event',
+    done: () => 'Changed an event',
+    command: 'calendar edit',
+    intent: /\b(?:move|reschedule|change|rename|edit|update|push|shift|postpone|bring forward|make it)\b/i,
+    named: (a: WhichArgs) => [a.uid],
+    description:
+      'Change an event on a writable iCloud calendar. Give only the fields to change. For a repeating event, ' +
+      'give occurrence to change just that one (“this event only”), or all: true for every occurrence; the ' +
+      'series then moves by as much as that occurrence moved. If the event was changed elsewhere since Ordo ' +
+      'last synced, nothing is overwritten and the result is the error code "conflict".',
+    untrusted: true,
+    reads: 'your calendar',
+    input: {
+      ...whichEvent,
+      ...eventFields,
+      repeat: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'none']).optional(),
+    },
+    run: viaCommand('calendar edit', (a: EventArgs & WhichArgs) => ({
+      input: { ...eventFlags(a), uid: a.uid, occurrence: a.occurrence, all: a.all, calendar: a.calendar },
+    })),
+    async preview(services, a) {
+      const title = 'Change an event'
+      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
+      const flags = eventFlags(a) as EventFlags
+      if (Object.values(flags).every((v) => v === undefined))
+        return blockedCard(title, 'Nothing would change: no fields were given.')
+      const picked = pickEvent(services, a)
+      if (!picked.ok) return blockedCard(title, failure(picked.result))
+      const before = picked.details.draft
+      const after = draftFromFlags(before, flags, localZone())
+      if (typeof after === 'string') return blockedCard(title, after)
+      const problem = checkDraft(after)
+      if (problem) return blockedCard(title, problem)
+      const changes: PreviewDetail[] = []
+      const diff = (label: string, x: string, y: string) => {
+        if (x !== y) changes.push(`${label}: ${x} → ${y}`)
+      }
+      diff('Title', clean(before.title, 80), clean(after.title, 80))
+      diff('When', whenLine(before), whenLine(after))
+      diff('Location', clean(before.location || 'none', 80), clean(after.location || 'none', 80))
+      if (before.notes !== after.notes) changes.push('Notes changed')
+      diff('Repeat', repeatLine(before), repeatLine(after))
+      diff('Alert', alertLine(before), alertLine(after))
+      const cal = services.calendar.calendars().find((c) => c.id === picked.ref.calendarId)
+      const series = picked.details.recurring
+      return {
+        title: `Change “${clean(before.title || 'New Event', 80)}”${cal ? ` in ${clean(cal.name, 60)}` : ''}`,
+        details: [
+          series
+            ? picked.scope === 'this'
+              ? `Only the occurrence on ${whenLine(before)}`
+              : 'Every event in the series'
+            : whenLine(before),
+          ...changes,
+        ],
+        notes: ['If it was changed on another device since Ordo last synced, nothing is overwritten.'],
+        ...(changes.length === 0 && { blocked: 'Nothing would change.' }),
+      }
+    },
+  }),
+
+  tool({
+    name: 'ordo_calendar_delete',
+    kind: 'change',
+    label: 'Deleting an event',
+    done: () => 'Deleted an event',
+    command: 'calendar delete',
+    intent: /\b(?:delete|remove|cancel|drop|clear)\b/i,
+    named: (a: WhichArgs) => [a.uid],
+    description:
+      'Delete an event from a writable iCloud calendar. For a repeating event, give occurrence to delete just ' +
+      'that one, or all: true to delete the whole series. This can’t be undone in Ordo.',
+    untrusted: true,
+    reads: 'your calendar',
+    input: whichEvent,
+    run: viaCommand('calendar delete', (a: WhichArgs) => ({
+      input: { uid: a.uid, occurrence: a.occurrence, all: a.all, calendar: a.calendar },
+    })),
+    async preview(services, a) {
+      const title = 'Delete an event'
+      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
+      const picked = pickEvent(services, a)
+      if (!picked.ok) return blockedCard(title, failure(picked.result))
+      const d = picked.details.draft
+      const name = clean(d.title || 'New Event', 80)
+      const cal = services.calendar.calendars().find((c) => c.id === picked.ref.calendarId)
+      const one = picked.details.recurring && picked.scope === 'this'
+      return {
+        title: one
+          ? `Delete one occurrence of “${name}”`
+          : picked.details.recurring
+            ? `Delete every event in the series “${name}”`
+            : `Delete “${name}”`,
+        details: [
+          whenLine(d),
+          ...(cal ? [`Calendar: ${clean(cal.name, 60)}`] : []),
+          ...(d.location ? [`Location: ${clean(d.location, 120)}`] : []),
+        ],
+        notes: [PERMANENT],
       }
     },
   }),

@@ -1,28 +1,74 @@
-import { useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { daysIn, isLong, layoutDay, sameDay, segments, type DateRange } from '@ordo/calendar-core'
 import { ItemBar } from './ItemChips'
+import { clampDays, nudged, nudgeFor, snap, SNAP } from './editing'
 import { fill, formatHour, formatTime, ink, type CalendarItem, type OpenItem } from './model'
+import type { MoveResult } from './useEventEditing'
 
 /** Pixels per minute in the time grid (48px an hour). */
 const PX = 0.8
 const GUTTER = 56
 const LANE = 20
+/** A keyboard move is saved once the keys have been still this long. */
+const KEY_SETTLE_MS = 900
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+const OPTION = isMac ? 'Option' : 'Alt'
+const EDGE = 'That’s the edge of the week. Move it to another week from the editor.'
+
+/** A move in progress, by drag or keys, shown until it's saved (or asked about) or cancelled. */
+interface Pending {
+  key: string
+  item: CalendarItem
+  days: number
+  minutes: number
+  resize: number
+  /** Handed over to be saved: the move stays drawn until the change itself shows. */
+  saving?: boolean
+}
 
 interface Props {
   range: DateRange
   today: Date
   items: CalendarItem[]
   onOpen: OpenItem
+  /** Double-click on an empty slot (or the all-day row) to create an event there. */
+  onCreate?: (at: Date, allDay: boolean) => void
+  /** Double-click on an event to edit it. */
+  onEditItem?: (item: CalendarItem) => void
+  /** Which timed events can be dragged or moved with the keyboard. */
+  canMove?: (item: CalendarItem) => boolean
+  onMove?: (item: CalendarItem, span: { start: Date; end: Date }) => Promise<MoveResult> | void
 }
 
-export function WeekView({ range, today, items, onOpen }: Props) {
+export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, canMove, onMove }: Props) {
   const days = daysIn(range)
   const long = items.filter((i) => isLong(i) || i.type === 'overlay')
   const timed = items.filter((i) => !long.includes(i))
   const segs = segments(long, days[0]!, days.length)
   const lanes = segs.reduce((n, s) => Math.max(n, s.lane + 1), 0)
   const scroller = useRef<HTMLDivElement>(null)
+  const grid = useRef<HTMLDivElement>(null)
   const now = useNow()
+  const hintId = useId()
+  const [pending, setPending] = useState<Pending | null>(null)
+  const [announce, setAnnounce] = useState('')
+  const pendingRef = useRef<Pending | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** The click that ends a drag mustn't also open the popover. */
+  const dragged = useRef(false)
+
+  const show = (p: Pending | null) => {
+    pendingRef.current = p
+    setPending(p)
+  }
 
   // Open scrolled to the working day, or to just before now if that's later.
   useEffect(() => {
@@ -32,10 +78,151 @@ export function WeekView({ range, today, items, onOpen }: Props) {
     el.scrollTop = Math.min(minutes, 24 * 60) * PX
   }, [])
 
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), [])
+
+  const columnWidth = () => {
+    const w = grid.current?.getBoundingClientRect().width ?? 0
+    return Math.max(1, (w - GUTTER) / days.length)
+  }
+  /** Which day of the week shown an event starts on. */
+  const column = (item: CalendarItem) =>
+    Math.max(
+      0,
+      days.findIndex((d) => sameDay(d, item.start)),
+    )
+
+  /**
+   * Save the move being shown, if there is one and it moved. It stays drawn where it was dropped
+   * until the change shows (or Ordo has asked "this event or all events?" and been answered).
+   */
+  const commit = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+    const p = pendingRef.current
+    if (!p || p.saving) return
+    if ((!p.days && !p.minutes && !p.resize) || !onMove) return show(null)
+    const handed = { ...p, saving: true }
+    show(handed)
+    const done = () => pendingRef.current === handed && show(null)
+    void Promise.resolve(onMove(p.item, nudged(p.item, p))).then(
+      (r) => {
+        done()
+        if (r === 'cancelled') setAnnounce('Move cancelled.')
+        else if (r === 'refused') setAnnounce('Not saved.')
+        else if (r) void r.saved.then((ok) => setAnnounce(ok ? 'Saved.' : 'Not saved.'))
+      },
+      () => {
+        done()
+        setAnnounce('Not saved.')
+      },
+    )
+  }, [onMove])
+
+  const startDrag = (e: ReactPointerEvent<HTMLElement>, item: CalendarItem, mode: 'move' | 'resize') => {
+    if (e.button !== 0 || !canMove?.(item) || pendingRef.current?.saving) return
+    e.stopPropagation()
+    const el = e.currentTarget
+    const origin = { x: e.clientX, y: e.clientY }
+    const width = columnWidth()
+    const col = column(item)
+    let moving = false
+    el.setPointerCapture?.(e.pointerId)
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - origin.x
+      const dy = ev.clientY - origin.y
+      if (!moving && Math.hypot(dx, dy) < 4) return
+      moving = true
+      const minutes = snap(dy / PX)
+      show(
+        mode === 'move'
+          ? {
+              key: item.key,
+              item,
+              days: clampDays(col, Math.round(dx / width), days.length).days,
+              minutes,
+              resize: 0,
+            }
+          : {
+              key: item.key,
+              item,
+              days: 0,
+              minutes: 0,
+              resize: Math.max(SNAP - (item.end.getTime() - item.start.getTime()) / 60_000, minutes),
+            },
+      )
+    }
+    const stop = () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', end)
+      el.removeEventListener('pointercancel', cancel)
+    }
+    const end = () => {
+      stop()
+      if (moving) {
+        dragged.current = true
+        setTimeout(() => (dragged.current = false), 0)
+        commit()
+      }
+    }
+    const cancel = () => {
+      stop()
+      show(null)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', end)
+    el.addEventListener('pointercancel', cancel)
+  }
+
+  const onKey = (e: KeyboardEvent<HTMLElement>, item: CalendarItem) => {
+    if (e.key === 'Escape' && pendingRef.current?.key === item.key && !pendingRef.current.saving) {
+      e.stopPropagation()
+      if (timer.current) clearTimeout(timer.current)
+      show(null)
+      setAnnounce('Move cancelled.')
+      return
+    }
+    const n = nudgeFor(e)
+    if (!n || !canMove?.(item)) return
+    e.preventDefault()
+    if (pendingRef.current?.saving) return
+    // Another event's move is still waiting: save it before starting this one.
+    if (pendingRef.current && pendingRef.current.key !== item.key) commit()
+    const was = pendingRef.current ?? { days: 0, minutes: 0, resize: 0 }
+    const wanted = was.days + (n.days ?? 0)
+    const { days: kept, clamped } = clampDays(column(item), wanted, days.length)
+    const next = {
+      key: item.key,
+      item,
+      days: kept,
+      minutes: was.minutes + (n.minutes ?? 0),
+      resize: Math.max(
+        SNAP - (item.end.getTime() - item.start.getTime()) / 60_000,
+        was.resize + (n.resize ?? 0),
+      ),
+    }
+    show(next)
+    const span = nudged(item, next)
+    setAnnounce(
+      clamped
+        ? EDGE
+        : `${item.title}: ${span.start.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}, ${formatTime(span.start)} to ${formatTime(span.end)}.`,
+    )
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(commit, KEY_SETTLE_MS)
+  }
+
   const cols = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`
   return (
     // One scroller with a sticky header keeps the columns aligned whatever the scrollbar width.
-    <div ref={scroller} className="h-full min-h-0 overflow-y-auto" aria-label="Week">
+    // `isolate` keeps the header's stacking inside the view, under sheets and popovers.
+    <div ref={scroller} className="isolate h-full min-h-0 overflow-y-auto" aria-label="Week">
+      <span id={hintId} className="sr-only">
+        {OPTION} and the arrow keys move this event by 15 minutes or a day. Add Shift to change how long it
+        is.
+      </span>
+      <span className="sr-only" aria-live="polite" data-testid="week-announce">
+        {announce}
+      </span>
       <div className="sticky top-0 z-30 bg-content">
         <div className="grid border-b border-sep" style={{ gridTemplateColumns: cols }}>
           <div />
@@ -74,6 +261,15 @@ export function WeekView({ range, today, items, onOpen }: Props) {
           >
             all-day
           </div>
+          {onCreate &&
+            days.map((d, i) => (
+              <div
+                key={`slot-${d.getTime()}`}
+                data-testid="all-day-slot"
+                onDoubleClick={() => onCreate(d, true)}
+                style={{ gridColumn: i + 2, gridRow: `1 / span ${Math.max(lanes, 1)}` }}
+              />
+            ))}
           {segs.map((s) => (
             <div
               key={s.item.key}
@@ -83,6 +279,7 @@ export function WeekView({ range, today, items, onOpen }: Props) {
               <ItemBar
                 item={s.item}
                 onOpen={onOpen}
+                onEdit={onEditItem}
                 continuesBefore={s.continuesBefore}
                 continuesAfter={s.continuesAfter}
               />
@@ -91,7 +288,7 @@ export function WeekView({ range, today, items, onOpen }: Props) {
         </div>
       </div>
 
-      <div className="relative grid" style={{ gridTemplateColumns: cols, height: 24 * 60 * PX }}>
+      <div ref={grid} className="relative grid" style={{ gridTemplateColumns: cols, height: 24 * 60 * PX }}>
         <div className="relative">
           {Array.from({ length: 23 }, (_, i) => i + 1).map((h) => (
             <span
@@ -109,7 +306,22 @@ export function WeekView({ range, today, items, onOpen }: Props) {
             day={d}
             items={timed}
             now={sameDay(d, now) ? now : null}
-            onOpen={onOpen}
+            onOpen={(item, anchor) => {
+              if (dragged.current) {
+                dragged.current = false
+                return
+              }
+              onOpen(item, anchor)
+            }}
+            onCreate={onCreate}
+            onEditItem={onEditItem}
+            canMove={canMove}
+            pending={pending}
+            columnWidth={columnWidth}
+            hintId={hintId}
+            onPointerDown={startDrag}
+            onKey={onKey}
+            onBlurItem={(item) => pendingRef.current?.key === item.key && commit()}
           />
         ))}
         {/* Hour lines across every day. */}
@@ -127,16 +339,37 @@ export function WeekView({ range, today, items, onOpen }: Props) {
   )
 }
 
+const KEYS_MOVE =
+  'Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Shift+ArrowUp Alt+Shift+ArrowDown'
+
 function DayColumn({
   day,
   items,
   now,
   onOpen,
+  onCreate,
+  onEditItem,
+  canMove,
+  pending,
+  columnWidth,
+  hintId,
+  onPointerDown,
+  onKey,
+  onBlurItem,
 }: {
   day: Date
   items: CalendarItem[]
   now: Date | null
   onOpen: OpenItem
+  onCreate?: (at: Date, allDay: boolean) => void
+  onEditItem?: (item: CalendarItem) => void
+  canMove?: (item: CalendarItem) => boolean
+  pending: Pending | null
+  columnWidth: () => number
+  hintId: string
+  onPointerDown: (e: ReactPointerEvent<HTMLElement>, item: CalendarItem, mode: 'move' | 'resize') => void
+  onKey: (e: KeyboardEvent<HTMLElement>, item: CalendarItem) => void
+  onBlurItem: (item: CalendarItem) => void
 }) {
   const weekend = day.getDay() === 0 || day.getDay() === 6
   const blocks = layoutDay(items, day, 20)
@@ -144,25 +377,51 @@ function DayColumn({
     <div
       className={`relative border-l border-sep ${weekend ? 'bg-black/[0.018] dark:bg-white/[0.025]' : ''}`}
       aria-label={day.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+      onDoubleClick={(e) => {
+        if (!onCreate || e.target !== e.currentTarget) return
+        const minutes = Math.floor((e.clientY - e.currentTarget.getBoundingClientRect().top) / PX / 30) * 30
+        const at = new Date(day)
+        at.setMinutes(Math.max(0, Math.min(23 * 60 + 30, minutes)))
+        onCreate(at, false)
+      }}
     >
       {blocks.map(({ item, top, height, column, columns }) => {
         const color = item.type === 'event' ? item.color : 'var(--ink-3)'
-        const compact = height * PX < 34
+        const p = pending?.key === item.key ? pending : null
+        const movable = canMove?.(item) ?? false
+        const shownTop = top + (p?.minutes ?? 0)
+        const shownHeight = Math.max(SNAP, height + (p?.resize ?? 0))
+        const compact = shownHeight * PX < 34
+        const span = p ? nudged(item, p) : item
         return (
           <button
             key={item.key}
             type="button"
+            data-testid="week-event"
+            data-event-key={item.key}
+            aria-describedby={movable ? hintId : undefined}
+            aria-keyshortcuts={movable ? KEYS_MOVE : undefined}
             onClick={(e) => {
               e.stopPropagation()
               onOpen(item, e.currentTarget.getBoundingClientRect())
             }}
-            className="absolute z-10 flex overflow-hidden rounded-[5px] border-l-[3px] px-1.5 py-0.5 text-left text-[11px] leading-tight hover:brightness-95 dark:hover:brightness-125"
+            onDoubleClick={(e) => {
+              e.stopPropagation()
+              onEditItem?.(item)
+            }}
+            onPointerDown={(e) => onPointerDown(e, item, 'move')}
+            onKeyDown={(e) => onKey(e, item)}
+            onBlur={() => onBlurItem(item)}
+            className={`absolute flex overflow-hidden rounded-[5px] border-l-[3px] px-1.5 py-0.5 text-left text-[11px] leading-tight hover:brightness-95 dark:hover:brightness-125 ${
+              p ? 'z-20 shadow-[0_4px_12px_rgb(0_0_0/0.18)] ring-1 ring-accent' : 'z-10'
+            } ${movable ? 'touch-none' : ''}`}
             style={{
-              top: top * PX + 1,
-              height: height * PX - 2,
+              top: shownTop * PX + 1,
+              height: shownHeight * PX - 2,
               left: `calc(${(column / columns) * 100}% + 2px)`,
               width: `calc(${100 / columns}% - 4px)`,
-              background: fill(color, 22),
+              transform: p?.days ? `translateX(${p.days * columnWidth()}px)` : undefined,
+              background: fill(color, p ? 34 : 22),
               borderColor: color,
               color: ink(color),
               flexDirection: compact ? 'row' : 'column',
@@ -170,11 +429,26 @@ function DayColumn({
             }}
           >
             <span className="truncate font-semibold">{item.title}</span>
-            {/* Short items show their title only; the time is in the popover. */}
-            <span className={compact ? 'hidden' : 'truncate opacity-80'}>
-              {formatTime(item.start)}
-              {!compact && item.type === 'event' && item.event.location ? ` · ${item.event.location}` : ''}
-            </span>
+            {p ? (
+              // While moving or resizing: where it will start and end, even on short events.
+              <span className="shrink-0 tabular-nums" data-testid="move-times">
+                {formatTime(span.start)} – {formatTime(span.end)}
+              </span>
+            ) : (
+              // Short items show their title only; the time is in the popover.
+              <span className={compact ? 'hidden' : 'truncate opacity-80'}>
+                {formatTime(item.start)}
+                {item.type === 'event' && item.event.location ? ` · ${item.event.location}` : ''}
+              </span>
+            )}
+            {movable && (
+              <span
+                aria-hidden="true"
+                data-testid="resize-handle"
+                onPointerDown={(e) => onPointerDown(e, item, 'resize')}
+                className="absolute inset-x-0 bottom-0 h-[6px] cursor-ns-resize"
+              />
+            )}
           </button>
         )
       })}

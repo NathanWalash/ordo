@@ -19,6 +19,8 @@
   --sheet: #f6f6f6;
   --field: #ffffff;
   --danger: #ff3b30;
+  /* Fill for a button that deletes: white text on it is 5.4:1. --danger fails AA as a fill. */
+  --danger-strong: #d70015;
   --success: #34c759;
   /* Frosted glass: translucent fills, a hairline highlight on the top edge, and soft shadows. */
   --bar: rgb(255 255 255 / 0.72);
@@ -103,6 +105,7 @@
   --color-sheet: var(--sheet);
   --color-field: var(--field);
   --color-danger: var(--danger);
+  --color-danger-strong: var(--danger-strong);
   --color-success: var(--success);
   --color-accent-tint: var(--accent-tint);
   --color-warn: var(--warn);
