@@ -214,6 +214,68 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
     (d.billPairs ? ` Matched ${plural(d.billsMatched, 'bill')} to email, to confirm in the app.` : '') +
     (d.errors.length ? `\n${d.errors.map((e: string) => clean(e, 200)).join('\n')}` : ''),
 
+  'money knows': (d) =>
+    [
+      d.facts.length
+        ? table(d.facts.map((f: any) => [clean(f.id, 40), clean(f.kind, 14), clean(f.summary, 120)]))
+        : 'Ordo hasn’t learned anything yet. Answer `money questions` or teach it in the app.',
+      ...d.accounts.map((a: any) => clean(a.note, 160)),
+    ]
+      .filter(Boolean)
+      .join('\n'),
+
+  'money questions': (d) =>
+    d.questions.length
+      ? d.questions
+          .map(
+            (q: any) =>
+              `${clean(q.text, 240)}\n  id: ${clean(q.id, 200)}\n  answers: ${q.answers
+                .map((a: any) => `${clean(a.id, 40)} (${clean(a.label, 40)})`)
+                .join(', ')}`,
+          )
+          .join('\n\n')
+      : 'No questions right now.',
+
+  'money loose-ends': (d) =>
+    [
+      ...d.held.map(
+        (h: any) =>
+          `Holding ${pounds(h.holdingPence)} of ${clean(h.from, 40)}'s money for ${clean(h.for, 40)}` +
+          (h.holdingPence > 0 ? ' (not passed on yet)' : ''),
+      ),
+      ...d.owed
+        .filter((o: any) => o.outstandingPence > 0)
+        .map(
+          (o: any) =>
+            `${clean(o.person, 40)} owes you ${pounds(o.outstandingPence)}${o.note ? ` for ${clean(o.note, 60)}` : ''}`,
+        ),
+    ].join('\n') || 'No loose ends.',
+
+  'money events': (d) =>
+    d.events.length
+      ? table([
+          ['EVENT', 'PAID OUT', 'PAID BACK', 'NET'],
+          ...d.events.map((e: any) => [
+            clean(e.name, 40),
+            pounds(e.paidOutPence),
+            pounds(e.paidBackPence),
+            pounds(e.netPence),
+          ]),
+        ])
+      : 'No events yet. Add one in the app.',
+
+  'money compare': (d) =>
+    [
+      `${d.category ? `${clean(d.category, 40)}: ` : ''}${pounds(d.thisMonth.netPence)} from ${d.thisMonth.from} to ${d.thisMonth.to}, ` +
+        `against ${pounds(d.lastMonth.netPence)} from ${d.lastMonth.from} to ${d.lastMonth.to} ` +
+        `(${d.differencePence > 0 ? `${pounds(d.differencePence)} more` : d.differencePence < 0 ? `${pounds(-d.differencePence)} less` : 'the same'}).`,
+      ...d.caveats.map((c: string) => clean(c, 200)),
+    ].join('\n'),
+
+  'money answer': (d) => `Answered. Ordo saved ${plural(d.saved, 'fact')}.`,
+
+  'money forget': () => 'Forgotten.',
+
   'ai status': (d) =>
     [
       `Using: ${d.settings.provider === 'none' ? 'nothing (AI is off)' : `${d.settings.provider}${d.settings.model ? ` (${clean(d.settings.model)})` : ''}`}`,
@@ -276,6 +338,13 @@ Money:
   money import <file.csv> [--account <name>] --confirm   Import a bank statement *
   money sort --confirm                          Categorise merchants in Other and match bills
                                                 to email with the saved model (AI for Money) *
+  money knows                                   What you've taught Ordo, and how banks date payments
+  money questions                               Ordo's questions, with answer ids
+  money loose-ends                              Money you hold for others, and who owes you
+  money events                                  Events and trips: paid out, paid back, net
+  money compare [--category <c>] [--account <name>]   This month so far against last month
+  money answer <question-id> --answer <id> --confirm  Answer a question; saves its facts *
+  money forget <fact-id> --confirm              Forget a fact *
 
 AI:
   ai status                                     Providers and the saved choice

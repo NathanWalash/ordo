@@ -143,6 +143,8 @@ it('marks exactly the commands that change data', () => {
   expect([...CHANGE_COMMANDS].sort()).toEqual([
     'ai sort',
     'cleanup run',
+    'money answer',
+    'money forget',
     'money import',
     'money sort',
     'undo',

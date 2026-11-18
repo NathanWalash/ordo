@@ -3,6 +3,7 @@ import * as mail from '../mail'
 import * as cleanup from '../cleanup'
 import * as calendar from '../calendar'
 import * as money from '../money'
+import * as memory from '../money-memory'
 import { aiSettings, categoriseSenders, sendersWithAi, status as aiStatus } from '../ai'
 import { lockHolder } from '../writes'
 import type { OrdoServices } from './commands'
@@ -36,6 +37,10 @@ export function mainServices(): OrdoServices {
       importFile: money.importStatementFile,
       counts: money.counts,
       aiSort: (onProgress) => money.aiSort(onProgress),
+      memory: memory.view,
+      answer: memory.answer,
+      forget: memory.deleteFact,
+      compare: memory.compare,
     },
     ai: {
       settings: aiSettings,

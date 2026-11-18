@@ -206,6 +206,70 @@ export function createMcpServer(
   )
 
   server.registerTool(
+    'ordo_money_knows',
+    {
+      description:
+        'What the user has taught Ordo about their money (people, events, paybacks, money held for others, ' +
+        'payments to ignore), as sentences with ids, and how each bank dates payments. ' +
+        UNTRUSTED,
+      annotations: readOnly,
+    },
+    () => call('money knows', {}),
+  )
+
+  server.registerTool(
+    'ordo_money_questions',
+    {
+      description:
+        'Short questions Ordo has about the user’s money (who a person is, whether money in was a payback ' +
+        'or passed straight through), each with answer ids. Ask the user; answer with ordo_money_answer. ' +
+        UNTRUSTED,
+      annotations: readOnly,
+    },
+    () => call('money questions', {}),
+  )
+
+  server.registerTool(
+    'ordo_money_loose_ends',
+    {
+      description:
+        'Money the user holds for someone else that hasn’t gone on yet (not income), and money people still ' +
+        'owe them, in pence (GBP). Worked out by Ordo. ' +
+        UNTRUSTED,
+      annotations: readOnly,
+    },
+    () => call('money loose-ends', {}),
+  )
+
+  server.registerTool(
+    'ordo_money_events',
+    {
+      description:
+        'Events and trips the user saved, with paid out, paid back and net cost across every account, in ' +
+        'pence (GBP). ' +
+        UNTRUSTED,
+      annotations: readOnly,
+    },
+    () => call('money events', {}),
+  )
+
+  server.registerTool(
+    'ordo_money_compare',
+    {
+      description:
+        'Spending this month so far against last month to the same day, net of paybacks, in pence (GBP). ' +
+        'Transfers between the user’s accounts, money held for others and ignored payments never count. ' +
+        'Includes caveats such as banks that show posting dates.',
+      inputSchema: {
+        category: z.string().max(40).optional().describe('Only this category, e.g. Groceries or Home'),
+        account: z.string().max(60).optional().describe('Only this account, by name'),
+      },
+      annotations: readOnly,
+    },
+    ({ category: c, account }) => call('money compare', { category: c, account }),
+  )
+
+  server.registerTool(
     'ordo_scan',
     {
       description:
@@ -305,6 +369,34 @@ export function createMcpServer(
       annotations: changes,
     },
     ({ confirm: yes }) => call('money sort', { confirm: yes }),
+  )
+
+  server.registerTool(
+    'ordo_money_answer',
+    {
+      description:
+        'Answer one of Ordo’s money questions with one of its answer ids (from ordo_money_questions). Ordo saves ' +
+        'the facts that answer means; "no" and "later" only stop the question coming back. ' +
+        CHANGE,
+      inputSchema: {
+        question: z.string().min(1).max(400).describe('Question id from ordo_money_questions'),
+        answer: z.string().min(1).max(40).describe('One of that question’s answer ids'),
+        confirm,
+      },
+      annotations: changes,
+    },
+    ({ question, answer, confirm: yes }) => call('money answer', { question, answer, confirm: yes }),
+  )
+
+  server.registerTool(
+    'ordo_money_forget',
+    {
+      description:
+        'Forget one fact Ordo learned about the user’s money (ids from ordo_money_knows). ' + CHANGE,
+      inputSchema: { fact: z.string().min(1).max(100).describe('Fact id'), confirm },
+      annotations: changes,
+    },
+    ({ fact, confirm: yes }) => call('money forget', { fact, confirm: yes }),
   )
 
   server.registerTool(

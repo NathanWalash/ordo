@@ -1,6 +1,105 @@
 import { vi } from 'vitest'
-import type { CategorisedSender } from '@ordo/shared'
+import type { CategorisedSender, MemoryView } from '@ordo/shared'
 import type { OrdoServices } from './commands'
+
+const period = (from: string, to: string, spent: number) => ({
+  from,
+  to,
+  spent,
+  paidBack: 0,
+  net: spent,
+  byCategory: [{ category: 'Home', amount: spent }],
+})
+
+/** What Ordo has learned, for the memory commands: one held balance, one question, one event. */
+export function memoryView(): MemoryView {
+  return {
+    facts: [
+      {
+        id: 'f1',
+        kind: 'held',
+        from: 'Gabe',
+        forPerson: 'Patrick',
+        what: 'rent',
+        createdAt: '2026-11-18T10:00:00.000Z',
+        source: 'question',
+        summary: 'Money from Gabe is rent you hold for Patrick, not your income.',
+      },
+    ],
+    questions: [
+      {
+        id: 'pass-through:m1>m2',
+        kind: 'pass-through',
+        step: 'matches',
+        text: "H Bennie's £50.00 on 5 Oct went out again the same day to Sam. Was it just passing through?",
+        confidence: 'exact',
+        answers: [
+          { id: 'yes', label: 'Yes, passing through' },
+          { id: 'no', label: 'No' },
+        ],
+      },
+    ],
+    held: [
+      {
+        factId: 'f1',
+        from: 'Gabe',
+        forPerson: 'Patrick',
+        what: 'rent',
+        received: 89550,
+        passedOn: 59700,
+        holding: 29850,
+        lastIn: '2026-11-01',
+        lastOut: '2026-10-02',
+        ins: [],
+        outs: [],
+      },
+    ],
+    owed: [
+      {
+        factId: 'f2',
+        person: 'Someone',
+        amount: 3000,
+        received: 0,
+        outstanding: 3000,
+        date: '2026-10-31',
+        note: 'Halloween',
+      },
+    ],
+    billsOwed: [],
+    events: [
+      {
+        id: 'e1',
+        name: 'Italy',
+        from: '2026-08-28',
+        to: '2026-09-04',
+        paidOut: 42399,
+        paidBack: 500,
+        net: 41899,
+        byCategory: [{ category: 'Other', amount: 25000 }],
+        byAccount: [],
+        outgoings: [],
+        paybacks: [],
+        excluded: 1,
+      },
+    ],
+    people: [],
+    caveats: [
+      { account: 'HSBC', dates: 'posting', from: 'bank', text: 'HSBC shows the day a payment cleared.' },
+    ],
+    compare: {
+      category: null,
+      account: null,
+      thisMonth: period('2026-11-01', '2026-11-18', 5000),
+      lastMonth: period('2026-10-01', '2026-10-18', 8000),
+      difference: -3000,
+      caveats: ['HSBC shows posting dates, so the last few days may not be in yet.'],
+    },
+    accounts: ['HSBC', 'Monzo'],
+    categories: ['Home'],
+    hasTransactions: true,
+    ask: { ready: false, provider: null, cloud: false, reason: 'no-model' },
+  }
+}
 
 /** A sender as the analysis would return it. */
 export function sender(address: string, extra: Partial<CategorisedSender> = {}): CategorisedSender {
@@ -78,6 +177,10 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         ok: false as const,
         message: 'Turn on AI for Money in Settings → AI first.',
       })),
+      memory: async () => memoryView(),
+      answer: vi.fn(async () => ({ ok: true as const, facts: 1 })),
+      forget: vi.fn(async () => ({ ok: true as const })),
+      compare: vi.fn(async () => memoryView().compare),
     },
     ai: {
       settings: () => ({
