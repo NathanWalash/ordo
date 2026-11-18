@@ -55,8 +55,9 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
   question and answer, or Ordo's sentence for the fact, never the model's words.
   Earlier questions and answers that used these tools are never sent to a cloud model without that
   consent, and the conversation starts afresh whenever the provider, the assistant's OK or the
-  Money details consent changes. Ordo checks the provider and both consents again just before every
-  tool runs, and again after you confirm a change: if one changed mid-question, it stops there. The
+  Money details consent changes. Ordo checks the provider and both consents again before every
+  call to the model, just before every tool runs, and after you confirm a change: if one changed
+  mid-question, it stops there, before anything more is read or sent. The
   answer card says when an answer also adds someone to Bills, and the forget card says when
   forgetting an event would also drop a payback that has no payments to link to.
 - The conversation is kept in memory for this session only. Tool results are sent for the question

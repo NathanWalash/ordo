@@ -401,6 +401,31 @@ describe('money details in history and mid-run', () => {
     expect(requests).toHaveLength(1)
   })
 
+  it('consent taken back after a money tool ran stops before its results go to the model', async () => {
+    state.settings = cloud
+    const { mainServices } = await import('../headless/services')
+    const services = mainServices()
+    const memory = services.money.memory
+    // The user turns the Money details consent off while the tool is reading.
+    services.money.memory = async () => {
+      state.settings = { ...cloud, moneyDetailsConsent: null }
+      return memory()
+    }
+    try {
+      const requests = model(looseEndsThenAnswer(), 'cloud')
+      setCloudConsent({ allow: true })
+      expect(await ask({ text: 'what am I holding?', page: 'home' }, asWc(window()))).toMatchObject({
+        ok: false,
+        reason: 'consent',
+      })
+      // The first call chose the tool; the call that would carry its results was never made.
+      expect(requests).toHaveLength(1)
+    } finally {
+      services.money.memory = memory
+      setCloudConsent({ allow: false })
+    }
+  })
+
   it('a change confirmed after the consent was taken back doesn’t run', async () => {
     state.settings = cloud
     model(() => ({ type: 'tool', tool: 'ordo_money_forget', args: { fact: 'f1' } }), 'cloud')

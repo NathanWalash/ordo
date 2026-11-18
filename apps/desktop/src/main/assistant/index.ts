@@ -215,6 +215,7 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
       // Turns that used money memory tools never go to a cloud model without the Money details consent.
       history: noMoneyDetails ? history.filter((t) => !t.moneyDetails) : history,
       allowed,
+      canSend: (moneyDetails) => allowed({ moneyDetails }),
       question: parsed.data.text,
       page,
       today: today(),
