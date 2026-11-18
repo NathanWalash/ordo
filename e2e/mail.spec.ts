@@ -95,7 +95,7 @@ async function screenshot(name: string) {
 
 const newsletter = () =>
   [
-    `From: Daily Digest <digest-${run}@news.example>`,
+    `From: News Desk <digest-${run}@news.example>`,
     `To: ${TEST_ACCOUNT.email}`,
     `Subject: ${NEWS}`,
     'Date: Mon, 16 Nov 2026 09:00:00 +0000',
@@ -159,7 +159,7 @@ test.beforeAll(async () => {
     )
     await c.append(
       'INBOX',
-      `From: Shop <orders@shop.example>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: ${OLD}\r\n` +
+      `From: Order Desk <orders@shop.example>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: ${OLD}\r\n` +
         `Date: Sun, 15 Nov 2026 08:00:00 +0000\r\n\r\nThanks for your order.\r\n`,
     )
   })
@@ -204,7 +204,7 @@ test('connects and shows the mailboxes and inbox', async () => {
   await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
 
   await expect(row(NEWS)).toBeVisible({ timeout: 20_000 })
-  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Unread\\. Daily Digest: ${NEWS}`))
+  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Unread\\. News Desk: ${NEWS}`))
   const boxes = page.getByRole('complementary', { name: 'Mailboxes' })
   for (const name of ['Drafts', 'Sent', 'Archive', 'Junk', 'Bin', FOLDER])
     await expect(boxes.getByRole('button', { name, exact: true })).toBeVisible()
@@ -238,7 +238,7 @@ test('shows HTML mail in a locked-down frame with remote images blocked', async 
   expect(imageHits).toHaveLength(0)
 
   // Opening it marked it read, on the server too.
-  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Daily Digest: ${NEWS}`))
+  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^News Desk: ${NEWS}`))
   const [msg] = await eventually(
     () => find('INBOX', NEWS),
     (m) => m[0]?.flags.has('\\Seen') === true,
@@ -310,9 +310,9 @@ test('saves an attachment with the save dialog', async () => {
 
 test('flags and marks unread, on the server too', async () => {
   await toolbar().getByRole('button', { name: 'Flag' }).click()
-  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Flagged\\. Daily Digest: ${NEWS}`))
+  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Flagged\\. News Desk: ${NEWS}`))
   await toolbar().getByRole('button', { name: 'Mark as unread' }).click()
-  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Unread\\. Flagged\\. Daily Digest`))
+  await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Unread\\. Flagged\\. News Desk`))
   const [msg] = await eventually(
     () => find('INBOX', NEWS),
     (m) => m[0]?.flags.has('\\Flagged') === true && !m[0]?.flags.has('\\Seen'),
