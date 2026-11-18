@@ -111,7 +111,14 @@ process through the typed `window.ordo` API exposed by the preload script
   writes a RECURRENCE-ID override, or an EXDATE when deleting. "All events" moves the
   series by however much the occurrence moved (days, then time of day) and moves
   EXDATEs and overrides with it; a different repeat frequency drops them.
-- The window shows a change at once and rolls it back if iCloud refuses it.
+- TZIDs that aren't IANA names (Outlook's `W. Europe Standard Time`) are read through
+  the file's own VTIMEZONE, as when displaying, and times that weren't changed are kept
+  exactly as written. An event in a zone Ordo can't work out isn't editable. Only
+  TZIDs on an event's times get a VTIMEZONE, and more than ten zones is refused.
+- An occurrence id must name a real occurrence (an override or one the rule produces),
+  or the change is refused as not found.
+- The window shows a change at once and rolls it back if iCloud refuses it. Changes in
+  one process are queued, so each sends the ETag the last one saved.
 
 ## Mail module
 
