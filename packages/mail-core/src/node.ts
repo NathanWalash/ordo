@@ -7,6 +7,7 @@ export {
   MailConnectionError,
   MailUnavailableError,
   classifyImapError,
+  serverWords,
   testImapLogin,
   type ImapConfig,
   type MailConnectionReason,

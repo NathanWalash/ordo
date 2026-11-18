@@ -84,3 +84,27 @@ describe('CalDavProvider when the server is busy', () => {
     expect(err).not.toBeInstanceOf(CalendarAuthError)
   })
 })
+
+describe('CalDavProvider when discovery is refused and then the server is busy', () => {
+  let server: Server
+  let url: string
+  beforeAll(async () => {
+    // .well-known isn't supported (405, which discovery tolerates); the account itself is busy.
+    server = createServer((req, res) => {
+      res.writeHead(req.url?.includes('.well-known') ? 405 : 503)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('reports the 503, not the tolerated 405', async () => {
+    const p = new CalDavProvider({
+      serverUrl: url,
+      username: 'you@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+    })
+    await expect(p.connect()).rejects.toBeInstanceOf(CalendarUnavailableError)
+  })
+})

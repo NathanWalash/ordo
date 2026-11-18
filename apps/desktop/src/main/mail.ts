@@ -9,6 +9,7 @@ import {
   MailUnavailableError,
   MailStore,
   classifyImapError,
+  serverWords,
   type MailConnectionReason,
   scanMailbox,
   testImapLogin,
@@ -103,12 +104,13 @@ export function explain(err: unknown, email?: string): { error: ConnectError; me
     }
     return { error: 'network', message: messages[e.reason] }
   }
-  const detail = (e as { code?: unknown }).code ?? e.message
+  // The error's code or message can carry the server's own text: cleaned like everything it says.
+  const detail = serverWords((e as { code?: unknown }).code ?? e.message)
   return {
     error: 'unknown',
     message:
       'Something unexpected went wrong talking to iCloud' +
-      (typeof detail === 'string' && detail ? ` (${detail.slice(0, 120)})` : '') +
+      (detail ? ` (${detail.slice(0, 120)})` : '') +
       '. Try again in a moment.',
   }
 }

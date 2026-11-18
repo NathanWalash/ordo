@@ -60,13 +60,16 @@ const DROPPED =
 const TLS = /^(ERR_SSL_|ERR_TLS_|CERT_|UNABLE_TO_|SELF_SIGNED_|DEPTH_ZERO_|HOSTNAME_MISMATCH|EPROTO$)/
 /** RFC 5530 response codes that mean "not now" rather than "wrong password". */
 const REFUSING_CODES = new Set(['UNAVAILABLE', 'LIMIT', 'INUSE', 'SERVERBUG'])
-const REFUSING_TEXT = /too many|try again|temporar|throttl|rate.?limit|maintenance|unavailable|overload|busy/i
+const REFUSING_TEXT = /too many|temporar|throttl|rate.?limit|maintenance|unavailable|overload|busy/i
 
-/** The server's words without control characters, short enough to show. */
-function serverWords(text: unknown): string | null {
+/** The server's words without control, invisible or bidi characters, short enough to show. */
+export function serverWords(text: unknown): string | null {
   if (typeof text !== 'string') return null
-  // eslint-disable-next-line no-control-regex
-  const clean = text.replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, ' ')
+  const clean = text.replace(
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g,
+    ' ',
+  )
   const words = clean.replace(/\s+/g, ' ').trim()
   if (!words) return null
   return words.length > 160 ? `${words.slice(0, 159)}…` : words

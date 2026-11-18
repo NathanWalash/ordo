@@ -295,4 +295,10 @@ describe('what connecting to iCloud says when it fails', () => {
     expect(r.error).toBe('unknown')
     expect(r.message).toContain('(WEIRD_THING)')
   })
+
+  it('cleans what an unknown error says before showing it', () => {
+    const rlo = String.fromCharCode(0x202e)
+    const r = mail.explain(new Error(`Server said\r\n${rlo}evil`))
+    expect(r.message).toContain('(Server said evil)')
+  })
 })

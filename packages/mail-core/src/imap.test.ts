@@ -151,6 +151,22 @@ describe('classifyImapError', () => {
     expect((classifyImapError(err) as MailUnavailableError).serverText).toBe('Slow down now')
   })
 
+  it('a failed sign-in that only says to try again is still about the password', () => {
+    const err = Object.assign(new Error('Command failed'), {
+      authenticationFailed: true,
+      responseText: 'LOGIN failed, please try again',
+    })
+    expect(classifyImapError(err)).toBeInstanceOf(MailAuthError)
+  })
+
+  it('cleans invisible and bidi characters out of what the server said', () => {
+    const sneaky = ['Slow', 0x200b, 'down', 0x061c, 'now', 0x2060, 'or', 0xfeff, 'later', 0x2028, 'ok']
+      .map((p) => (typeof p === 'number' ? String.fromCharCode(p) : p))
+      .join('')
+    const err = Object.assign(new Error('x'), { code: 'ETHROTTLE', responseText: sneaky })
+    expect((classifyImapError(err) as MailUnavailableError).serverText).toBe('Slow down now or later ok')
+  })
+
   it('leaves anything else alone', () => {
     const err = new Error('odd')
     expect(classifyImapError(err)).toBe(err)

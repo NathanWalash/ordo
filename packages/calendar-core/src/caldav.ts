@@ -37,14 +37,16 @@ export class CalDavProvider implements CalendarProvider {
       defaultAccountType: 'caldav',
       fetch: async (input, init) => {
         const res = await fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeout) })
-        // tsdav often reports a refused request as "cannot find principalUrl": remember why.
-        if (!res.ok && res.status !== 404 && res.status !== 207) this.failedStatus ??= res.status
+        // tsdav often reports a refused request as "cannot find principalUrl": remember why. Only
+        // statuses that explain a failure count (discovery tolerates redirects, 400 and 405 from
+        // .well-known), and a busy server outranks a refusal.
+        if (severity(res.status) > severity(this.failedStatus)) this.failedStatus = res.status
         return res
       },
     })
   }
 
-  /** The first HTTP error status in the current call, if any. */
+  /** The most telling HTTP error status in the current call, if any. */
   private failedStatus: number | null = null
 
   async connect(): Promise<void> {
@@ -111,6 +113,13 @@ export class CalDavProvider implements CalendarProvider {
       throw classify(err, this.failedStatus)
     }
   }
+}
+
+/** 2: busy or down (429, 5xx). 1: refused (401, 403). 0: anything else. */
+function severity(status: number | null): number {
+  if (status === null) return 0
+  if (status === 429 || status >= 500) return 2
+  return status === 401 || status === 403 ? 1 : 0
 }
 
 function classify(err: unknown, status: number | null = null): Error {
