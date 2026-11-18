@@ -8,6 +8,21 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Mail client. Mail → Inbox now shows your iCloud folders (Inbox, Drafts, Sent, Archive, Junk, Bin and your own), a message list with unread dots, flags and an All/Unread switch, and a reading pane. Ordo checks for new mail when you open a folder, on request and every five minutes. See [docs/mail.md](docs/mail.md).
+- HTML email is shown safely: sanitised with DOMPurify, in a sandboxed frame with no scripts, forms or pop-ups, under a Content-Security-Policy that lets it connect nowhere. Remote images (tracking pixels) are blocked; **Load images** fetches that message's images through Ordo, https only, public internet only, no cookies or referrer. Plain-text mail is shown as text.
+- Links in email never open inside Ordo. A sheet shows where a link really goes, warns when its text names a different site or it isn't https, and opens it in your browser. Links that hide their destination behind a user name, and non-web links, are refused. `mailto:` links start a new message (never with a Bcc).
+- Attachments are listed under the message and saved with the save dialog. Inline images in a message are shown.
+- Mark read or unread, flag, and move to Archive, Bin, Junk or back to the Inbox, with Undo. Keyboard shortcuts: arrows or J/K, C, R, A, F, E, Delete, U, S, Z and /.
+- Search as you type across every downloaded folder (subjects, people and the text of messages you've opened), plus **Search all of … on iCloud** for older mail.
+- Write, reply, reply all and forward (with the original's attachments), attach files, and save drafts to Drafts. Mail is sent through iCloud SMTP (`smtp.mail.me.com:587`, STARTTLS) with the app-specific password you already saved, only when you click Send; a copy with the Bcc list is kept in Sent and replies are threaded and marked as answered. Addresses are checked as you type and again in the main process, at most 50 recipients per message.
+- Headless: read-only `mail mailboxes`, `mail sync`, `mail list`, `mail search` (cache or `--server`) and `mail read` (plain text, never marks a message read), and the matching MCP tools `ordo_mailboxes`, `ordo_mail_sync`, `ordo_messages`, `ordo_search_mail` and `ordo_read_message`. There is no way to send, draft, flag or move mail from headless mode or MCP.
+- Settings → Account shows the connected iCloud account, with Connect and Disconnect (Disconnect moved here from the Inbox page).
+- `ORDO_SMTP_HOST` and `ORDO_SMTP_PORT` point an unpackaged build's SMTP at a local server for tests, like `ORDO_IMAP_*`. End-to-end tests for the mail client run against GreenMail IMAP and SMTP.
+
+### Changed
+
+- The inbox scan also records flags, recipients and Message-IDs, and a refresh forgets mail that was moved or deleted elsewhere, so Unclutter's counts stay accurate.
+
 - `pnpm dev` on macOS shows the app as Ordo in the menu bar, Dock and Cmd-Tab instead of Electron, by renaming the development copy of Electron before it starts. Packaged builds were already named Ordo.
 - Add a calendar by link: paste a calendar's iCal link (Google's **Secret address in iCal format**, Outlook's published ICS link, any `webcal://` or `.ics` link) and Ordo shows it under **Other calendars**, read-only, next to iCloud's. Useful for a Google work calendar that doesn't sync properly into iCloud. Ordo checks the link really is a calendar before saving it, keeps it encrypted with the system keychain, refreshes it with every sync, and says which link stopped working instead of dropping its events. Links must be https, and neither a link nor its redirects may reach this computer or the local network.
 - Import an `.ics` file as a calendar of its own, with its recurring events expanded like any other.

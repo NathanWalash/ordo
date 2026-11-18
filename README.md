@@ -19,7 +19,7 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** You can connect iCloud, scan your inbox, see who's filling it, and
+> **Early days.** You can connect iCloud, read, search and write mail, see who’s filling your inbox, and
 > unsubscribe and clear senders with a review step and undo. See the [roadmap](#roadmap).
 
 ## Why Ordo
@@ -46,7 +46,8 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Sort with AI in Unclutter: a model sorts the senders in Other          | Done    |
 | One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Done    |
 | Unclutter clean-up history with undo                                   | Done    |
-| Full mail client: read, search, compose                                | Planned |
+| Mail client: folders, reading with a safe HTML view, search, flags     | Done    |
+| Mail client: write, reply, forward and drafts through iCloud SMTP      | Done    |
 | Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
 | Calendar: subscribe by link (Google, Outlook, webcal) or import .ics   | Done    |
 | Create and edit calendar events                                        | Planned |
@@ -130,11 +131,11 @@ Playwright, electron-builder, pnpm workspaces.
 ## Roadmap
 
 1. **Unclutter for real:** iCloud connection, header scan into SQLite, rule and model-based sorting, review, unsubscribe, move to Trash, history.
-2. **Reading mail:** folders, threads, a safe HTML reader with remote images blocked, search.
-3. **Writing mail:** compose, reply, drafts, attachments.
+2. **Reading mail (done):** folders, a safe HTML reader with remote images blocked, search. Conversation threads are next.
+3. **Writing mail (done):** compose, reply, reply all, forward, drafts, attachments.
 4. **Finance** and other modules.
 
-More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md).
+How the mail client keeps you safe, and its keyboard shortcuts, are in [docs/mail.md](docs/mail.md). More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md).
 
 ## Contributing
 
