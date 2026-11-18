@@ -124,3 +124,64 @@ describe('parseMarkdown', () => {
     expect(parseMarkdown('```\ncode')).toEqual([{ type: 'code', text: 'code' }])
   })
 })
+
+describe('termination and speed', () => {
+  it('treats Unicode line and paragraph separators as line breaks (it used to loop forever)', () => {
+    expect(parseMarkdown('# a\u2028b')).toEqual([
+      { type: 'heading', level: 1, children: [{ type: 'text', text: 'a' }] },
+      { type: 'paragraph', children: [{ type: 'text', text: 'b' }] },
+    ])
+    expect(parseMarkdown('## x\u2029- y').map((b) => b.type)).toEqual(['heading', 'list'])
+    expect(parseMarkdown('- a\u0085b').map((b) => b.type)).toEqual(['list', 'paragraph'])
+  })
+
+  it('finishes on any mix of awkward characters', () => {
+    const alphabet = [
+      '#',
+      ' ',
+      '\n',
+      '\u2028',
+      '\u2029',
+      '\u0085',
+      '\r',
+      '\t',
+      '\v',
+      '\f',
+      '\u00a0',
+      '-',
+      '*',
+      '_',
+      '>',
+      '`',
+      '[',
+      ']',
+      '(',
+      ')',
+      '1',
+      '.',
+      'x',
+      '\\',
+      'h',
+      'https://a.example',
+      '\u202e',
+    ]
+    let seed = 1
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
+    for (let n = 0; n < 2000; n++) {
+      const length = 1 + Math.floor(next() * 30)
+      const text = Array.from({ length }, () => alphabet[Math.floor(next() * alphabet.length)]).join('')
+      const blocks = parseMarkdown(text)
+      // Every block takes at least one line.
+      expect(blocks.length).toBeLessThanOrEqual(text.split(/\r\n?|[\n\u0085\u2028\u2029]/).length)
+    }
+  })
+
+  it('stays fast on long runs of unclosed marks', () => {
+    for (const unit of ['*a ', '_a ', '**a ', '__a ', '`a ', '[a ', 'h ', '[a](b ']) {
+      const text = unit.repeat(Math.ceil(20_000 / unit.length)).slice(0, 20_000)
+      const started = performance.now()
+      parseMarkdown(text)
+      expect(performance.now() - started, unit).toBeLessThan(250)
+    }
+  })
+})

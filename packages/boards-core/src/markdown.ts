@@ -24,7 +24,7 @@ export const MAX_NOTES = 20_000
 
 const MAX_DEPTH = 4
 const ESCAPABLE = /[\\`*_[\]()#>!-]/
-const AUTOLINK = /^https:\/\/[^\s<>"'`]+/
+const AUTOLINK = /https:\/\/[^\s<>"'`]+/y
 
 /** Is `c` a character a `_` emphasis may start after (so snake_case isn't italic)? */
 const boundary = (c: string | undefined) => c === undefined || /[\s([{"'*~-]/.test(c)
@@ -49,7 +49,9 @@ function findClosing(src: string, mark: string, from: number): number {
 /** The `)` that closes a link target starting at `from`, allowing balanced brackets inside. */
 function closingParen(src: string, from: number): number {
   let depth = 0
-  for (let j = from; j < src.length; j++) {
+  // A link is never longer than this, so a run of unclosed `](` stays cheap.
+  const end = Math.min(src.length, from + 2048)
+  for (let j = from; j < end; j++) {
     const c = src[j]
     if (c === '\n') return -1
     if (c === '(') depth++
@@ -62,6 +64,15 @@ function closingParen(src: string, from: number): number {
 }
 
 export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
+  // Marks known to have no closer at or after a position. Once a scan from p finds none, a scan
+  // from anywhere later can't either, so unclosed marks cost one scan in all, not one each.
+  const none = new Map<string, number>()
+  const closing = (mark: string, from: number, find: () => number) => {
+    if (from >= (none.get(mark) ?? Infinity)) return -1
+    const at = find()
+    if (at === -1) none.set(mark, Math.min(from, none.get(mark) ?? Infinity))
+    return at
+  }
   const out: Inline[] = []
   let text = ''
   const flush = () => {
@@ -83,7 +94,7 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
       continue
     }
     if (c === '`') {
-      const end = src.indexOf('`', i + 1)
+      const end = closing('`', i + 1, () => src.indexOf('`', i + 1))
       if (end > i + 1) {
         flush()
         out.push({ type: 'code', text: src.slice(i + 1, end) })
@@ -93,8 +104,10 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
     }
     if (depth < MAX_DEPTH && (src.startsWith('**', i) || src.startsWith('__', i))) {
       const mark = src.slice(i, i + 2)
-      const end = findClosing(src, mark, i + 2)
-      if (end > i + 2 && src[i + 2] !== ' ' && (mark === '**' || boundary(src[i - 1]))) {
+      // The opening rules first: they're cheap, the search for a closer isn't.
+      const opens = src[i + 2] !== ' ' && (mark === '**' || boundary(src[i - 1]))
+      const end = opens ? closing(mark, i + 2, () => findClosing(src, mark, i + 2)) : -1
+      if (end > i + 2) {
         flush()
         out.push({ type: 'strong', children: parseInline(src.slice(i + 2, end), depth + 1, inLink) })
         i = end + 2
@@ -102,8 +115,9 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
       }
     }
     if (depth < MAX_DEPTH && (c === '*' || c === '_') && src[i + 1] !== c) {
-      const end = findClosing(src, c, i + 1)
-      if (end > i + 1 && src[i + 1] !== ' ' && (c === '*' || boundary(src[i - 1]))) {
+      const opens = src[i + 1] !== ' ' && (c === '*' || boundary(src[i - 1]))
+      const end = opens ? closing(c, i + 1, () => findClosing(src, c, i + 1)) : -1
+      if (end > i + 1) {
         flush()
         out.push({ type: 'em', children: parseInline(src.slice(i + 1, end), depth + 1, inLink) })
         i = end + 1
@@ -111,7 +125,7 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
       }
     }
     if (!inLink && c === '[') {
-      const mid = src.indexOf('](', i + 1)
+      const mid = closing('](', i + 1, () => src.indexOf('](', i + 1))
       const close = mid > i ? closingParen(src, mid + 2) : -1
       if (mid > i + 1 && close > mid + 2 && !src.slice(i + 1, mid).includes('\n')) {
         const href = safeUrl(src.slice(mid + 2, close).trim())
@@ -124,7 +138,8 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
       }
     }
     if (!inLink && c === 'h' && boundary(src[i - 1])) {
-      const m = AUTOLINK.exec(src.slice(i))
+      AUTOLINK.lastIndex = i
+      const m = AUTOLINK.exec(src)
       if (m) {
         // Leave trailing punctuation outside the link, as people write "see https://x.example."
         const raw = m[0].replace(/[.,;:!?)\]]+$/, '')
@@ -144,12 +159,18 @@ export function parseInline(src: string, depth = 0, inLink = false): Inline[] {
   return out
 }
 
-const LIST_ITEM = /^\s{0,3}(?:([-*+])|(\d{1,3})[.)])\s+(.*)$/
-const TASK = /^\[( |x|X)\]\s+(.*)$/
+// `s`: `.` takes every character, so nothing on a line can stop these matching it whole.
+const LIST_ITEM = /^\s{0,3}(?:([-*+])|(\d{1,3})[.)])\s+(.*)$/s
+const TASK = /^\[( |x|X)\]\s+(.*)$/s
+const HEADING = /^\s{0,3}(#{1,3})\s+(.*)$/s
 
 /** Split notes into blocks: paragraphs, headings, lists, quotes and fenced code. */
 export function parseMarkdown(source: string): Block[] {
-  const lines = source.slice(0, MAX_NOTES).replace(/\r\n?/g, '\n').split('\n')
+  // Unicode line and paragraph separators (and NEL) are line breaks too.
+  const lines = source
+    .slice(0, MAX_NOTES)
+    .replace(/\r\n?|[\u0085\u2028\u2029]/g, '\n')
+    .split('\n')
   const blocks: Block[] = []
   let i = 0
   while (i < lines.length) {
@@ -166,7 +187,7 @@ export function parseMarkdown(source: string): Block[] {
       blocks.push({ type: 'code', text: body.join('\n') })
       continue
     }
-    const heading = /^\s{0,3}(#{1,3})\s+(.*)$/.exec(line)
+    const heading = HEADING.exec(line)
     if (heading) {
       blocks.push({
         type: 'heading',
@@ -209,6 +230,8 @@ export function parseMarkdown(source: string): Block[] {
       !/^\s{0,3}(#{1,3}\s|>|```)/.test(lines[i]!)
     )
       body.push(lines[i++]!)
+    // Every block takes at least one line, so a line no rule above wanted can't stall the loop.
+    if (body.length === 0) body.push(lines[i++]!)
     blocks.push({ type: 'paragraph', children: parseInline(body.join('\n')) })
   }
   return blocks
