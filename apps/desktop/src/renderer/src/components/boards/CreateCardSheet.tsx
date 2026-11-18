@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { SquareKanban } from 'lucide-react'
-import { addDays, toISODate, type Column } from '@ordo/boards-core'
+import { addDays, occurrenceStart, toISODate, type Column } from '@ordo/boards-core'
 import type { BoardSummary, CalendarEvent } from '@ordo/shared'
 import { Button } from '../Button'
 import { Select } from '../money/ui'
@@ -80,7 +80,7 @@ export function CreateCardSheet({
           kind: 'event',
           calendarId: event.calendarId,
           uid: event.uid,
-          start: event.start.toISOString(),
+          start: occurrenceStart(event),
         },
         title: event.title,
         detail: calendarName ?? null,

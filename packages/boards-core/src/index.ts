@@ -43,6 +43,7 @@ export {
   emailCandidate,
   eventCandidate,
   keywords,
+  occurrenceStart,
   pounds,
   relevance,
   resolveLinks,

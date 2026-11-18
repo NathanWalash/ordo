@@ -783,7 +783,10 @@ export class BoardsStore {
       case 'card': {
         const column = this.column(String(row['column_id']))
         if (!column || column.boardId !== boardId) return null
-        const n = this.get('SELECT COUNT(*) AS n FROM cards WHERE board_id = ? AND deleted_at IS NULL', boardId)
+        const n = this.get(
+          'SELECT COUNT(*) AS n FROM cards WHERE board_id = ? AND deleted_at IS NULL',
+          boardId,
+        )
         room(Number(n?.['n'] ?? 0), LIMITS.cards, 'A board can have up to 5,000 cards.')
         // An archived card gets a new rank when it's restored, so it can't clash.
         return row['archived_at'] ? [] : this.columnCards(column.id)

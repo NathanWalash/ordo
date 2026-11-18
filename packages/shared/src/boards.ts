@@ -136,7 +136,8 @@ export const LinkTargetSchema = z.discriminatedUnion('kind', [
     kind: z.literal('event'),
     calendarId: z.string().min(1).max(2000),
     uid: z.string().min(1).max(1000),
-    start: z.iso.datetime(),
+    // An instant for a timed event, the day for an all-day one.
+    start: z.union([z.iso.datetime(), day]),
   }),
   z.object({
     kind: z.literal('email'),

@@ -86,12 +86,19 @@ export function pounds(pence: number): string {
 
 const oneLine = (s: string, max = 200) => s.replace(/\s+/g, ' ').trim().slice(0, max)
 
+/**
+ * How a link names one occurrence of an event: the instant for a timed event, the day for an
+ * all-day one, so an all-day link survives a change of time zone.
+ */
+export const occurrenceStart = (e: Pick<EventSource, 'start' | 'allDay'>): string =>
+  e.allDay ? toISODate(e.start) : e.start.toISOString()
+
 export function eventCandidate(e: EventSource): LinkCandidate {
   const target: LinkTarget = {
     kind: 'event',
     calendarId: e.calendarId,
     uid: e.uid,
-    start: e.start.toISOString(),
+    start: occurrenceStart(e),
   }
   const when = e.allDay ? 'All day' : clock(e.start)
   return {
@@ -136,7 +143,8 @@ export function emailCandidate(m: EmailSource): LinkCandidate {
     key: targetKey(target),
     target,
     title: oneLine(m.subject) || '(no subject)',
-    detail: oneLine(m.from.name || m.from.address, 120),
+    // The sender's display name only: an address is never shown to a model, so it isn't here.
+    detail: m.from.name && !m.from.name.includes('@') ? oneLine(m.from.name, 120) : null,
     date: toISODate(m.date),
   }
 }

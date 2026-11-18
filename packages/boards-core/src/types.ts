@@ -108,7 +108,10 @@ export type LinkTarget =
       kind: 'event'
       calendarId: string
       uid: string
-      /** The occurrence's start, as an ISO instant, so one meeting of a series can be linked. */
+      /**
+       * Which occurrence, so one meeting of a series can be linked: the start as an ISO instant,
+       * or the day (`YYYY-MM-DD`) for an all-day event.
+       */
       start: string
     }
   | {

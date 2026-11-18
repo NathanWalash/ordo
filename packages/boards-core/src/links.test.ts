@@ -61,6 +61,27 @@ describe('candidates', () => {
     expect(pounds(123_400)).toBe('£1,234')
   })
 
+  it('names an all-day occurrence by its day, so the link survives a change of time zone', () => {
+    const allDay = eventCandidate({ ...event, allDay: true, start: new Date(2026, 10, 20) })
+    expect(allDay.target).toMatchObject({ start: '2026-11-20' })
+    expect(allDay.key).toBe(`event|${encodeURIComponent(event.calendarId)}|dentist-1|2026-11-20`)
+    expect(eventCandidate(event).target).toMatchObject({ start: event.start.toISOString() })
+  })
+
+  it('shows a sender by name only, never by address', () => {
+    const email = (name?: string) =>
+      emailCandidate({
+        mailbox: 'INBOX',
+        uid: 1,
+        subject: 's',
+        from: { address: 'a@b.example', name },
+        date: new Date(),
+      })
+    expect(email('Smiles Dental').detail).toBe('Smiles Dental')
+    expect(email().detail).toBeNull()
+    expect(email('a@b.example').detail).toBeNull()
+  })
+
   it('gives each target one key', () => {
     const a = eventCandidate(event)
     expect(a.key).toBe(targetKey(a.target))

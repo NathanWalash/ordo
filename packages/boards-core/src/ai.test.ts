@@ -159,6 +159,20 @@ describe('buildSuggestPrompt', () => {
     expect(prompt).toContain('{"id":"b1","kind":"bill","title":"Dental plan","date":"2026-12-01"}')
     expect(prompt).not.toContain('£15')
   })
+
+  it('never sends an email address, even for a sender without a name', () => {
+    const noName = emailCandidate({
+      mailbox: 'INBOX',
+      uid: 9,
+      subject: 'Dentist appointment reminder',
+      from: { address: 'noreply@dentist.example' },
+      date: new Date(2026, 10, 14),
+    })
+    const i = { ...input(), candidates: { email: [noName, quote] } }
+    const prompt = buildSuggestPrompt(i, pickCandidates(i))
+    expect(prompt).toContain('Dentist appointment reminder')
+    expect(prompt).not.toContain('@')
+  })
 })
 
 describe('applyReply', () => {
