@@ -232,28 +232,59 @@ describe('boards service', () => {
   })
 })
 
+const writeAi = (ai: Record<string, unknown>) => {
+  writeFileSync(
+    join(dir.path, 'settings.json'),
+    JSON.stringify({
+      theme: 'system',
+      ai: {
+        provider: 'lmstudio',
+        model: 'test-model',
+        sortSenders: false,
+        money: false,
+        boards: false,
+        cloudConsent: null,
+        ...ai,
+      },
+    }),
+  )
+  initAi()
+}
+
 describe('Suggest', () => {
   it('needs a model first', async () => {
     const [card] = ok(boards.cardsByRef({ board: 'Home' }))
     expect(await boards.suggest(card!.id)).toMatchObject({ ok: false, error: 'no-ai' })
+    expect(boards.suggestInfo()).toMatchObject({ ready: false, error: 'no-ai', provider: null })
   })
 
-  it('asks the chosen local model and returns only checked picks', async () => {
-    writeFileSync(
-      join(dir.path, 'settings.json'),
-      JSON.stringify({
-        theme: 'system',
-        ai: {
-          provider: 'lmstudio',
-          model: 'test-model',
-          sortSenders: false,
-          money: false,
-          cloudConsent: null,
-        },
-      }),
-    )
-    initAi()
+  it('needs AI for Boards turned on, and asks nothing until it is', async () => {
+    writeAi({ boards: false })
+    const asked = prompts.length
     const [card] = ok(boards.cardsByRef({ board: 'Home' }))
+    expect(await boards.suggest(card!.id)).toMatchObject({ ok: false, error: 'off' })
+    expect(prompts.length).toBe(asked)
+    expect(boards.suggestInfo()).toEqual({
+      ready: false,
+      error: 'off',
+      message: 'Turn on AI for Boards in Settings → AI first.',
+      provider: { label: 'LM Studio', kind: 'local' },
+      sends: ['event', 'card'],
+    })
+  })
+
+  it('draws on bills only with AI for Money on, and emails only with sender sorting on', () => {
+    writeAi({ boards: true, money: true })
+    expect(boards.suggestInfo().sends).toEqual(['event', 'bill', 'card'])
+    writeAi({ boards: true, sortSenders: true })
+    expect(boards.suggestInfo().sends).toEqual(['event', 'email', 'card'])
+  })
+
+  it('asks the chosen local model and returns only checked picks, for that card', async () => {
+    writeAi({ boards: true })
+    const [card] = ok(boards.cardsByRef({ board: 'Home' }))
+    // A card that shares a word with "Fix the gate", so it is offered as c1.
+    const related = ok(await boards.addCardByRef({ board: 'Home', title: 'Order gate hinges' }))
     const due = addDays(toISODate(), 3)
     answer = () => ({
       due: { date: due, basedOn: 'zz' },
@@ -263,12 +294,19 @@ describe('Suggest', () => {
     })
     const r = await boards.suggest(card!.id)
     if (!r.ok) throw new Error(r.message)
+    expect(r.cardId).toBe(card!.id)
     expect(r.provider).toEqual({ label: 'LM Studio', kind: 'local' })
     expect(r.suggestions.due).toEqual({ date: due, basedOn: null })
     expect(r.suggestions.checklist).toEqual(['Buy a new latch'])
     expect(r.suggestions.labels.map((l) => l.name)).toEqual(['Waiting'])
-    expect(prompts.at(-1)).toContain('<candidates>')
-    expect(prompts.at(-1)).toContain('"title":"Fix the gate"')
+    expect(r.suggestions.links.map((l) => l.target)).toEqual([{ kind: 'card', cardId: related.id }])
+    const prompt = prompts.at(-1)!
+    expect(prompt).toContain('{"id":"c1","kind":"card","title":"Order gate hinges"')
+    expect(prompt).toContain('"title":"Fix the gate"')
+    // Neither bills nor emails with those switches off.
+    expect(prompt).not.toContain('"kind":"bill"')
+    expect(prompt).not.toContain('"kind":"email"')
+    expect(prompt).not.toContain('@')
   })
 
   it('says so when the model replies badly', async () => {
@@ -276,5 +314,32 @@ describe('Suggest', () => {
     answer = () => ({ nonsense: true })
     expect(await boards.suggest(card!.id)).toMatchObject({ ok: false, error: 'failed' })
     expect(await boards.suggest('missing')).toMatchObject({ ok: false, error: 'not-found' })
+  })
+})
+
+describe('tidying deleted things', () => {
+  it('never happens when the store is only opened to read', async () => {
+    const [card] = ok(boards.cardsByRef({ board: 'Home' }))
+    const token = ok(await boards.deleteCard(card!.id))
+    boards.closeBoards()
+    // Reading again, a week later, removes nothing.
+    vi.setSystemTime(new Date(Date.now() + 7 * 86_400_000))
+    try {
+      boards.list()
+      expect(boards.cardsByRef({ board: 'Home' }).ok).toBe(true)
+      ok(await boards.restore(token))
+      expect(ok(boards.cardsByRef({ board: 'Home' })).map((c) => c.id)).toContain(card!.id)
+    } finally {
+      vi.useRealTimers()
+    }
+    // The app tidies up, holding the write lock, a day after a delete.
+    ok(await boards.deleteCard(card!.id))
+    vi.setSystemTime(new Date(Date.now() + 2 * 86_400_000))
+    try {
+      await boards.tidyBoards()
+      expect(await boards.restore(token)).toMatchObject({ ok: false, error: 'not-found' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

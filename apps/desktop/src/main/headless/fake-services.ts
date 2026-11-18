@@ -103,6 +103,7 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         model: null,
         sortSenders: false,
         money: false,
+        boards: false,
         cloudConsent: null,
       }),
       status: async () => [],

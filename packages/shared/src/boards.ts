@@ -195,16 +195,30 @@ export interface SuggestProvider {
   vendor?: string
 }
 
+/** Whether Suggest can run, and what it would send where. */
+export type SuggestInfo = (
+  { ready: true } | { ready: false; error: 'no-ai' | 'consent' | 'off'; message: string }
+) & {
+  provider: SuggestProvider | null
+  /** The other modules it draws on, besides the card itself. */
+  sends: ('event' | 'bill' | 'email' | 'card')[]
+}
+
 export type SuggestOutcome =
   | {
       ok: true
+      /** The card asked about, so an answer that arrives late can't land on another. */
+      cardId: string
       suggestions: CardSuggestions
       provider: SuggestProvider
       /** How many candidates and labels were sent. */
       sent: { candidates: number; labels: number }
     }
-  /** `no-ai`: no model chosen; `consent`: a cloud provider without consent; `busy`: already asking. */
-  | { ok: false; error: 'no-ai' | 'consent' | 'busy' | 'not-found' | 'failed'; message: string }
+  /**
+   * `no-ai`: no model chosen; `consent`: a cloud provider without consent; `off`: AI for Boards is
+   * off; `busy`: already asking.
+   */
+  | { ok: false; error: 'no-ai' | 'consent' | 'off' | 'busy' | 'not-found' | 'failed'; message: string }
 
 /** `window.ordo.boards`. Everything runs in the main process; data stays in `boards.sqlite`. */
 export interface BoardsApi {
@@ -265,6 +279,8 @@ export interface BoardsApi {
    * Ordo picks the candidates; the model only chooses among them. Nothing is changed.
    */
   suggest(cardId: string): Promise<SuggestOutcome>
+  /** Whether Suggest is ready, and what it would send to which provider. Changes nothing. */
+  suggestInfo(): Promise<SuggestInfo>
   stopSuggest(): Promise<void>
 }
 
@@ -302,6 +318,7 @@ export const BOARDS_METHODS = [
   'restore',
   'dueDates',
   'suggest',
+  'suggestInfo',
   'stopSuggest',
 ] as const satisfies readonly (keyof BoardsApi)[]
 

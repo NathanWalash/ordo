@@ -49,6 +49,7 @@ import {
   type BoardsResult,
   type CalendarOverlayItem,
   type CardDetail,
+  type SuggestInfo,
   type SuggestOutcome,
 } from '@ordo/shared'
 import type { z } from 'zod'
@@ -64,15 +65,20 @@ let store: BoardsStore | null = null
 const KEEP_DELETED_MS = 86_400_000
 
 export function boardsStore(): BoardsStore {
-  if (!store) {
-    store = new BoardsStore(join(app.getPath('userData'), 'boards.sqlite'))
-    try {
-      store.purgeDeleted(KEEP_DELETED_MS)
-    } catch {
-      // Another Ordo is writing; it can tidy up next time.
-    }
+  return (store ??= new BoardsStore(join(app.getPath('userData'), 'boards.sqlite')))
+}
+
+/**
+ * Remove for good what was deleted more than a day ago. Only the windowed app does this, once it's
+ * ready and holding the write lock: headless runs and agents only read unless asked to change.
+ */
+export async function tidyBoards(): Promise<void> {
+  try {
+    await withWriteLock('tidying boards', async () => boardsStore().purgeDeleted(KEEP_DELETED_MS))
+  } catch (err) {
+    // Not tidying this time is fine; it happens on the next start.
+    console.error(err)
   }
-  return store
 }
 
 const firstIssue = (e: { issues: { message: string }[] }) => e.issues[0]?.message ?? 'Check the details.'
@@ -358,15 +364,48 @@ let suggesting: AbortController | null = null
  * the model only picks among them by id. Same provider, model and cloud consent as everywhere
  * else. Read-only: the user accepts each suggestion, which is then an ordinary change.
  */
+/** What Suggest would send, and to whom, so the window can say so before anything goes. */
+export function suggestInfo(): SuggestInfo {
+  const ai = aiSettings()
+  const provider = usableProvider(ai)
+  const info = provider && providerInfo(provider.id)
+  const refusal =
+    ai.provider === 'none'
+      ? ({ error: 'no-ai', message: 'Choose a model in Settings → AI first.' } as const)
+      : !provider
+        ? ({ error: 'consent', message: 'Confirm that Ordo may use this provider first.' } as const)
+        : !ai.boards
+          ? ({ error: 'off', message: 'Turn on AI for Boards in Settings → AI first.' } as const)
+          : null
+  return {
+    ...(refusal ? { ready: false, ...refusal } : { ready: true }),
+    provider: info
+      ? { label: info.label, kind: info.kind, ...(info.vendor && { vendor: info.vendor }) }
+      : null,
+    sends: suggestKinds(ai),
+  }
+}
+
+/**
+ * Which other modules Suggest may draw on: events and other cards always; bills only with AI for
+ * Money on, and emails only with AI sorting of senders on, the switches that already cover them.
+ */
+function suggestKinds(ai: { money: boolean; sortSenders: boolean }): SuggestInfo['sends'] {
+  return [
+    'event',
+    ...(ai.money ? (['bill'] as const) : []),
+    ...(ai.sortSenders ? (['email'] as const) : []),
+    'card',
+  ]
+}
+
 export async function suggest(raw: unknown): Promise<SuggestOutcome> {
   const parsed = IdSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, error: 'not-found', message: 'That card is no longer there.' }
   const ai = aiSettings()
-  if (ai.provider === 'none')
-    return { ok: false, error: 'no-ai', message: 'Choose a model in Settings → AI first.' }
-  const provider = usableProvider(ai)
-  if (!provider)
-    return { ok: false, error: 'consent', message: 'Confirm that Ordo may use this provider first.' }
+  const ready = suggestInfo()
+  if (!ready.ready) return { ok: false, error: ready.error, message: ready.message }
+  const provider = usableProvider(ai)!
   if (suggesting) return { ok: false, error: 'busy', message: 'Already asking for suggestions.' }
   const s = boardsStore()
   const c = s.card(parsed.data)
@@ -375,7 +414,7 @@ export async function suggest(raw: unknown): Promise<SuggestOutcome> {
   const ctrl = (suggesting = new AbortController())
   try {
     const today = toISODate()
-    const sources = await gather(new Set(['event', 'bill', 'email', 'card']), today)
+    const sources = await gather(new Set(suggestKinds(ai)), today)
     const candidates = toCandidates({ ...sources, cards: sources.cards?.filter((x) => x.id !== c.id) })
     const result = await suggestForCard(
       {
@@ -404,6 +443,7 @@ export async function suggest(raw: unknown): Promise<SuggestOutcome> {
     const { sent, ...suggestions } = result
     return {
       ok: true,
+      cardId: c.id,
       suggestions,
       sent,
       provider: { label: info.label, kind: info.kind, ...(info.vendor && { vendor: info.vendor }) },
@@ -453,6 +493,7 @@ const service: { [K in keyof BoardsApi]: (input: unknown) => unknown } = {
   restore,
   dueDates,
   suggest,
+  suggestInfo,
   stopSuggest,
 }
 
