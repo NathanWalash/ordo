@@ -59,8 +59,10 @@ const FORBID_ATTR = [
   'dynsrc',
 ]
 
+// The frame is sized to its content, so the document itself never scrolls up and down; wide
+// emails scroll sideways.
 const BASE_STYLE = `
-html { background: #fff; }
+html { background: #fff; overflow-y: hidden; overflow-x: auto; }
 body { margin: 0; padding: 16px 20px; color: #1d1d1f; background: #fff;
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   overflow-wrap: break-word; }
@@ -70,6 +72,28 @@ img[data-ordo-blocked] { display: inline-block; min-width: 1px; min-height: 1px;
 pre { white-space: pre-wrap; }
 a { color: #0068d6; }
 `
+
+/** For emails without colours of their own: the app's dark look when it's dark. */
+const FOLLOW_THEME = `
+:root { color-scheme: light dark; }
+@media (prefers-color-scheme: dark) {
+  html, body { background: #1e1e1e; color: #f5f5f7; }
+  a { color: #4da3ff; }
+  img[data-ordo-blocked] { background: repeating-linear-gradient(45deg, #2a2a2a, #2a2a2a 6px, #333 6px, #333 12px); }
+}
+`
+
+const COLOUR_CSS = /(^|[;{\s])(color|background(-color|-image)?)\s*:/i
+
+/** Whether an email sets text or background colours anywhere (attributes, styles, <font>). */
+export function setsColours(root: Element): boolean {
+  if (root.querySelector('[bgcolor], [text], font[color], body[link]')) return true
+  for (const el of Array.from(root.querySelectorAll('[style]')))
+    if (COLOUR_CSS.test(el.getAttribute('style') ?? '')) return true
+  for (const s of Array.from(root.querySelectorAll('style')))
+    if (COLOUR_CSS.test(s.textContent ?? '')) return true
+  return false
+}
 
 export interface SanitiseOptions {
   /** Inline images from the message, by Content-ID (lower-case, no angle brackets). */
@@ -83,6 +107,8 @@ export interface SanitisedEmail {
   html: string
   /** Remote image URLs that weren't shown. */
   blocked: string[]
+  /** The email sets its own colours, so it's shown on white whatever the app's look. */
+  styled: boolean
 }
 
 /** A remote image address, made absolute (`//host` means https), or null if it isn't one. */
@@ -147,8 +173,11 @@ export function sanitiseEmail(html: string, opts: SanitiseOptions): SanitisedEma
     head = doc.createElement('head')
     root.insertBefore(head, root.firstChild)
   }
+  // An email that sets no colours of its own follows the app's light or dark look, like Mail.
+  // A designed one keeps the white card it was made for.
+  const styled = setsColours(root)
   const style = doc.createElement('style')
-  style.textContent = BASE_STYLE
+  style.textContent = BASE_STYLE + (styled ? '' : FOLLOW_THEME)
   head.insertBefore(style, head.firstChild)
   const csp = doc.createElement('meta')
   csp.setAttribute('http-equiv', 'Content-Security-Policy')
@@ -158,5 +187,5 @@ export function sanitiseEmail(html: string, opts: SanitiseOptions): SanitisedEma
   charset.setAttribute('charset', 'utf-8')
   head.insertBefore(charset, head.firstChild)
 
-  return { html: `<!doctype html>${root.outerHTML}`, blocked: [...blocked] }
+  return { html: `<!doctype html>${root.outerHTML}`, blocked: [...blocked], styled }
 }

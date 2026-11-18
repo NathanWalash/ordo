@@ -462,6 +462,58 @@ export async function saveAttachment(
   }
 }
 
+/** A path in `folder` for `name` that doesn't overwrite anything: `notes.txt`, `notes 2.txt`… */
+async function freePath(folder: string, name: string): Promise<string> {
+  const dot = name.lastIndexOf('.')
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+  for (let n = 1; n < 1000; n++) {
+    const candidate = join(folder, n === 1 ? name : `${stem} ${n}${ext}`)
+    try {
+      await stat(candidate)
+    } catch {
+      return candidate
+    }
+  }
+  return join(folder, `${stem} ${randomUUID()}${ext}`)
+}
+
+/** Save every attachment of a message into a folder the user chooses. Nothing is overwritten. */
+export async function saveAllAttachments(
+  input: unknown,
+  win?: BrowserWindow | null,
+): Promise<MailOutcome<{ saved: number }>> {
+  const parsed = MessageRefSchema.safeParse(input)
+  if (!parsed.success) return INVALID
+  if (!loadAccount()) return NO_ACCOUNT
+  const ref = parsed.data
+  if (!knownMailbox(ref.mailbox)) return UNKNOWN_MAILBOX
+  try {
+    const content = await fetchContent(ref)
+    const files = content?.attachments.filter((a) => !a.inline) ?? []
+    if (!files.length) return fail('not-found', 'This message has no attachments any more.')
+    const options: OpenDialogOptions = {
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Save here',
+      defaultPath: app.getPath('downloads'),
+    }
+    const choice = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    const folder = choice.filePaths[0]
+    if (choice.canceled || !folder) return { ok: true, saved: 0 }
+    let saved = 0
+    for (const a of files) {
+      const file = await withImap((p) => p.downloadPart(ref.mailbox, ref.uid, a.part))
+      if (!file) continue
+      const path = await freePath(folder, safeFilename(a.filename))
+      await writeFile(path, file.content, { flag: 'wx' })
+      await markAsDownloaded(path)
+      saved++
+    }
+    return { ok: true, saved }
+  } catch (err) {
+    return failure(err)
+  }
+}
+
 /** Files picked to attach, by id. The window never sees the paths. */
 const picked = new Map<string, { path: string; name: string; size: number }>()
 const PICKED_KEPT = 200
@@ -680,6 +732,7 @@ export function registerMailIpc(): void {
   ipcMain.handle(MAIL_IPC.loadImages, (_e, input: unknown) => loadImages(input))
   ipcMain.handle(MAIL_IPC.openLink, (_e, url: unknown) => openLink(url))
   ipcMain.handle(MAIL_IPC.saveAttachment, (e, ref: unknown) => saveAttachment(ref, win(e)))
+  ipcMain.handle(MAIL_IPC.saveAllAttachments, (e, ref: unknown) => saveAllAttachments(ref, win(e)))
   ipcMain.handle(MAIL_IPC.pickAttachments, (e) => pickAttachments(win(e)))
   ipcMain.handle(MAIL_IPC.send, (_e, input: unknown) => send(input))
   ipcMain.handle(MAIL_IPC.saveDraft, (_e, input: unknown) => saveDraft(input))

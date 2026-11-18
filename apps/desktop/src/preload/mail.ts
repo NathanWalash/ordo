@@ -29,6 +29,7 @@ export const mailApi: MailApi = {
   loadImages: (input) => ipcRenderer.invoke(MAIL_IPC.loadImages, input),
   openLink: (url) => ipcRenderer.invoke(MAIL_IPC.openLink, url),
   saveAttachment: (ref) => ipcRenderer.invoke(MAIL_IPC.saveAttachment, ref),
+  saveAllAttachments: (ref) => ipcRenderer.invoke(MAIL_IPC.saveAllAttachments, ref),
   pickAttachments: () => ipcRenderer.invoke(MAIL_IPC.pickAttachments),
   send: (input) =>
     userActed()

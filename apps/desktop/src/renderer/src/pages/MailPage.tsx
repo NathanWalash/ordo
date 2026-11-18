@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   Archive,
   Flag,
@@ -12,6 +19,7 @@ import {
   Search,
   SquarePen,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react'
 import {
@@ -20,6 +28,7 @@ import {
   forwardBody,
   forwardSubject,
   formatAddressList,
+  ownAddresses,
   parseMailtoLink,
   replyBody,
   replyRecipients,
@@ -44,11 +53,16 @@ import { LinkSheet } from '../components/mail/LinkSheet'
 import { mailboxName, MailboxList } from '../components/mail/MailboxList'
 import { keyOf, MessageList } from '../components/mail/MessageList'
 import { Reader } from '../components/mail/Reader'
+import { ShortcutsSheet } from '../components/mail/ShortcutsSheet'
 
 const INBOX = 'INBOX'
+/** Messages per page in the list; the main process returns at most 500 at a time. */
 const PAGE = 200
+const CHUNK = 500
 /** Check for new mail this often while Mail is open. */
 const POLL_MS = 5 * 60_000
+/** Below this window width the folder list becomes a rail of icons. */
+const COMPACT_WIDTH = 1100
 
 interface Props {
   account: AccountStatus | null
@@ -77,6 +91,7 @@ export function MailPage({ account, onConnect, onTitle }: Props) {
 type Opened = { key: string; message?: MessageContent; error?: string }
 type Toast = { text: string; undoId?: number; error?: boolean }
 type Filter = 'all' | 'unread'
+type Page = { total: number; messages: MessageSummary[] }
 
 const FILTERS = [
   { value: 'all', label: 'All' },
@@ -86,18 +101,32 @@ const FILTERS = [
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))
 
+const timeNow = (d: Date) => d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+
+function useWindowWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const on = () => setWidth(window.innerWidth)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return width
+}
+
 function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | null) => void }) {
   const [boxes, setBoxes] = useState<MailboxInfo[]>([])
   const [current, setCurrent] = useState(INBOX)
   const [filter, setFilter] = useState<Filter>('all')
-  const [limit, setLimit] = useState(PAGE)
-  const [list, setList] = useState<{ total: number; messages: MessageSummary[] } | null>(null)
+  const [list, setList] = useState<Page | null>(null)
   const [selected, setSelected] = useState<MessageSummary | null>(null)
   const [opened, setOpened] = useState<Opened | null>(null)
+  const [openAttempt, setOpenAttempt] = useState(0)
+  const [slow, setSlow] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [progress, setProgress] = useState<MailRefreshProgress | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
+  const [problem, setProblem] = useState<{ text: string; at: Date } | null>(null)
   const [checkedAt, setCheckedAt] = useState<Date | null>(null)
+  const [announcement, setAnnouncement] = useState('')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MessageSummary[] | null>(null)
   const [server, setServer] = useState<{ busy: boolean; done: boolean; error?: string }>({
@@ -107,13 +136,18 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
   const [toast, setToast] = useState<Toast | null>(null)
   const [compose, setCompose] = useState<ComposeDraft | null>(null)
   const [link, setLink] = useState<CheckedLink | null>(null)
+  const [showKeys, setShowKeys] = useState(false)
+  const compact = useWindowWidth() < COMPACT_WIDTH
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  // The folder on screen, for async work that finishes after you've moved on.
-  const currentRef = useRef(current)
+  const readerRef = useRef<HTMLElement>(null)
+  // What's on screen, for async work and the poll, which outlive the render that started them.
+  const view = useRef({ current, filter, shown: 0, query })
   useEffect(() => {
-    currentRef.current = current
-  }, [current])
+    view.current = { current, filter, shown: list?.messages.length ?? 0, query }
+  }, [current, filter, list, query])
+  const loadingMore = useRef(false)
+  const moving = useRef(new Set<string>())
 
   const box = boxes.find((b) => b.path === current)
   const role = box?.role ?? (current === INBOX ? 'inbox' : null)
@@ -125,23 +159,67 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     },
     [boxes],
   )
+  const roleOf = (path: string) =>
+    boxes.find((b) => b.path === path)?.role ?? (path === INBOX ? 'inbox' : null)
 
   useEffect(() => {
     onTitle(boxName)
   }, [boxName, onTitle])
   useEffect(() => () => onTitle(null), [onTitle])
 
-  /** Read the folder list and the current page from the cache (no network). */
+  /**
+   * Read the folder list and the messages from the cache (no network): at least the first page,
+   * or as many as are already shown, in chunks the main process accepts.
+   */
   const load = useCallback(async () => {
-    const mailbox = current
-    const [b, page] = await Promise.all([
-      window.ordo.mail.mailboxes(),
-      window.ordo.mail.messages({ mailbox, limit, unread: filter === 'unread' || undefined }),
-    ])
-    if (mailbox !== currentRef.current) return
+    const { current: mailbox, filter: f, shown } = view.current
+    const want = Math.max(PAGE, shown)
+    const unread = f === 'unread' || undefined
+    const pages: MessageSummary[] = []
+    let total = 0
+    for (let offset = 0; offset < want; offset += CHUNK) {
+      const p = await window.ordo.mail.messages({
+        mailbox,
+        limit: Math.min(CHUNK, want - offset),
+        offset,
+        unread,
+      })
+      total = p.total
+      pages.push(...p.messages)
+      if (p.messages.length < Math.min(CHUNK, want - offset)) break
+    }
+    const b = await window.ordo.mail.mailboxes()
+    if (mailbox !== view.current.current || f !== view.current.filter) return
     setBoxes(b)
-    setList(page)
-  }, [current, limit, filter])
+    setList({ total, messages: pages })
+  }, [])
+
+  /** The next page, added to the end of the list. */
+  const loadMore = async () => {
+    const l = list
+    if (!l || loadingMore.current || l.messages.length >= l.total) return
+    loadingMore.current = true
+    const { current: mailbox, filter: f } = view.current
+    try {
+      const p = await window.ordo.mail.messages({
+        mailbox,
+        limit: PAGE,
+        offset: l.messages.length,
+        unread: f === 'unread' || undefined,
+      })
+      if (mailbox !== view.current.current || f !== view.current.filter) return
+      setList((cur) => {
+        if (!cur) return cur
+        const seen = new Set(cur.messages.map(keyOf))
+        return {
+          total: p.total,
+          messages: [...cur.messages, ...p.messages.filter((m) => !seen.has(keyOf(m)))],
+        }
+      })
+    } finally {
+      loadingMore.current = false
+    }
+  }
 
   /** Fetch new mail for a folder from the server, then show it. */
   const refresh = useCallback(
@@ -153,7 +231,11 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
         if (r.ok) {
           setProblem(null)
           setCheckedAt(new Date())
-        } else if (r.error !== 'busy') setProblem(r.message)
+          if (r.added > 0 && mailbox === view.current.current)
+            setAnnouncement(`${r.added} new ${r.added === 1 ? 'message' : 'messages'}`)
+        } else if (r.error !== 'busy')
+          // Only a new problem is announced again.
+          setProblem((p) => (p?.text === r.message ? p : { text: r.message, at: new Date() }))
         await load()
       } finally {
         off()
@@ -163,26 +245,31 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     },
     [load],
   )
+  const refreshRef = useRef(refresh)
+  useEffect(() => {
+    refreshRef.current = refresh
+  }, [refresh])
 
-  // Show the cache straight away whenever the folder, filter or page size changes.
+  // Show the cache straight away whenever the folder or filter changes.
   useEffect(() => {
     const t = setTimeout(() => void load(), 0)
     return () => clearTimeout(t)
-  }, [load])
+  }, [load, current, filter])
 
-  // Then check the server: on opening a folder, and every few minutes.
+  // Then check the server: on opening a folder, and every few minutes (always with what's on
+  // screen now, not what was there when the timer started).
   useEffect(() => {
-    const first = setTimeout(() => void refresh(current), 0)
-    const every = setInterval(() => void refresh(currentRef.current), POLL_MS)
+    const first = setTimeout(() => void refreshRef.current(current), 0)
+    const every = setInterval(() => void refreshRef.current(view.current.current), POLL_MS)
     return () => {
       clearTimeout(first)
       clearInterval(every)
     }
-    // Only when the folder changes, not when `refresh` is recreated by a filter change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current])
 
   const changeQuery = (q: string) => {
+    // Starting a search clears the selection, so the reading pane doesn't show a non-result.
+    if (q.trim() && !query.trim()) setSelected(null)
     setQuery(q)
     setServer({ busy: false, done: false })
     if (!q.trim()) setResults(null)
@@ -236,33 +323,45 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     if (!selected) return
     const key = keyOf(selected)
     let live = true
+    // "Opening…" only if it takes a moment.
+    const t = setTimeout(() => live && setSlow(true), 300)
     void window.ordo.mail.open({ mailbox: selected.mailbox, uid: selected.uid }).then((r) => {
       if (!live) return
+      setSlow(false)
       setOpened(r.ok ? { key, message: r.message } : { key, error: r.message })
       if (r.ok && !r.message.seen) void setFlags([selected], { seen: true })
     })
     return () => {
       live = false
+      clearTimeout(t)
     }
-    // Opening depends on which message, not on its flags changing.
+    // Opening depends on which message (and Try again), not on its flags changing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey])
+  }, [selectedKey, openAttempt])
 
   const move = async (to: MoveTarget) => {
     const m = selected
     if (!m) return
-    const i = visible.findIndex((x) => keyOf(x) === keyOf(m))
-    const next = visible[i + 1] ?? visible[i - 1] ?? null
-    const r = await window.ordo.mail.move({ mailbox: m.mailbox, uids: [m.uid], to })
-    if (!r.ok) {
-      setToast({ text: r.message, error: true })
-      return
+    // A key held down sends the same move again and again: once is enough.
+    const key = keyOf(m)
+    if (moving.current.has(key)) return
+    moving.current.add(key)
+    try {
+      const i = visible.findIndex((x) => keyOf(x) === key)
+      const next = visible[i + 1] ?? visible[i - 1] ?? null
+      const r = await window.ordo.mail.move({ mailbox: m.mailbox, uids: [m.uid], to })
+      if (!r.ok) {
+        setToast({ text: r.message, error: true })
+        return
+      }
+      patch(new Set([key]), null)
+      setSelected(next)
+      const where = { archive: 'Archive', trash: 'Bin', inbox: 'Inbox', junk: 'Junk' }[to]
+      setToast({ text: `Moved to ${where}.`, ...(r.undoId !== null && { undoId: r.undoId }) })
+      setBoxes(await window.ordo.mail.mailboxes())
+    } finally {
+      moving.current.delete(key)
     }
-    patch(new Set([keyOf(m)]), null)
-    setSelected(next)
-    const where = { archive: 'Archive', trash: 'Bin', inbox: 'Inbox', junk: 'Junk' }[to]
-    setToast({ text: `Moved to ${where}.`, ...(r.undoId !== null && { undoId: r.undoId }) })
-    setBoxes(await window.ordo.mail.mailboxes())
   }
 
   const undo = async () => {
@@ -274,8 +373,9 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     await load()
   }
 
+  // Errors stay until dismissed; other notes go after a while.
   useEffect(() => {
-    if (!toast) return
+    if (!toast || toast.error) return
     const t = setTimeout(() => setToast(null), toast.undoId ? 12_000 : 5_000)
     return () => clearTimeout(t)
   }, [toast])
@@ -284,7 +384,9 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
 
   const startReply = (all: boolean) => {
     if (!message) return
-    const r = replyRecipients(message, [email], all)
+    const r = replyRecipients(message, ownAddresses(email), all, {
+      inSent: roleOf(message.mailbox) === 'sent',
+    })
     setCompose({
       title: all ? 'Reply all' : 'Reply',
       to: formatAddressList(r.to),
@@ -349,8 +451,11 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
   const searchServer = async () => {
     const q = query.trim()
     if (!q) return
+    const mailbox = current
     setServer({ busy: true, done: false })
-    const r = await window.ordo.mail.searchServer({ query: q, mailbox: current, limit: 100 })
+    const r = await window.ordo.mail.searchServer({ query: q, mailbox, limit: 100 })
+    // You've typed something else, or left the folder, since: these results are for nothing on screen.
+    if (view.current.query.trim() !== q || view.current.current !== mailbox) return
     if (!r.ok) return setServer({ busy: false, done: false, error: r.message })
     setResults((local) => {
       const seen = new Set((local ?? []).map(keyOf))
@@ -364,7 +469,6 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
   const selectMailbox = (path: string) => {
     if (path === current) return void refresh(path)
     setCurrent(path)
-    setLimit(PAGE)
     setSelected(null)
     setList(null)
     changeQuery('')
@@ -377,8 +481,8 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     if (next) setSelected(next)
   }
 
-  const sheetOpen = compose !== null || link !== null
-  const handlers = {
+  const sheetOpen = compose !== null || link !== null || showKeys
+  const actions = {
     move,
     undo,
     startReply,
@@ -387,56 +491,89 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     step,
     toggleRead: () => selected && void setFlags([selected], { seen: !selected.seen }),
     toggleFlag: () => selected && void setFlags([selected], { flagged: !selected.flagged }),
+    search: () => searchRef.current?.focus(),
+    keys: () => setShowKeys(true),
   }
-  const handlersRef = useRef(handlers)
+  const actionsRef = useRef(actions)
   useEffect(() => {
-    handlersRef.current = handlers
+    actionsRef.current = actions
   })
 
-  // Keyboard shortcuts, like Mail and Gmail. Never while typing or while a sheet is open.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (sheetOpen || e.defaultPrevented || e.altKey || e.ctrlKey) return
-      const h = handlersRef.current
+  /**
+   * Mail's own chords (⌘R, ⇧⌘R…) work wherever focus is, except while typing. Single keys
+   * (Gmail's) only work in the message list or a message, so they never surprise anyone typing
+   * elsewhere or using a screen reader (WCAG 2.1.4).
+   */
+  const handleKey = useCallback(
+    (
+      e: Pick<
+        KeyboardEvent,
+        'key' | 'metaKey' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'target' | 'preventDefault'
+      >,
+      singleKeys: boolean,
+    ) => {
+      if (sheetOpen || e.altKey) return false
+      const a = actionsRef.current
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+      let action: (() => void) | undefined
       if (e.metaKey) {
-        if (e.key === 'n') h.newMessage()
-        else if (e.key === 'f') searchRef.current?.focus()
-        else return
-        e.preventDefault()
-        return
+        if (e.ctrlKey) action = key === 'a' ? () => void a.move('archive') : undefined
+        else if (key === 'n') action = a.newMessage
+        else if (key === 'f' && !e.shiftKey) action = a.search
+        else if (isTyping(e.target)) action = undefined
+        else if (key === 'r') action = () => a.startReply(e.shiftKey)
+        else if (key === 'f') action = a.startForward
+        else if (key === 'u' && e.shiftKey) action = a.toggleRead
+        else if (key === 'l' && e.shiftKey) action = a.toggleFlag
+        else if (key === 'z' && !e.shiftKey) action = () => void a.undo()
+        else if (key === 'Backspace') action = () => void a.move('trash')
+      } else if (singleKeys && !e.ctrlKey && !isTyping(e.target)) {
+        const single: Record<string, () => void> = {
+          c: a.newMessage,
+          '/': a.search,
+          r: () => a.startReply(false),
+          a: () => a.startReply(true),
+          f: a.startForward,
+          e: () => void a.move('archive'),
+          '#': () => void a.move('trash'),
+          Delete: () => void a.move('trash'),
+          Backspace: () => void a.move('trash'),
+          u: a.toggleRead,
+          s: a.toggleFlag,
+          z: () => void a.undo(),
+          '?': a.keys,
+        }
+        action = single[key]
       }
-      if (isTyping(e.target)) return
-      const actions: Record<string, () => void> = {
-        c: h.newMessage,
-        '/': () => searchRef.current?.focus(),
-        r: () => h.startReply(false),
-        a: () => h.startReply(true),
-        f: h.startForward,
-        e: () => void h.move('archive'),
-        '#': () => void h.move('trash'),
-        Delete: () => void h.move('trash'),
-        Backspace: () => void h.move('trash'),
-        u: h.toggleRead,
-        s: h.toggleFlag,
-        z: () => void h.undo(),
-        ArrowDown: () => h.step(1),
-        j: () => h.step(1),
-        ArrowUp: () => h.step(-1),
-        k: () => h.step(-1),
-      }
-      const action = actions[e.key]
-      if (!action) return
+      if (!action) return false
       e.preventDefault()
       action()
+      return true
+    },
+    [sheetOpen],
+  )
+
+  // Chords from anywhere in the window.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !e.metaKey) return
+      handleKey(e, false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sheetOpen])
+  }, [handleKey])
+
+  // Single keys from the message list and the reading pane (including the message frame).
+  const onPaneKey = (e: ReactKeyboardEvent<HTMLElement>) => {
+    if (!e.metaKey) handleKey(e.nativeEvent, true)
+  }
+  const onFrameKey = useCallback((e: KeyboardEvent) => void handleKey(e, true), [handleKey])
 
   const hasRole = (r: MoveTarget) => r === 'inbox' || boxes.some((b) => b.role === r)
   const canAct = selected !== null
   const inDrafts = role === 'drafts' || (message?.draft ?? false)
   const searching = results !== null
+  const emptyFolder = !searching && list !== null && list.messages.length === 0
 
   const firstSync = refreshing && current === INBOX && progress && (list?.total ?? 0) === 0
   const listTitle = searching ? `Results for “${query.trim()}”` : boxName
@@ -452,15 +589,27 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
     ? progress && progress.total > 0 && current === INBOX
       ? `Checking ${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()}…`
       : 'Checking for new mail…'
-    : checkedAt
-      ? `Updated ${checkedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
-      : email
+    : problem
+      ? `Couldn’t check at ${timeNow(problem.at)}. Showing downloaded mail.`
+      : checkedAt
+        ? `Updated ${timeNow(checkedAt)}`
+        : email
+
+  const serverSearch = (
+    <ServerSearch
+      mailbox={boxName}
+      busy={server.busy}
+      done={server.done}
+      error={server.error}
+      onSearch={() => void searchServer()}
+    />
+  )
 
   return (
     <div className="relative flex h-full min-h-0">
       <ToolbarActions>
-        <div role="toolbar" aria-label="Mail" className="flex min-w-0 items-center gap-1">
-          <ToolButton label="New message" shortcut="C" onClick={newMessage}>
+        <div role="group" aria-label="Mail" className="flex min-w-0 items-center gap-1">
+          <ToolButton label="New message" keys="⌘N" aria="Meta+N" onClick={newMessage}>
             <SquarePen size={16} />
           </ToolButton>
           <Divider />
@@ -471,7 +620,8 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
           ) : (
             <ToolButton
               label={hasRole('archive') ? 'Archive' : 'This account has no Archive mailbox'}
-              shortcut="E"
+              keys="⌃⌘A"
+              aria="Control+Meta+A"
               disabled={!canAct || !hasRole('archive')}
               onClick={() => void move('archive')}
             >
@@ -481,7 +631,8 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
           {role !== 'trash' && (
             <ToolButton
               label="Move to Bin"
-              shortcut="Delete"
+              keys="⌘⌫"
+              aria="Meta+Backspace"
               disabled={!canAct}
               onClick={() => void move('trash')}
             >
@@ -494,44 +645,66 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
             </ToolButton>
           )}
           <Divider />
-          <ToolButton label="Reply" shortcut="R" disabled={!message} onClick={() => startReply(false)}>
+          <ToolButton
+            label="Reply"
+            keys="⌘R"
+            aria="Meta+R"
+            disabled={!message}
+            onClick={() => startReply(false)}
+          >
             <Reply size={16} />
           </ToolButton>
-          <ToolButton label="Reply all" shortcut="A" disabled={!message} onClick={() => startReply(true)}>
+          <ToolButton
+            label="Reply all"
+            keys="⇧⌘R"
+            aria="Shift+Meta+R"
+            disabled={!message}
+            onClick={() => startReply(true)}
+          >
             <ReplyAll size={16} />
           </ToolButton>
-          <ToolButton label="Forward" shortcut="F" disabled={!message} onClick={startForward}>
+          <ToolButton
+            label="Forward"
+            keys="⇧⌘F"
+            aria="Shift+Meta+F"
+            disabled={!message}
+            onClick={startForward}
+          >
             <Forward size={16} />
           </ToolButton>
           <Divider />
           <ToolButton
             label="Flag"
-            shortcut="S"
+            keys="⇧⌘L"
+            aria="Shift+Meta+L"
             pressed={selected?.flagged ?? false}
             disabled={!canAct}
-            onClick={handlers.toggleFlag}
+            onClick={actions.toggleFlag}
           >
             <Flag size={16} className={selected?.flagged ? 'fill-[#ff9500] text-[#ff9500]' : ''} />
           </ToolButton>
           <ToolButton
             label={selected && !selected.seen ? 'Mark as read' : 'Mark as unread'}
-            shortcut="U"
+            keys="⇧⌘U"
+            aria="Shift+Meta+U"
             disabled={!canAct}
-            onClick={handlers.toggleRead}
+            onClick={actions.toggleRead}
           >
             {selected && !selected.seen ? <MailOpen size={16} /> : <Mail size={16} />}
           </ToolButton>
-          <div className="no-drag relative ml-2 w-[200px] min-w-[120px] shrink">
+          <div className="no-drag relative ml-2 w-[200px] min-w-[110px] shrink">
             <Search
               size={13}
-              className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-ink-3"
+              className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-ink-2"
             />
             <input
               ref={searchRef}
               type="search"
               role="searchbox"
               aria-label="Search mail"
+              aria-keyshortcuts="Meta+F"
               placeholder="Search"
+              title="Search (⌘F)"
               value={query}
               onChange={(e) => changeQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -545,14 +718,14 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
                   if (!selected && visible[0]) setSelected(visible[0])
                 }
               }}
-              className="h-7 w-full rounded-md border border-sep bg-field pr-6 pl-7 text-[13px] text-ink outline-none select-text placeholder:text-ink-3 focus:border-accent focus:ring-1 focus:ring-accent [&::-webkit-search-cancel-button]:hidden"
+              className="h-7 w-full rounded-md border border-sep bg-field pr-6 pl-7 text-[13px] text-ink outline-none select-text placeholder:text-ink-2 focus:border-accent focus:ring-1 focus:ring-accent [&::-webkit-search-cancel-button]:hidden"
             />
             {query && (
               <button
                 type="button"
                 aria-label="Clear search"
                 onClick={() => changeQuery('')}
-                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded text-ink-3 hover:text-ink"
+                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded text-ink-2 hover:text-ink"
               >
                 <X size={13} />
               </button>
@@ -567,13 +740,14 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
         onSelect={selectMailbox}
         onRefresh={() => void refresh(current)}
         refreshing={refreshing}
-        footer={<span aria-live="polite">{footer}</span>}
+        compact={compact}
+        footer={footer}
       />
 
       <section
         ref={listRef}
         aria-label="Messages"
-        className="flex w-[320px] shrink-0 flex-col border-r border-sep max-[1100px]:w-[280px]"
+        className={`flex shrink-0 flex-col border-r border-sep ${compact ? 'w-[270px]' : 'w-[320px]'}`}
       >
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-sep px-4">
           <div className="min-w-0">
@@ -581,21 +755,18 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
             <p className="truncate text-[11px] text-ink-2">{countLine}</p>
           </div>
           {!searching && (
-            <SegmentedControl
-              label="Show"
-              options={FILTERS}
-              value={filter}
-              onChange={(f) => {
-                setFilter(f)
-                setLimit(PAGE)
-              }}
-            />
+            <SegmentedControl label="Show" options={FILTERS} value={filter} onChange={setFilter} />
           )}
         </div>
         {problem && (
-          <p role="alert" className="mx-3 mt-2 rounded-md bg-hover px-3 py-2 text-[12px] text-danger">
-            {problem}
-          </p>
+          <div className="mx-3 mt-2 flex items-center gap-2 rounded-md bg-hover px-3 py-2 text-[12px]">
+            <p role="alert" className="min-w-0 flex-1 text-danger-text">
+              {problem.text}
+            </p>
+            <Button onClick={() => void refresh(current)} disabled={refreshing} className="shrink-0">
+              Try again
+            </Button>
+          </div>
         )}
         {firstSync ? (
           <FirstSync progress={progress} />
@@ -605,61 +776,54 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
             messages={visible}
             selected={selectedKey}
             onSelect={setSelected}
+            onKey={onPaneKey}
             showRecipients={!searching && (role === 'sent' || role === 'drafts')}
             showMailbox={searching ? nameOf : undefined}
             onEndReached={() => {
-              if (!searching && list && list.messages.length < list.total && limit <= list.messages.length)
-                setLimit((l) => l + PAGE)
+              if (!searching) void loadMore()
             }}
             empty={
               list === null && !searching ? null : (
-                <p className="text-center text-[13px] text-ink-3">
-                  {searching
-                    ? 'Nothing found in downloaded mail.'
-                    : filter === 'unread'
-                      ? 'No unread messages.'
-                      : refreshing
-                        ? 'Checking for mail…'
-                        : 'No messages.'}
-                </p>
+                <div className="flex flex-col items-center">
+                  <p className="text-center text-[13px] text-ink-2">
+                    {searching
+                      ? 'Nothing found in downloaded mail.'
+                      : filter === 'unread'
+                        ? 'No unread messages.'
+                        : refreshing
+                          ? 'Checking for mail…'
+                          : `Nothing in ${boxName}.`}
+                  </p>
+                  {searching && serverSearch}
+                </div>
               )
             }
-            footer={
-              searching && (
-                <ServerSearch
-                  mailbox={boxName}
-                  busy={server.busy}
-                  done={server.done}
-                  error={server.error}
-                  onSearch={() => void searchServer()}
-                />
-              )
-            }
-          />
-        )}
-        {searching && visible.length === 0 && (
-          <ServerSearch
-            mailbox={boxName}
-            busy={server.busy}
-            done={server.done}
-            error={server.error}
-            onSearch={() => void searchServer()}
+            footer={searching && serverSearch}
           />
         )}
       </section>
 
-      <section aria-label="Reading pane" className="relative min-w-0 flex-1 overflow-y-auto">
+      <section
+        ref={readerRef}
+        aria-label="Reading pane"
+        tabIndex={-1}
+        onKeyDown={onPaneKey}
+        className="relative min-w-0 flex-1 overflow-y-auto outline-none"
+      >
         {!selected ? (
-          <EmptyState
-            icon={<Mail size={40} strokeWidth={1.5} />}
-            title="No message selected"
-            body="Choose a message to read it. Use the arrow keys to move through the list."
-          />
+          emptyFolder || searching ? null : (
+            <EmptyState
+              icon={<Mail size={40} strokeWidth={1.5} />}
+              title="No message selected"
+              body="Choose a message to read it. Use the arrow keys to move through the list, and press ? for keyboard shortcuts."
+            />
+          )
         ) : opened?.key === selectedKey && opened.error ? (
           <EmptyState
             icon={<Mail size={40} strokeWidth={1.5} />}
             title="Couldn’t open this message"
             body={opened.error}
+            action={<Button onClick={() => setOpenAttempt((n) => n + 1)}>Try again</Button>}
           />
         ) : message ? (
           <Reader
@@ -668,36 +832,38 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
             isDraft={inDrafts}
             onLink={onLink}
             onEditDraft={editDraft}
+            onFrameKey={onFrameKey}
           />
-        ) : (
-          <p className="p-6 text-[13px] text-ink-3" aria-live="polite">
-            Opening…
-          </p>
-        )}
+        ) : slow ? (
+          <p className="p-6 text-[13px] text-ink-2">Opening…</p>
+        ) : null}
       </section>
 
       {toast && !sheetOpen && (
         <div
-          role="status"
-          className="glass-panel absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 rounded-full py-1.5 pr-1.5 pl-4 text-[13px]"
+          role={toast.error ? 'alert' : 'status'}
+          className="absolute right-5 bottom-5 z-10 flex max-w-[420px] items-center gap-3 rounded-lg border border-sep bg-sheet py-1.5 pr-1.5 pl-4 text-[13px] shadow-[0_8px_24px_rgb(0_0_0/0.18)]"
         >
-          <span className={toast.error ? 'text-danger' : ''}>{toast.text}</span>
+          <span className={`min-w-0 flex-1 ${toast.error ? 'text-danger-text' : ''}`}>{toast.text}</span>
           {toast.undoId ? (
-            <Button onClick={() => void undo()} title="Undo (Z)">
-              Undo
+            <Button icon={<Undo2 size={13} />} onClick={() => void undo()} title="Undo move (⌘Z)">
+              Undo move
             </Button>
           ) : (
             <button
               type="button"
               aria-label="Dismiss"
               onClick={() => setToast(null)}
-              className="flex size-6 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink"
+              className="flex size-6 items-center justify-center rounded-full text-ink-2 hover:bg-hover hover:text-ink"
             >
               <X size={13} />
             </button>
           )}
         </div>
       )}
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
 
       {compose && (
         <ComposeSheet
@@ -713,6 +879,7 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
         />
       )}
       {link && <LinkSheet link={link} onClose={() => setLink(null)} />}
+      {showKeys && <ShortcutsSheet onClose={() => setShowKeys(false)} />}
     </div>
   )
 }
@@ -720,7 +887,7 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
 function FirstSync({ progress }: { progress: MailRefreshProgress | null }) {
   const pct = progress?.total ? Math.min(100, (progress.checked / progress.total) * 100) : 0
   return (
-    <div className="px-4 pt-5" aria-live="polite">
+    <div className="px-4 pt-5">
       <p className="text-[13px] font-medium">Downloading your inbox</p>
       <div
         className="mt-2 h-1.5 overflow-hidden rounded-full bg-selected"
@@ -734,7 +901,7 @@ function FirstSync({ progress }: { progress: MailRefreshProgress | null }) {
       </div>
       <p className="mt-2 text-[12px] leading-snug text-ink-2">
         {progress?.total
-          ? `${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()}. Only headers come down now; a message’s text is fetched when you open it.`
+          ? `${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()}. Ordo downloads the list of messages first. Each message downloads when you open it.`
           : 'Connecting to iCloud…'}
       </p>
     </div>
@@ -751,13 +918,13 @@ function ServerSearch(props: {
   return (
     <div className="flex flex-col items-center gap-1.5 px-4 py-4 text-center">
       {props.done ? (
-        <p className="text-[12px] text-ink-3">Searched all of {props.mailbox} on iCloud.</p>
+        <p className="text-[12px] text-ink-2">Searched all of {props.mailbox} on iCloud.</p>
       ) : (
         <Button icon={<Search size={13} />} onClick={props.onSearch} disabled={props.busy}>
           {props.busy ? 'Searching iCloud…' : `Search all of ${props.mailbox} on iCloud`}
         </Button>
       )}
-      {props.error && <p className="text-[12px] text-danger">{props.error}</p>}
+      {props.error && <p className="text-[12px] text-danger-text">{props.error}</p>}
     </div>
   )
 }
@@ -768,13 +935,15 @@ function Divider() {
 
 function ToolButton(props: {
   label: string
-  shortcut?: string
+  /** The shortcut as Mac glyphs, for the tooltip. */
+  keys?: string
+  /** The shortcut for aria-keyshortcuts. */
+  aria?: string
   disabled?: boolean
   pressed?: boolean
   onClick: () => void
   children: ReactNode
 }) {
-  const title = props.shortcut ? `${props.label} (${props.shortcut})` : props.label
   return (
     <button
       type="button"
@@ -782,7 +951,8 @@ function ToolButton(props: {
       disabled={props.disabled}
       aria-label={props.label}
       aria-pressed={props.pressed}
-      title={title}
+      aria-keyshortcuts={props.aria}
+      title={props.keys ? `${props.label} (${props.keys})` : props.label}
       className="no-drag flex size-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
     >
       {props.children}

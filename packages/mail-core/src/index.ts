@@ -63,6 +63,7 @@ export {
   parseAddress,
   parseAddressList,
   personLabel,
+  splitAddressList,
   type ParsedAddressList,
 } from './address'
 export {

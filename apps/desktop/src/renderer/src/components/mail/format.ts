@@ -1,4 +1,4 @@
-import { displayName, type Address } from '@ordo/mail-core'
+import { displayName, personLabel, type Address } from '@ordo/mail-core'
 
 const DAY = 86_400_000
 
@@ -30,6 +30,9 @@ export function initials(a: Address | null | undefined): string {
 }
 
 export const people = (list: readonly Address[]) => list.map((a) => displayName(a)).join(', ')
+
+/** Names with their real addresses, for the reading pane: a name can't hide where mail goes. */
+export const peopleWithAddresses = (list: readonly Address[]) => list.map(personLabel).join(', ')
 
 /** A file size people can read: 980 bytes, 12 KB, 3.4 MB. */
 export function fileSize(bytes: number): string {

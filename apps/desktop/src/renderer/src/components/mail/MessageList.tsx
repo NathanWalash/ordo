@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode, type UIEvent } f
 import { Flag, Paperclip, Reply } from 'lucide-react'
 import { displayName } from '@ordo/mail-core'
 import type { MessageSummary } from '@ordo/shared'
-import { listDate, people } from './format'
+import { fullDate, listDate, people } from './format'
 
 export const keyOf = (m: { mailbox: string; uid: number }) => `${m.mailbox}\u0000${m.uid}`
 
@@ -17,8 +17,24 @@ interface Props {
   showMailbox?: (path: string) => string
   /** Near the bottom: load the next page. */
   onEndReached?: () => void
+  /** Keys the list doesn't use itself (the window's shortcuts). */
+  onKey?: (e: KeyboardEvent<HTMLElement>) => void
   empty: ReactNode
   footer?: ReactNode
+}
+
+/** What a screen reader says for a row: state, who, subject, when, and what's attached. */
+function rowLabel(m: MessageSummary, who: string): string {
+  return [
+    m.seen ? '' : 'Unread.',
+    m.flagged ? 'Flagged.' : '',
+    `${who}: ${m.subject || '(No subject)'}.`,
+    fullDate(m.date) + '.',
+    m.hasAttachments ? 'Has attachments.' : '',
+    m.answered ? 'Replied.' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 /**
@@ -33,6 +49,7 @@ export function MessageList({
   showRecipients,
   showMailbox,
   onEndReached,
+  onKey,
   empty,
   footer,
 }: Props) {
@@ -45,15 +62,15 @@ export function MessageList({
     list.current?.querySelector<HTMLElement>(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [index])
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return
+  const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return onKey?.(e)
     let next = -1
     if (e.key === 'ArrowDown' || e.key === 'j') next = Math.min(messages.length - 1, index + 1)
     else if (e.key === 'ArrowUp' || e.key === 'k') next = Math.max(0, index - 1)
     else if (e.key === 'Home') next = 0
     else if (e.key === 'End') next = messages.length - 1
     const target = messages[next]
-    if (next < 0 || !target) return
+    if (next < 0 || !target) return onKey?.(e)
     e.preventDefault()
     e.stopPropagation()
     onSelect(target)
@@ -74,11 +91,16 @@ export function MessageList({
         tabIndex={0}
         aria-activedescendant={index >= 0 ? `message-${index}` : undefined}
         onKeyDown={onKeyDown}
-        className="group/list outline-none"
+        // Tabbing in with nothing selected selects the first message, so focus is visible.
+        onFocus={(e) => {
+          if (e.target === e.currentTarget && index < 0 && messages[0]) onSelect(messages[0])
+        }}
+        className="group/list rounded-md py-0.5 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       >
         {messages.map((m, i) => {
           const on = i === index
           const who = showRecipients ? people(m.to) || 'No recipients' : displayName(m.from)
+          const sub = on ? 'text-ink-2 group-focus/list:text-white' : 'text-ink-2'
           return (
             <li
               key={keyOf(m)}
@@ -86,7 +108,7 @@ export function MessageList({
               data-index={i}
               role="option"
               aria-selected={on}
-              aria-label={`${m.seen ? '' : 'Unread. '}${m.flagged ? 'Flagged. ' : ''}${who}: ${m.subject || '(No subject)'}`}
+              aria-label={rowLabel(m, who)}
               onMouseDown={(e) => {
                 // Clicking a row focuses the list, so the arrow keys work straight away.
                 e.preventDefault()
@@ -109,25 +131,18 @@ export function MessageList({
                 <span className={`min-w-0 flex-1 truncate text-[13px] ${m.seen ? '' : 'font-semibold'}`}>
                   {who}
                 </span>
-                <time
-                  dateTime={m.date.toISOString()}
-                  className={`shrink-0 text-[11px] ${on ? 'text-ink-2 group-focus/list:text-white/80' : 'text-ink-2'}`}
-                >
+                <time dateTime={m.date.toISOString()} className={`shrink-0 text-[11px] ${sub}`}>
                   {listDate(m.date)}
                 </time>
               </div>
               <div className="flex items-center gap-1.5">
                 <span
-                  className={`min-w-0 flex-1 truncate text-[12px] ${
-                    on ? 'text-ink-2 group-focus/list:text-white/90' : 'text-ink-2'
-                  }`}
+                  className={`min-w-0 flex-1 truncate text-[12px] ${on ? 'text-ink group-focus/list:text-white' : 'text-ink'}`}
                 >
                   {m.subject || '(No subject)'}
                 </span>
-                {m.answered && <Reply size={12} aria-hidden="true" className="shrink-0 opacity-60" />}
-                {m.hasAttachments && (
-                  <Paperclip size={12} aria-hidden="true" className="shrink-0 opacity-60" />
-                )}
+                {m.answered && <Reply size={12} aria-hidden="true" className={`shrink-0 ${sub}`} />}
+                {m.hasAttachments && <Paperclip size={12} aria-hidden="true" className={`shrink-0 ${sub}`} />}
                 {m.flagged && (
                   <Flag
                     size={12}
@@ -136,13 +151,7 @@ export function MessageList({
                   />
                 )}
               </div>
-              {showMailbox && (
-                <span
-                  className={`text-[11px] ${on ? 'text-ink-3 group-focus/list:text-white/70' : 'text-ink-3'}`}
-                >
-                  {showMailbox(m.mailbox)}
-                </span>
-              )}
+              {showMailbox && <span className={`text-[11px] ${sub}`}>{showMailbox(m.mailbox)}</span>}
             </li>
           )
         })}

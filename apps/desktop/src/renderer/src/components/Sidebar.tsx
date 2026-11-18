@@ -32,7 +32,7 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
       <Section label="Mail">
         <Item
           icon={<Inbox size={15} />}
-          label="Inbox"
+          label="Mail"
           active={route === 'mail/inbox'}
           onClick={() => onNavigate('mail/inbox')}
         />

@@ -154,6 +154,8 @@ export interface MailApi {
   openLink(url: string): Promise<MailOutcome>
   /** Save an attachment with the save dialog. `saved` is false if the dialog was cancelled. */
   saveAttachment(ref: AttachmentRef): Promise<MailOutcome<{ saved: boolean }>>
+  /** Save every attachment into a folder chosen with the open dialog. `saved` is how many. */
+  saveAllAttachments(ref: MessageRef): Promise<MailOutcome<{ saved: number }>>
   /** Choose files to attach with the open dialog. */
   pickAttachments(): Promise<PickedFile[]>
   /** Send a message. The preload only passes this on from a click. */
@@ -179,6 +181,7 @@ export const MAIL_IPC = {
   loadImages: 'mail:load-images',
   openLink: 'mail:open-link',
   saveAttachment: 'mail:save-attachment',
+  saveAllAttachments: 'mail:save-all-attachments',
   pickAttachments: 'mail:pick-attachments',
   send: 'mail:send',
   saveDraft: 'mail:save-draft',

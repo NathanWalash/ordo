@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -190,18 +191,21 @@ test.afterAll(async () => {
 
 const list = () => page.getByRole('listbox')
 const row = (subject: string) => list().getByRole('option', { name: new RegExp(subject) })
-const frame = () => page.frameLocator('iframe[title="Message"]')
-const toolbar = () => page.getByRole('toolbar', { name: 'Mail' })
+const frame = () => page.frameLocator('iframe[title="Message body"]')
+const toolbar = () => page.getByRole('group', { name: 'Mail' })
+const reader = () => page.getByRole('region', { name: 'Reading pane' })
+const recipients = (dialog: ReturnType<Page['getByRole']>, field: string) =>
+  dialog.getByRole('list', { name: `${field} recipients` })
 
 test('connects and shows the mailboxes and inbox', async () => {
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await page.getByRole('button', { name: 'Connect iCloud' }).click()
   await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
   await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)
   await page.getByRole('dialog').getByRole('button', { name: 'Connect', exact: true }).click()
   // Connecting opens Unclutter; go to the mail client from there.
   await expect(page.getByRole('heading', { level: 1, name: 'Unclutter' })).toBeVisible()
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
 
   await expect(row(NEWS)).toBeVisible({ timeout: 20_000 })
   await expect(row(NEWS)).toHaveAccessibleName(new RegExp(`^Unread\\. News Desk: ${NEWS}`))
@@ -215,7 +219,7 @@ test('connects and shows the mailboxes and inbox', async () => {
 test('shows HTML mail in a locked-down frame with remote images blocked', async () => {
   await row(NEWS).click()
   await expect(frame().getByRole('heading', { name: `Hello from the newsletter ${run}` })).toBeVisible()
-  const iframe = page.locator('iframe[title="Message"]')
+  const iframe = page.locator('iframe[title="Message body"]')
   await expect(iframe).toHaveAttribute('sandbox', 'allow-same-origin')
 
   // Scripts, handlers, forms and frames are gone, and nothing ran.
@@ -231,7 +235,7 @@ test('shows HTML mail in a locked-down frame with remote images blocked', async 
 
   // The tracking pixel never loaded; the inline logo did, from the message itself.
   await expect(
-    page.getByText('Ordo blocked 1 remote image so the sender can’t tell you opened this.'),
+    page.getByText('Ordo blocked 1 remote image so the sender can’t tell you’ve opened it.'),
   ).toBeVisible()
   await expect(frame().locator('#pixel')).not.toHaveAttribute('src')
   await expect(frame().locator('#logo')).toHaveAttribute('src', /^data:image\/png;base64,/)
@@ -244,6 +248,13 @@ test('shows HTML mail in a locked-down frame with remote images blocked', async 
     (m) => m[0]?.flags.has('\\Seen') === true,
   )
   expect(msg?.flags.has('\\Seen')).toBe(true)
+
+  // The frame is as tall as the message, so only the reading pane scrolls.
+  const sizes = await frame()
+    .locator('html')
+    .evaluate((html) => ({ doc: html.scrollHeight, view: html.clientHeight }))
+  expect(sizes.view).toBeGreaterThanOrEqual(sizes.doc)
+  await expect(frame().locator('html')).toHaveCSS('overflow-y', 'hidden')
   await screenshot('reading')
 })
 
@@ -259,19 +270,21 @@ test('Load images fetches them through Ordo, without cookies, for this message o
 
 test('links ask first, warn about lookalikes and open in the browser, never in Ordo', async () => {
   await frame().locator('#phish').click()
-  const sheet = page.getByRole('dialog', { name: 'Open this link in your browser?' })
+  const sheet = page.getByRole('dialog', { name: 'This link may be a scam' })
   await expect(sheet).toBeVisible()
-  await expect(sheet.getByRole('alert')).toContainText(
-    'The link says mybank.co.uk, but it goes to evil.example.',
+  await expect(sheet).toHaveAccessibleDescription(
+    /The email shows mybank\.co\.uk, but the link really goes to evil\.example\./,
   )
   await expect(sheet.getByLabel('Link address')).toHaveText('https://evil.example/login')
+  // The safe choice is the default: Return or Space doesn't open it.
+  await expect(sheet.getByRole('button', { name: 'Don’t open' })).toBeFocused()
   await screenshot('link')
-  await sheet.getByRole('button', { name: 'Cancel' }).click()
+  await page.keyboard.press('Enter')
   await expect(sheet).toBeHidden()
   expect(await app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened)).toEqual([])
 
   await frame().locator('#phish').click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Open link' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Open anyway' }).click()
   await expect(page.getByRole('dialog')).toBeHidden()
   expect(await app.evaluate(() => (globalThis as unknown as { opened: string[] }).opened)).toEqual([
     'https://evil.example/login',
@@ -283,7 +296,7 @@ test('links ask first, warn about lookalikes and open in the browser, never in O
   // load a page into the frame never leaves Ordo.
   const before = imageHits.length
   await page.evaluate((port) => {
-    const f = document.querySelector<HTMLIFrameElement>('iframe[title="Message"]')!
+    const f = document.querySelector<HTMLIFrameElement>('iframe[title="Message body"]')!
     f.contentWindow!.location.href = `http://127.0.0.1:${port}/elsewhere`
   }, imagePort)
   await page.waitForTimeout(500)
@@ -298,13 +311,13 @@ test('links ask first, warn about lookalikes and open in the browser, never in O
 test('a mailto: link starts a message, without the hidden Bcc', async () => {
   await frame().locator('#mailto-link').click()
   const compose = page.getByRole('dialog', { name: 'New message' })
-  await expect(compose.getByLabel('To')).toHaveValue('editor@news.example')
+  await expect(recipients(compose, 'To').getByRole('listitem')).toHaveText(['editor@news.example'])
   await expect(compose.getByLabel('Subject')).toHaveValue('Feedback')
   await expect(compose.getByRole('button', { name: 'Add Bcc' })).toBeVisible()
   // With changes, closing asks whether to keep a draft.
   await compose.getByLabel('Message').fill('Hello')
   await page.keyboard.press('Escape')
-  await compose.getByRole('button', { name: 'Don’t keep' }).click()
+  await compose.getByRole('button', { name: 'Don’t save' }).click()
   await expect(compose).toBeHidden()
 })
 
@@ -321,6 +334,11 @@ test('saves an attachment with the save dialog', async () => {
   await attachments.getByRole('button', { name: `Save notes-${run}.txt` }).click()
   await expect(attachments.getByRole('status')).toHaveText(`Saved notes-${run}.txt.`)
   expect(readFileSync(target, 'utf8')).toContain(`These are the notes ${run}.`)
+  // Marked as downloaded, so the system checks it before it opens.
+  if (process.platform === 'darwin')
+    expect(execFileSync('/usr/bin/xattr', ['-p', 'com.apple.quarantine', target]).toString()).toMatch(
+      /^0083;[0-9a-f]+;Ordo;/,
+    )
 })
 
 test('flags and marks unread, on the server too', async () => {
@@ -347,9 +365,7 @@ test('the arrow keys move through the list', async () => {
 
 test('archive moves to Archive, and Undo puts it back', async () => {
   await row(OLD).click()
-  await expect(
-    page.getByRole('article', { name: 'Message' }).getByText('Thanks for your order.'),
-  ).toBeVisible()
+  await expect(reader().getByText('Thanks for your order.')).toBeVisible()
   await page.keyboard.press('e')
   await expect(page.getByRole('status').filter({ hasText: 'Moved to Archive.' })).toBeVisible()
   await expect(row(OLD)).toHaveCount(0)
@@ -361,7 +377,7 @@ test('archive moves to Archive, and Undo puts it back', async () => {
   ).toHaveLength(1)
   expect(await find('INBOX', OLD)).toHaveLength(0)
 
-  await page.getByRole('status').getByRole('button', { name: 'Undo' }).click()
+  await page.getByRole('status').getByRole('button', { name: 'Undo move' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Moved back.' })).toBeVisible()
   await expect(row(OLD)).toBeVisible()
   expect(await find('INBOX', OLD)).toHaveLength(1)
@@ -396,7 +412,7 @@ test('Move to Bin, then from Bin back to Inbox', async () => {
 test('search finds downloaded mail, and searches the server for the rest', async () => {
   const search = page.getByRole('searchbox', { name: 'Search mail' })
   await row(LUNCH).click()
-  await expect(page.getByRole('article', { name: 'Message' }).getByText(`pumpkin${run}`)).toBeVisible()
+  await expect(reader().getByText(`pumpkin${run}`)).toBeVisible()
   await search.fill(`pumpkin${run}`)
   await expect(list().getByRole('option')).toHaveCount(1)
   await expect(row(LUNCH)).toBeVisible()
@@ -451,18 +467,24 @@ test('writes and sends a message with an attachment, keeping a copy in Sent', as
 
   await toolbar().getByRole('button', { name: 'New message' }).click()
   const compose = page.getByRole('dialog', { name: 'New message' })
-  await expect(compose.getByLabel('To')).toBeFocused()
-  await compose.getByLabel('To').fill('not an address')
+  await expect(compose.getByLabel('To', { exact: true })).toBeFocused()
+  await compose.getByLabel('To', { exact: true }).fill('not an address')
   await compose.getByLabel('Subject').fill(`Plan ${run}`)
   await compose.getByLabel('Message').fill(`Here is the plan ${run}.`)
   // Return in a field never sends.
   await compose.getByLabel('Subject').press('Enter')
   await compose.getByRole('button', { name: 'Send' }).click()
   await expect(compose.getByText('Check this address: not an address')).toBeVisible()
+  // The cursor goes back to the field to fix.
+  await expect(compose.getByLabel('To', { exact: true })).toBeFocused()
 
-  await compose.getByLabel('To').fill(`Me <${TEST_ACCOUNT.email}>`)
+  await recipients(compose, 'To').getByRole('button', { name: 'Remove not an address' }).click()
+  await compose.getByLabel('To', { exact: true }).fill(`Me <${TEST_ACCOUNT.email}>`)
+  await compose.getByLabel('To', { exact: true }).press('Enter')
+  // The token always shows the real address.
+  await expect(recipients(compose, 'To').getByRole('listitem')).toHaveText([`Me <${TEST_ACCOUNT.email}>`])
   await compose.getByRole('button', { name: 'Add Bcc' }).click()
-  await compose.getByLabel('Bcc').fill('hidden@friend.example')
+  await compose.getByLabel('Bcc', { exact: true }).fill('hidden@friend.example')
   await compose.getByRole('button', { name: 'Attach files…' }).click()
   await expect(compose.getByRole('list', { name: 'Attachments' }).getByText(`plan-${run}.txt`)).toBeVisible()
   await screenshot('compose')
@@ -489,8 +511,8 @@ test('replies in the thread and marks the original answered', async () => {
   await row(LUNCH).click()
   await toolbar().getByRole('button', { name: 'Reply all' }).click()
   const compose = page.getByRole('dialog', { name: 'Reply all' })
-  await expect(compose.getByLabel('To')).toHaveValue('Sam <sam@friend.example>')
-  await expect(compose.getByLabel('Cc')).toHaveValue('Pat <pat@friend.example>')
+  await expect(recipients(compose, 'To').getByRole('listitem')).toHaveText(['Sam <sam@friend.example>'])
+  await expect(recipients(compose, 'Cc').getByRole('listitem')).toHaveText(['Pat <pat@friend.example>'])
   await expect(compose.getByLabel('Subject')).toHaveValue(`Re: ${LUNCH}`)
   await expect(compose.getByLabel('Message')).toBeFocused()
   await expect(compose.getByLabel('Message')).toHaveValue(
@@ -521,7 +543,7 @@ test('forwards with the attachment', async () => {
   await expect(compose.getByLabel('Subject')).toHaveValue(`Fwd: ${NEWS}`)
   await expect(compose.getByLabel('Message')).toHaveValue(/---------- Forwarded message ----------/)
   await expect(compose.getByRole('list', { name: 'Attachments' }).getByText(`notes-${run}.txt`)).toBeVisible()
-  await compose.getByLabel('To').fill(TEST_ACCOUNT.email)
+  await compose.getByLabel('To', { exact: true }).fill(TEST_ACCOUNT.email)
   await compose.getByRole('button', { name: 'Send' }).click()
   await expect(compose).toBeHidden({ timeout: 15_000 })
   const [got] = await eventually(
@@ -531,13 +553,29 @@ test('forwards with the attachment', async () => {
   expect(got?.source).toContain(`filename=notes-${run}.txt`)
 })
 
-test('saves a draft, and sending it removes the draft', async () => {
+test('saves a draft with an attachment twice, and sending it removes the draft', async () => {
+  const file = join(files, `draft-file-${run}.txt`)
+  writeFileSync(file, `Attached to the draft ${run}`)
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = (async () => ({
+      canceled: false,
+      filePaths: [path],
+    })) as typeof dialog.showOpenDialog
+  }, file)
   await toolbar().getByRole('button', { name: 'New message' }).click()
   const compose = page.getByRole('dialog', { name: 'New message' })
   await compose.getByLabel('Subject').fill(`Draft ${run}`)
+  await compose.getByLabel('Message').fill('Not finished')
+  await compose.getByRole('button', { name: 'Attach files…' }).click()
+  await compose.getByRole('button', { name: 'Save draft' }).click()
+  await expect(compose.getByRole('status')).toHaveText('Saved to Drafts.')
+  // A second save replaces the first, keeping the attachment that now lives in the draft.
   await compose.getByLabel('Message').fill('Not finished yet')
   await compose.getByRole('button', { name: 'Save draft' }).click()
   await expect(compose.getByRole('status')).toHaveText('Saved to Drafts.')
+  await expect(
+    compose.getByRole('list', { name: 'Attachments' }).getByText(`draft-file-${run}.txt`),
+  ).toBeVisible()
   // Saved, so closing doesn't ask.
   await compose.getByRole('button', { name: 'Cancel' }).click()
   await expect(compose).toBeHidden()
@@ -556,7 +594,10 @@ test('saves a draft, and sending it removes the draft', async () => {
   await page.getByRole('button', { name: 'Edit draft' }).click()
   const draft = page.getByRole('dialog', { name: 'Draft' })
   await expect(draft.getByLabel('Message')).toHaveValue('Not finished yet')
-  await draft.getByLabel('To').fill(TEST_ACCOUNT.email)
+  await expect(
+    draft.getByRole('list', { name: 'Attachments' }).getByText(`draft-file-${run}.txt`),
+  ).toBeVisible()
+  await draft.getByLabel('To', { exact: true }).fill(TEST_ACCOUNT.email)
   await draft.getByRole('button', { name: 'Send' }).click()
   await expect(draft).toBeHidden({ timeout: 15_000 })
   expect(
@@ -565,6 +606,91 @@ test('saves a draft, and sending it removes the draft', async () => {
       (m) => m.length === 0,
     ),
   ).toHaveLength(0)
+  const [delivered] = await eventually(
+    () => find('INBOX', `Draft ${run}`),
+    (m) => m.length > 0,
+  )
+  expect(delivered?.source).toContain(`filename=draft-file-${run}.txt`)
+  expect(delivered?.source).toContain('Not finished yet')
+})
+
+test('Mail’s own shortcuts work: ⌘R replies, ? lists them, and a sheet gives focus back', async () => {
+  await page
+    .getByRole('complementary', { name: 'Mailboxes' })
+    .getByRole('button', { name: /^Inbox/ })
+    .click()
+  await row(LUNCH).click()
+  await expect(reader().getByText(`pumpkin${run}`)).toBeVisible()
+  await page.keyboard.press('Meta+r')
+  const compose = page.getByRole('dialog', { name: 'Reply' })
+  await expect(compose).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(compose).toBeHidden()
+  // Focus is back in the list, so the arrow keys carry on working.
+  await expect(list()).toBeFocused()
+  await page.keyboard.press('?')
+  const keys = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(keys.getByRole('cell', { name: 'Reply all' })).toBeVisible()
+  await expect(keys.getByRole('button', { name: 'Done' })).toBeFocused()
+  // Tab stays inside the sheet.
+  await page.keyboard.press('Tab')
+  await expect(keys.getByRole('button', { name: 'Done' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(keys).toBeHidden()
+  // Typing in search never triggers a single-key shortcut.
+  await page.getByRole('searchbox', { name: 'Search mail' }).fill('e')
+  await expect(page.getByRole('status').filter({ hasText: 'Moved to Archive.' })).toHaveCount(0)
+  await page.getByRole('searchbox', { name: 'Search mail' }).press('Escape')
+})
+
+test('scrolls past 500 messages without losing the list', async () => {
+  test.setTimeout(120_000)
+  const BIG = `Big ${run}`
+  await withImap(async (c) => {
+    await c.mailboxCreate(BIG)
+    for (let i = 0; i < 520; i++)
+      await c.append(
+        BIG,
+        `From: Bulk <bulk@x.example>\r\nSubject: Bulk ${i}\r\nDate: Mon, 16 Nov 2026 10:00:00 +0000\r\n\r\nx\r\n`,
+      )
+  })
+  // The folder appears after the next check.
+  await page.getByRole('button', { name: 'Check for new mail' }).click()
+  await page
+    .getByRole('complementary', { name: 'Mailboxes' })
+    .getByRole('button', { name: new RegExp(`^${BIG}`) })
+    .click()
+  await expect(list().getByRole('option').first()).toBeVisible({ timeout: 20_000 })
+  // Keep scrolling to the bottom: every page loads, past the 500 a single request can return
+  // (the folder's first sync keeps its newest 500).
+  await expect
+    .poll(
+      async () => {
+        await list().getByRole('option').last().scrollIntoViewIfNeeded()
+        return list().getByRole('option').count()
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(500)
+  await expect(list().getByRole('option').first()).toBeAttached()
+})
+
+test('fits a small window: the folders become a rail, and Send stays in view', async () => {
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(920, 600))
+  await page.waitForTimeout(300)
+  await page
+    .getByRole('complementary', { name: 'Mailboxes' })
+    .getByRole('button', { name: /^Inbox/ })
+    .click()
+  await row(`News Desk: ${NEWS}`).click()
+  await expect(frame().getByRole('heading', { name: `Hello from the newsletter ${run}` })).toBeVisible()
+  await screenshot('narrow')
+  await toolbar().getByRole('button', { name: 'New message' }).click()
+  const compose = page.getByRole('dialog', { name: 'New message' })
+  await expect(compose.getByRole('button', { name: 'Send' })).toBeInViewport()
+  await screenshot('narrow-compose')
+  await page.keyboard.press('Escape')
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1240, 800))
 })
 
 test('your own folders open too', async () => {
@@ -573,6 +699,6 @@ test('your own folders open too', async () => {
     .getByRole('button', { name: FOLDER, exact: true })
     .click()
   await expect(page.getByRole('heading', { level: 1, name: FOLDER })).toBeVisible()
-  await expect(page.getByText('No messages.')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(`Nothing in ${FOLDER}.`)).toBeVisible({ timeout: 15_000 })
   await screenshot('empty-folder')
 })

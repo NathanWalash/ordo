@@ -16,7 +16,7 @@ export interface ParsedAddressList {
 }
 
 /** Split on commas and semicolons that aren't inside quotes or angle brackets. */
-function splitList(input: string): string[] {
+export function splitAddressList(input: string): string[] {
   const out: string[] = []
   let cur = ''
   let quoted = false
@@ -57,7 +57,7 @@ export function parseAddressList(input: string): ParsedAddressList {
   const addresses: Address[] = []
   const invalid: string[] = []
   const seen = new Set<string>()
-  for (const entry of splitList(input)) {
+  for (const entry of splitAddressList(input)) {
     const a = parseAddress(entry)
     if (!a) {
       invalid.push(entry)
