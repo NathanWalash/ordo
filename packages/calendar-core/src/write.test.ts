@@ -1,6 +1,6 @@
 import ICAL from 'ical.js'
 import { describe, expect, it } from 'vitest'
-import type { EventDraft } from './draft'
+import { checkDraft, type EventDraft } from './draft'
 import { parseIcs } from './ics'
 import {
   createEventIcs,
@@ -428,10 +428,11 @@ describe('updateEventIcs: all events', () => {
     expect(l).toContain('DTEND;TZID=Europe/London:20261103T110000')
     expect(l).toContain('EXDATE;TZID=Europe/London:20261117T100000')
     expect(l).toContain('RECURRENCE-ID;TZID=Europe/London:20261124T100000')
+    expect(l).toContain('DTSTART;TZID=Europe/London:20261124T120000')
     expect(parse(ics2).map((e) => [e.title, e.start.toISOString()])).toEqual([
       ['Standup', occ(3, 10)],
       ['Standup', occ(10, 10)],
-      ['Moved', occ(23, 11)], // the moved occurrence stays where it was put
+      ['Moved', occ(24, 12)], // the changed occurrence moves with the series, an hour after it
       ['Standup', new Date(Date.UTC(2026, 11, 1, 10)).toISOString()],
     ])
   })
@@ -511,6 +512,82 @@ describe('updateEventIcs: all events', () => {
     )
     expect(lines(ics)).toContain('RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=4')
     expect(parse(ics).map((e) => e.title)).toEqual(['Spanish', 'Spanish', 'Spanish', 'Spanish'])
+  })
+
+  it('keeps a retitled occurrence in step when the whole series moves', () => {
+    // 9 Nov only has a new title, so its override starts at 09:00 like the rest.
+    const retitled = updateEventIcs(
+      WEEKLY(),
+      { uid: 'ev-1', recurrenceId: occ(9) },
+      wk({ title: 'Demo day', start: '2026-11-09T09:00', end: '2026-11-09T09:30' }),
+      'this',
+    )
+    const target = { uid: 'ev-1', recurrenceId: occ(16) }
+    const before = readEvent(retitled, target).draft
+    const later = updateEventIcs(
+      retitled,
+      target,
+      { ...before, start: '2026-11-16T10:00', end: '2026-11-16T10:30' },
+      'all',
+    )
+    expect(parse(later).map((e) => [e.title, e.start.toISOString()])).toEqual([
+      ['Standup', occ(2, 10)],
+      ['Demo day', occ(9, 10)],
+      ['Standup', occ(16, 10)],
+      ['Standup', occ(23, 10)],
+      ['Standup', occ(30, 10)],
+    ])
+  })
+
+  it('moves a custom rule’s time but won’t move it to other days', () => {
+    const custom = cal(
+      'BEGIN:VEVENT',
+      'UID:c',
+      'DTSTART;TZID=Europe/London:20261102T090000',
+      'DTEND;TZID=Europe/London:20261102T100000',
+      'RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4',
+      'EXDATE;TZID=Europe/London:20261104T090000',
+      'SUMMARY:Class',
+      'END:VEVENT',
+    )
+    const target = { uid: 'c', recurrenceId: occ(9) }
+    const before = readEvent(custom, target).draft
+    expect(() =>
+      updateEventIcs(
+        custom,
+        target,
+        { ...before, start: '2026-11-10T09:00', end: '2026-11-10T10:00' },
+        'all',
+      ),
+    ).toThrow(/can’t move to other days/)
+    const later = updateEventIcs(
+      custom,
+      target,
+      { ...before, start: '2026-11-09T11:00', end: '2026-11-09T12:00' },
+      'all',
+    )
+    expect(lines(later)).toContain('RRULE:FREQ=WEEKLY;BYDAY=MO,WE;COUNT=4')
+    expect(lines(later)).toContain('EXDATE;TZID=Europe/London:20261104T110000')
+    expect(isoStarts(later)).toEqual([occ(2, 11), occ(9, 11), occ(11, 11)])
+  })
+
+  it('keeps ends the editor can’t show, and still lets the event be edited', () => {
+    const long = cal(
+      'BEGIN:VEVENT',
+      'UID:l',
+      'DTSTART;TZID=Europe/London:20261102T090000',
+      'DTEND;TZID=Europe/London:20261102T100000',
+      'RRULE:FREQ=DAILY;COUNT=5000',
+      'SUMMARY:Vitamins',
+      'END:VEVENT',
+    )
+    const before = readEvent(long, { uid: 'l' }).draft
+    expect(before.repeat).toEqual({ frequency: 'daily', custom: true })
+    expect(checkDraft(before)).toBeNull()
+    const renamed = updateEventIcs(long, { uid: 'l' }, { ...before, title: 'Vitamin D' }, 'all')
+    expect(lines(renamed)).toContain('RRULE:FREQ=DAILY;COUNT=5000')
+    const far = long.replace('COUNT=5000', 'UNTIL=29991231T000000Z')
+    expect(readEvent(far, { uid: 'l' }).draft.repeat).toEqual({ frequency: 'daily', custom: true })
   })
 
   it('turns a timed series into an all-day one', () => {

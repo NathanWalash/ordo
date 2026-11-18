@@ -9,6 +9,7 @@ import {
   addWallMinutes,
   dateToWall,
   dayNumber,
+  DRAFT_LIMITS,
   draftWalls,
   formatDay,
   formatDayTime,
@@ -197,6 +198,9 @@ function readRepeat(master: Comp, start: Moment): RepeatRule | null {
       ? formatDay(u)
       : formatDay(dateToWall(momentToDate(momentOf(u, undefined)), zoneOf(start)))
   }
+  // An end the editor can't show (more than 1000 times, or past 2200) is kept as it is.
+  if ((rule.count ?? 0) > DRAFT_LIMITS.count || (rule.until !== undefined && !parseDay(rule.until)))
+    return { frequency, custom: true }
   // Parts that only restate the start (Google writes BYDAY=MO for a weekly Monday event) are fine.
   const weekday = new Date(Date.UTC(start.wall.year, start.wall.month - 1, start.wall.day)).getUTCDay()
   const expected: Record<string, string> = {
@@ -456,8 +460,10 @@ function remapDates(comp: Comp, name: string, map: (m: Moment) => Moment | null)
   const props = comp.getAllProperties(name)
   const out: Moment[] = []
   for (const p of props) {
-    for (const v of p.getValues() as ITime[]) {
-      if (!v || typeof v !== 'object' || !('isDate' in v)) continue
+    const values = p.getValues() as ITime[]
+    // Leave anything that isn't a plain date or time (an RDATE period, say) as it was.
+    if (!values.every((v) => v && typeof v === 'object' && 'isDate' in v)) continue
+    for (const v of values) {
       const m = map(momentOf(v, p.getParameter('tzid')))
       if (m) out.push(m)
     }
@@ -552,6 +558,12 @@ export function updateEventIcs(
       if (wasAllDay) return { ...shifted, hour: start.wall.hour, minute: start.wall.minute, second: 0 }
       return addWallMinutes(shifted, minuteDelta)
     }
+    if (before.repeat?.custom && !repeatChanged && (dayDelta !== 0 || start.allDay !== oldStart.allDay))
+      // Its rule names days (every Monday and Wednesday, say): moving the start a day wouldn't move them.
+      throw new IcsEditError(
+        'invalid',
+        'This event repeats in a way Ordo can’t move to other days. Change its time, change just this event, or move it in Calendar on your Mac or iPhone.',
+      )
     const newStart: Moment = { allDay: start.allDay, wall: moved(oldWall, oldStart.allDay), zone: start.zone }
     const length = start.allDay
       ? dayNumber(end.wall) - dayNumber(start.wall)
@@ -585,7 +597,10 @@ export function updateEventIcs(
         return { allDay: start.allDay, wall: moved(wall, m.allDay), zone: start.zone }
       }
       remapDates(series, 'exdate', remap)
-      for (const o of overrides) remapDates(o, 'recurrence-id', remap)
+      remapDates(series, 'rdate', remap)
+      // Changed occurrences move with the series, keeping any change to their own time.
+      for (const o of overrides)
+        for (const name of ['recurrence-id', 'dtstart', 'dtend']) remapDates(o, name, remap)
     }
   }
   stamp(series, now, true)
