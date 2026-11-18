@@ -34,7 +34,7 @@ describe('boards', () => {
     expect(simple.name).toBe('Home jobs')
     expect(store.columns(simple.id).map((c) => [c.name, c.wipLimit, c.done])).toEqual([
       ['To do', null, false],
-      ['Doing', 3, false],
+      ['Doing', null, false],
       ['Done', null, true],
     ])
     expect(store.labels(simple.id).map((l) => l.name)).toEqual(['Urgent', 'Waiting', 'Home'])
@@ -77,6 +77,7 @@ describe('boards', () => {
 describe('columns', () => {
   it('adds, renames, reorders and deletes columns', () => {
     const { board, todo, doing, done } = simpleBoard()
+    store.updateColumn(doing.id, { wipLimit: 3 })
     const later = store.addColumn(board.id, 'Later', 0)
     expect(store.columns(board.id).map((c) => c.name)).toEqual(['Later', 'To do', 'Doing', 'Done'])
     store.updateColumn(later.id, { name: 'Someday', wipLimit: 5 })
@@ -366,5 +367,105 @@ describe('purgeDeleted', () => {
     store.purgeDeleted(0, new Date(Date.now() + 1000))
     expect(store.restore({ kind: 'board', id: board.id })).toBe(false)
     expect(store.counts()).toEqual({ boards: 0, cards: 0 })
+  })
+
+  it('cascades: a purged column takes its cards, their steps and every link to them', () => {
+    const { board, todo, doing } = simpleBoard()
+    const keep = store.addCard({ boardId: board.id, columnId: todo.id, title: 'Keep' })
+    const gone = store.addCard({ boardId: board.id, columnId: doing.id, title: 'Gone' })
+    const step = store.addChecklistItem(gone.id, 'step')
+    store.addLink(gone.id, { target: { kind: 'bill', billId: 'b' }, title: 'Bill' })
+    store.addLink(keep.id, { target: { kind: 'card', cardId: gone.id }, title: 'Gone' })
+    store.deleteColumn(doing.id)
+    store.purgeDeleted(0, new Date(Date.now() + 1000))
+    expect(store.restore({ kind: 'column', id: doing.id })).toBe(false)
+    expect(store.restore({ kind: 'card', id: gone.id })).toBe(false)
+    expect(store.restore({ kind: 'checklist', id: step.id })).toBe(false)
+    expect(store.links(keep.id)).toEqual([])
+    expect(store.links(gone.id)).toEqual([])
+    expect(store.card(keep.id)?.title).toBe('Keep')
+  })
+
+  it('a purged board takes its labels and fields', () => {
+    const board = store.createBoard('P', 'project')
+    const [label] = store.labels(board.id)
+    const [field] = store.fields(board.id)
+    store.deleteBoard(board.id)
+    store.purgeDeleted(0, new Date(Date.now() + 1000))
+    expect(store.restore({ kind: 'label', id: label!.id })).toBe(false)
+    expect(store.restore({ kind: 'field', id: field!.id })).toBe(false)
+  })
+})
+
+describe('restore', () => {
+  it('fits a card back in when one added since has taken its rank', () => {
+    const { board, todo } = simpleBoard()
+    store.addCard({ boardId: board.id, title: 'A' })
+    const last = store.addCard({ boardId: board.id, title: 'B' })
+    const token = store.deleteCard(last.id)
+    const fresh = store.addCard({ boardId: board.id, title: 'C' })
+    // The new card is appended after A, exactly where B was.
+    expect(fresh.rank).toBe(last.rank)
+    expect(store.restore(token)).toBe(true)
+    const cards = store.cards(board.id).filter((c) => c.columnId === todo.id)
+    expect(cards.map((c) => c.title)).toEqual(['A', 'B', 'C'])
+    expect(new Set(cards.map((c) => c.rank)).size).toBe(3)
+  })
+
+  it('does the same for steps, columns and labels', () => {
+    const { board } = simpleBoard()
+    const card = store.addCard({ boardId: board.id, title: 'x' })
+    const step = store.addChecklistItem(card.id, 'one')
+    const t1 = store.deleteChecklistItem(step.id)
+    store.addChecklistItem(card.id, 'two')
+    store.restore(t1)
+    expect(store.checklist(card.id).map((i) => i.text)).toEqual(['one', 'two'])
+    expect(new Set(store.checklist(card.id).map((i) => i.rank)).size).toBe(2)
+
+    const col = store.addColumn(board.id, 'Later')
+    const t2 = store.deleteColumn(col.id)
+    store.addColumn(board.id, 'Soon')
+    store.restore(t2)
+    expect(store.columns(board.id).map((c) => c.name)).toEqual(['To do', 'Doing', 'Done', 'Later', 'Soon'])
+  })
+
+  it('won’t put a card back into a column or board that has gone', () => {
+    const { board, doing } = simpleBoard()
+    const card = store.addCard({ boardId: board.id, columnId: doing.id, title: 'x' })
+    const token = store.deleteCard(card.id)
+    store.deleteColumn(doing.id)
+    expect(store.restore(token)).toBe(false)
+    expect(store.card(card.id)).toBeUndefined()
+
+    const other = store.createBoard('Other')
+    const step = store.addChecklistItem(store.addCard({ boardId: other.id, title: 'y' }).id, 's')
+    const stepToken = store.deleteChecklistItem(step.id)
+    store.deleteBoard(other.id)
+    expect(store.restore(stepToken)).toBe(false)
+  })
+
+  it('checks names and limits again', () => {
+    const board = store.createBoard('x', 'simple')
+    const garden = store.saveLabel({ boardId: board.id, name: 'Garden', color: 'green' })
+    const token = store.deleteLabel(garden.id)
+    store.saveLabel({ boardId: board.id, name: 'garden', color: 'blue' })
+    expect(() => store.restore(token)).toThrow(/already a label called Garden/)
+
+    for (let i = store.labels(board.id).length; i < 50; i++)
+      store.saveLabel({ boardId: board.id, name: `L${i}`, color: 'grey' })
+    const one = store.labels(board.id)[0]!
+    const t2 = store.deleteLabel(one.id)
+    store.saveLabel({ boardId: board.id, name: 'Fiftieth', color: 'grey' })
+    expect(() => store.restore(t2)).toThrow(/up to 50 labels/)
+  })
+})
+
+describe('names', () => {
+  it('strip control characters and bidi overrides', () => {
+    const board = store.createBoard('Evil\u202e\u0007 board\n')
+    expect(board.name).toBe('Evil board')
+    const card = store.addCard({ boardId: board.id, title: 'gate⁦\u0000 fix' })
+    expect(card.title).toBe('gate fix')
+    expect(store.addChecklistItem(card.id, 'a\u001b[2Jb').text).toBe('a [2Jb')
   })
 })

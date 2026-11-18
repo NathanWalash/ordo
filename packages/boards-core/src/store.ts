@@ -148,8 +148,13 @@ const json = <T>(text: unknown, fallback: T): T => {
   }
 }
 
+// C0 and C1 control characters, DEL, and bidi overrides and isolates: never part of a name.
+// eslint-disable-next-line no-control-regex
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g
+
 function cleanName(name: string, what: string, max: number = LIMITS.name): string {
   const s = String(name ?? '')
+    .replace(UNSAFE, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (!s) throw new BoardsError('invalid', `Give the ${what} a name.`)
@@ -731,11 +736,80 @@ export class BoardsStore {
   restore(token: UndoToken): boolean {
     const table = UNDO_TABLES[token.kind]
     if (!table) return false
-    const r = this.run(
-      `UPDATE ${table} SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL`,
-      token.id,
-    )
-    return Number(r.changes) > 0
+    const row = this.get(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NOT NULL`, token.id)
+    if (!row) return false
+    const siblings = this.restoreChecks(token.kind, row)
+    if (!siblings) return false
+    return this.tx(() => {
+      this.run(`UPDATE ${table} SET deleted_at = NULL WHERE id = ?`, token.id)
+      // Something added since may have taken the same rank: then fit it back in just before.
+      const rank = String(row['rank'])
+      if (siblings.some((x) => x.rank === rank)) {
+        const index = siblings.filter((x) => x.rank < rank).length
+        for (const u of planMove(siblings, token.id, index).updates)
+          this.run(`UPDATE ${table} SET rank = ? WHERE id = ?`, u.rank, u.id)
+      }
+      return true
+    })
+  }
+
+  /**
+   * Whether a deleted row can come back: what it belongs to is still there, and the limits and
+   * unique names still hold. Returns the live items it's ranked among, or null when it can't
+   * (its board or column has gone too). Throws a BoardsError for a limit or a name clash.
+   */
+  private restoreChecks(kind: UndoToken['kind'], row: Row): Ranked[] | null {
+    const boardId = String(row['board_id'] ?? '')
+    const unique = (items: { id: string; name: string }[], what: string) => {
+      const name = String(row['name'])
+      if (items.some((i) => i.name.toLowerCase() === name.toLowerCase()))
+        throw new BoardsError('invalid', `There’s already a ${what} called ${name}.`)
+    }
+    const room = (n: number, max: number, message: string) => {
+      if (n >= max) throw new BoardsError('limit', message)
+    }
+    switch (kind) {
+      case 'board': {
+        const boards = this.boards()
+        room(boards.length, LIMITS.boards, 'That’s as many boards as Ordo keeps.')
+        return boards
+      }
+      case 'column': {
+        if (!this.board(boardId)) return null
+        const columns = this.columns(boardId)
+        room(columns.length, LIMITS.columns, 'A board can have up to 50 columns.')
+        return columns
+      }
+      case 'card': {
+        const column = this.column(String(row['column_id']))
+        if (!column || column.boardId !== boardId) return null
+        const n = this.get('SELECT COUNT(*) AS n FROM cards WHERE board_id = ? AND deleted_at IS NULL', boardId)
+        room(Number(n?.['n'] ?? 0), LIMITS.cards, 'A board can have up to 5,000 cards.')
+        // An archived card gets a new rank when it's restored, so it can't clash.
+        return row['archived_at'] ? [] : this.columnCards(column.id)
+      }
+      case 'label': {
+        if (!this.board(boardId)) return null
+        const labels = this.labels(boardId)
+        room(labels.length, LIMITS.labels, 'A board can have up to 50 labels.')
+        unique(labels, 'label')
+        return labels
+      }
+      case 'field': {
+        if (!this.board(boardId)) return null
+        const fields = this.fields(boardId)
+        room(fields.length, LIMITS.fields, 'A board can have up to 30 fields.')
+        unique(fields, 'field')
+        return fields
+      }
+      case 'checklist': {
+        const cardId = String(row['card_id'])
+        if (!this.card(cardId)) return null
+        const items = this.checklist(cardId)
+        room(items.length, LIMITS.checklist, 'A checklist can have up to 200 items.')
+        return items
+      }
+    }
   }
 
   /** Remove for good everything deleted more than `olderThanMs` ago. */
@@ -914,6 +988,7 @@ const UNDO_TABLES: Record<UndoToken['kind'], string> = {
 
 function cleanText(text: string, empty: string, max: number): string {
   const s = String(text ?? '')
+    .replace(UNSAFE, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (!s) throw new BoardsError('invalid', empty)

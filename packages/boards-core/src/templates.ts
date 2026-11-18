@@ -21,7 +21,7 @@ export const TEMPLATES: readonly BoardTemplate[] = [
     id: 'simple',
     name: 'Simple',
     description: 'To do, Doing and Done.',
-    columns: [{ name: 'To do' }, { name: 'Doing', wipLimit: 3 }, { name: 'Done', done: true }],
+    columns: [{ name: 'To do' }, { name: 'Doing' }, { name: 'Done', done: true }],
     labels: [
       { name: 'Urgent', color: 'red' },
       { name: 'Waiting', color: 'yellow' },
