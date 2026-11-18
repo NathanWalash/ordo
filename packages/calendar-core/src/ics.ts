@@ -184,6 +184,7 @@ function expand(
   const event = new ICAL.Event(master, NO_EXCEPTIONS)
   const base = toOccurrence(event, master, calendarId, uid)
   if (!event.isRecurring()) return overlaps(base.start, base.end, range) ? [base] : []
+  if (budget.steps <= 0) return [] // the document has used up its expansion budget
 
   const tzid = tzidOf(master, 'dtstart')
   const length = base.end.getTime() - base.start.getTime()
