@@ -179,13 +179,12 @@ describe.skipIf(!port)('changing events on CalDAV (Radicale)', () => {
     ).toEqual(starts())
     fresh.close()
 
-    await deleteEvent(
-      provider,
-      store,
-      { calendarId: id, uid, recurrenceId: last.recurrenceId },
-      'all',
-      opts(),
-    )
+    // The old occurrence id went when the series moved: it's refused, and the current one works.
+    await expect(
+      deleteEvent(provider, store, { calendarId: id, uid, recurrenceId: last.recurrenceId }, 'this', opts()),
+    ).rejects.toMatchObject({ kind: 'not-found' })
+    const now = mine().filter((e) => e.uid === uid)[2]!
+    await deleteEvent(provider, store, { calendarId: id, uid, recurrenceId: now.recurrenceId }, 'all', opts())
     expect(starts()).toEqual([])
   })
 
