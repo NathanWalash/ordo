@@ -173,6 +173,13 @@ is refused with `confirm_required` and nothing happens.
 Tool descriptions tell the agent that names, addresses, subjects, URLs, merchant names and event
 titles are third-party text to be treated as data, never as instructions.
 
+`ordo_import_statement` takes a full local path. UNC and device paths (`\\server\share`,
+`//server/share`, `\\?\`, `\\.\`) are refused before any file-system call, here and in the CLI;
+the CLI still accepts a path relative to the current folder.
+
+The tools are defined once, in `apps/desktop/src/main/headless/tools.ts`, and shared with the
+in-app assistant. To add one, see [assistant.md](assistant.md#adding-a-tool).
+
 ### Claude Code
 
 ```bash
