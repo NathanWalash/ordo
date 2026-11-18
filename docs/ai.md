@@ -112,35 +112,51 @@ answers, writing every amount as a placeholder for a number a tool returned:
 { "type": "answer", "text": "Italy cost you {{r1.netPence}} after {{r1.paidBackPence}} came back." }
 ```
 
-Ordo fills the placeholders in itself, by the field they point at:
+which shows as "Italy cost you **Net cost of Italy · £418.99** after **Paid back for Italy · £5.00**
+came back.", each figure a chip of its own.
 
-- an amount: a whole number of pence in a field ending in `Pence`, shown as pounds;
-- a date (`date`, `from`, `to`, `lastIn`, `lastOut`, `lastDate`, `inDate`), shown as `3 Nov`;
-- a count (`total`, `shown`, `payments`, `leftOut`, `parts`, `days`);
-- a name (`name`, `inName`, `person`, `forPerson`, `from`), only if it has no digits, no currency
-  signs and no amount in words, so a bank reference like "£4,000.00 YOU OWE ME" or a payee called
-  "five hundred pounds" can never stand in for an amount.
+Ordo fills the placeholders in itself, by the field they point at and the value it holds:
 
-Nothing else fills a placeholder: not categories, account names, reasons or notes.
+- an amount (a whole number of pence in a field ending in `Pence`) or a count (`total`, `shown`,
+  `payments`, `leftOut`, `parts`, `days`) becomes a **figure**: a separate chip with Ordo's own
+  label, like **Net cost of Italy · £418.99** or **Luca B, 5 Sept · £5.00**, drawn apart from the
+  model's prose. The label is built by Ordo from where the number sits in the tool result, so words
+  the model writes next to a figure ("thousand", "per cent") can't change what it says;
+- a date (`date`, `from`, `to`, `lastIn`, `lastOut`, `lastDate`, `inDate`), only when the value
+  really is a date, goes into the prose as `3 Nov`;
+- a name (`name`, `inName`, `person`, `forPerson`, `from`) goes into the prose only if it has no
+  digits, currency signs or numbers in words, so a bank reference like "£4,000.00 YOU OWE ME" or a
+  payee called "five hundred pounds" can never stand in for an amount. Names in figure labels pass
+  the same check, or the label falls back to a plain one like "Amount".
 
-The model writes no numbers at all. After the placeholders are taken out, an answer is refused if it
-has any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`), a number in words next
-to a money word (`five hundred pounds`, `one pound`, `twenty quid`, `a grand`, `GBP seventy`), or a
-number or scale word on its own (`seventy`, `three hundred`, `a dozen`, `k`, `bn`, `lakh`,
-`crore`, `score`, `gross`). Only "one", "half", "few" and
-"couple" are allowed on their own, because plain English needs them.
+Nothing else fills a placeholder: not categories, account names, reasons or notes. In plain text
+(the conversation history the model sees next time) a figure reads `[Net cost of Italy: £418.99]`.
+
+The structure does the real work; these checks stay as defence in depth. Text is NFKC-normalised
+first, so full-width letters and digits fold to plain ones. After the placeholders are taken out,
+an answer is refused if it has:
+
+- any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`) or `%`;
+- a number in words next to a money word (`five hundred pounds`, `one pound`, `twenty quid`,
+  `a grand`, `GBP seventy`);
+- a number or scale word on its own, plurals included (`seventy`, `hundreds`, `a dozen`, `k`,
+  `bn`, `lakhs`, `crore`, `scores`, `gross`). "one", "few" and "couple" are allowed on their own,
+  because plain English needs them;
+- a fraction or multiplier anywhere (`half`, `quarters`, `thirds`, `double`, `twice`, `triple`,
+  `times`, `x`, `squared`, `per cent`, `per-cent`, `percent`).
 
 A placeholder must stand apart from the model's words. Before it: only the start, a space or an
-opening bracket or quote. After an amount, count or date: only the end, sentence punctuation
-(`. , ; : ! ? ) —`) followed by a space, or a space and then a word from a short allowlist (on, in,
-for, from, to, and, or, back, out, net, each, per, so, after, of, at, since, by, payments, days and
-a few more). It is an allowlist because a list of scale words (thousand, bn, lakh, crore, score…)
-can never be complete. After a name: the end, a space, punctuation, or a possessive `'s`. So
-`£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.total}}k`, `{{r1.total}}-odd`, `x{{r1.total}}` and
-`{{r1.total}} thousand` are all refused, as is a placeholder that points at nothing. Whether a value
-is a number is decided by the value, not the key: `from` holding a name is a name. Then the
-filled-in answer is checked once more with only the amounts, counts and dates blanked out, so names
-and the model's words together can't spell an amount either.
+opening bracket or quote. After a figure or a date there must be a gap of spaces and punctuation;
+after the whole gap comes the end of the answer, another placeholder, a new sentence (the gap
+holds `.`, `!` or `?`), or a whole word from a short allowlist (on, in, for, from, to, and, or,
+back, out, net, each, per, so, after, of, at, since, by, payments, days and a few more). It is an
+allowlist because a list of scale words can never be complete, and the word must be a whole token,
+so `per-cent` and `back'` aren't `per` and `back`. After a name: the end, a space, punctuation and
+a space, or a possessive `'s`. So `£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.total}}k`,
+`{{r1.total}}-odd`, `x{{r1.total}}`, `{{r1.total}} thousand` and `{{r1.total}}, squillion` are all
+refused, as is a placeholder that points at nothing. Then the filled-in answer is checked once more
+with only the figures and dates blanked out, so names and the model's words together can't spell an
+amount either.
 
 The same rules apply to a clarifying question and its options, which may not contain placeholders at
 all. A suggested fact's label is the model's words too: one with an amount or a placeholder is
