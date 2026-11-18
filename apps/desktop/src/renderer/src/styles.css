@@ -215,6 +215,10 @@ body,
   background-clip: text;
   animation: assistant-shimmer 1.8s linear infinite;
 }
+/* The composer's frame shows focus; the field inside doesn't need its own ring. */
+.assistant-composer textarea:focus-visible {
+  outline: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
     color: var(--ink-2);

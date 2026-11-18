@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { ASSISTANT_PAGE_IDS, type ConfirmCard } from '@ordo/shared'
 import { ROUTES } from '../../routes'
-import { applyEvent, elapsed, finish, type Item, type ReplyItem } from './conversation'
+import {
+  applyEvent,
+  elapsed,
+  finish,
+  groupTrace,
+  workedFor,
+  type Item,
+  type ReplyItem,
+  type TraceEntry,
+} from './conversation'
 import { suggestionsFor } from './suggestions'
 
 const card: ConfirmCard = {
@@ -64,6 +73,30 @@ describe('the conversation', () => {
   it('ignores events once the reply has finished', () => {
     const done = finish(start(), { ok: true, answer: 'Done.', steps: 0 }, 10)
     expect(applyEvent(done, { type: 'thinking', step: 2 })).toBe(done)
+  })
+
+  it('keeps cards in order, between rows of tool chips', () => {
+    const t = (id: string): TraceEntry => ({
+      kind: 'tool',
+      id,
+      tool: 'ordo_bills',
+      label: 'Reading your bills',
+      toolKind: 'read',
+      status: 'done',
+    })
+    const c: TraceEntry = { kind: 'card', id: 'c', card, state: 'approved' }
+    const groups = groupTrace([t('a'), t('b'), c, t('d')])
+    expect(groups.map((g) => (g.kind === 'tools' ? g.entries.map((e) => e.id).join('+') : g.id))).toEqual([
+      'a+b',
+      'c',
+      'd',
+    ])
+  })
+
+  it('says how long it worked, only when there is something to say', () => {
+    expect(workedFor(300, 0)).toBeNull()
+    expect(workedFor(300, 1)).toBe('1 step')
+    expect(workedFor(4200, 2)).toBe('Worked for 4 s · 2 steps')
   })
 
   it('says how long it worked', () => {

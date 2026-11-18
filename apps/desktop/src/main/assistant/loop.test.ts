@@ -418,7 +418,8 @@ describe('helpers', () => {
     expect(summarise({ ok: true, data: { total: 40, transactions: [1, 2] } })).toBe('40 transactions')
     expect(summarise({ ok: true, data: { events: [1] } })).toBe('1 event')
     expect(summarise({ ok: false, code: 'not_connected', message: 'No account.' })).toBe('No account.')
-    expect(summarise({ ok: true, data: { added: 3 } })).toBe('Done')
+    expect(summarise({ ok: true, data: { added: 3 } })).toBe('3 transactions added')
+    expect(summarise({ ok: true, data: { status: 1 } })).toBe('Done')
   })
 
   it('strips bidi overrides and control characters from answers', () => {

@@ -55,6 +55,8 @@ export function summarise(result: CommandResult): string {
   if (!result.ok) return clean(result.message, 120)
   const d = result.data as Record<string, unknown> | null
   if (d && typeof d === 'object') {
+    if (typeof d['added'] === 'number') return `${plural(d['added'], 'transaction')} added`
+    if (typeof d['restored'] === 'number') return `${plural(d['restored'], 'email')} restored`
     for (const [key, one] of [
       ['transactions', 'transaction'],
       ['events', 'event'],

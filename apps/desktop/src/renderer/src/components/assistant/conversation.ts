@@ -103,3 +103,28 @@ export function elapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`
 }
+
+export type TraceGroup =
+  | { kind: 'tools'; key: string; entries: Extract<TraceEntry, { kind: 'tool' }>[] }
+  | Extract<TraceEntry, { kind: 'card' }>
+
+/** The trace in order, with runs of tool calls gathered into one row of chips. */
+export function groupTrace(trace: readonly TraceEntry[]): TraceGroup[] {
+  const groups: TraceGroup[] = []
+  for (const t of trace) {
+    const last = groups.at(-1)
+    if (t.kind === 'card') groups.push(t)
+    else if (last?.kind === 'tools') last.entries.push(t)
+    else groups.push({ kind: 'tools', key: t.id, entries: [t] })
+  }
+  return groups
+}
+
+/** The footer under a finished reply: "Worked for 4 s · 2 steps", or null when there's nothing to say. */
+export function workedFor(ms: number, steps: number): string | null {
+  const parts = [
+    ms >= 1000 && `Worked for ${elapsed(ms)}`,
+    steps > 0 && `${steps} step${steps === 1 ? '' : 's'}`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : null
+}

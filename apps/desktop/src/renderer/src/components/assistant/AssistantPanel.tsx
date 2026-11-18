@@ -30,7 +30,7 @@ import {
 import type { AssistantInfo } from '@ordo/shared'
 import type { Route } from '../../routes'
 import { Button } from '../Button'
-import { elapsed, type Item, type ReplyItem, type TraceEntry } from './conversation'
+import { elapsed, groupTrace, workedFor, type Item, type ReplyItem, type TraceEntry } from './conversation'
 import { suggestionsFor, type SuggestionIcon } from './suggestions'
 import type { Assistant } from './useAssistant'
 
@@ -63,10 +63,14 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
   const [draft, setDraft] = useState('')
 
   const refreshInfo = assistant.refreshInfo
+  useEffect(() => refreshInfo(), [refreshInfo])
+  // Focus the composer once it can take input (it's disabled until a model is set up).
+  const ready = info?.ready === true
+  const panel = useRef<HTMLElement>(null)
   useEffect(() => {
-    refreshInfo()
-    input.current?.focus()
-  }, [refreshInfo])
+    if (ready) input.current?.focus()
+    else panel.current?.focus()
+  }, [ready])
 
   // Keep the newest message in view.
   useLayoutEffect(() => {
@@ -106,11 +110,13 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
 
   return (
     <section
+      ref={panel}
+      tabIndex={-1}
       role="dialog"
       aria-modal="false"
       aria-labelledby={titleId}
       onKeyDown={onPanelKey}
-      className="assistant-pop glass-panel no-drag absolute top-[60px] right-3 bottom-3 z-30 flex w-[392px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[14px]"
+      className="assistant-pop glass-panel no-drag absolute outline-none top-[60px] right-3 bottom-3 z-30 flex w-[392px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[14px]"
     >
       <header className="flex items-center gap-2.5 border-b border-sep px-3.5 py-2.5">
         <span className="flex size-7 shrink-0 items-center justify-center rounded-[8px] bg-accent text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]">
@@ -158,7 +164,7 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
       )}
 
       <form
-        className="px-3 pb-3"
+        className="assistant-composer px-3 pb-3"
         onSubmit={(e) => {
           e.preventDefault()
           send(draft)
@@ -210,14 +216,19 @@ export function AssistantPanel({ assistant, route, shortcut, onClose, onOpenSett
 function ProviderLine({ info }: { info: AssistantInfo | null }) {
   if (!info) return <p className="text-[11px] text-ink-3">Checking…</p>
   if (!info.label) return <p className="text-[11px] text-ink-3">No model chosen</p>
-  const where = info.kind === 'cloud' ? 'Cloud' : 'On this computer'
+  const where = info.kind === 'cloud' ? 'Cloud' : 'Local'
+  // "openai/gpt-oss-20b" → "gpt-oss-20b": the vendor prefix only crowds the line.
+  const model = info.model?.split('/').at(-1)
   return (
-    <p className="flex items-center gap-1.5 truncate text-[11px] text-ink-2">
+    <p
+      className="flex items-center gap-1.5 truncate text-[11px] text-ink-2"
+      title={info.kind === 'cloud' ? `Sent to ${info.label}` : 'Runs on this computer'}
+    >
       <span
         aria-hidden
         className={`size-1.5 shrink-0 rounded-full ${info.kind === 'cloud' ? 'bg-[var(--promotions)]' : 'bg-success'}`}
       />
-      <span className="truncate">{[info.label, info.model, where].filter(Boolean).join(' · ')}</span>
+      <span className="truncate">{[info.label, model, where].filter(Boolean).join(' · ')}</span>
     </p>
   )
 }
@@ -267,6 +278,9 @@ function Welcome({
   return (
     <div className="assistant-rise mt-auto flex flex-col gap-4">
       <div className="px-1">
+        <span className="mb-3 flex size-9 items-center justify-center rounded-[10px] bg-accent-tint text-accent shadow-[0_0_0_1px_var(--accent-tint),0_8px_24px_var(--accent-tint)]">
+          <Sparkles size={18} aria-hidden />
+        </span>
         <h3 className="text-[17px] leading-snug font-semibold tracking-[-0.01em]">What can I help with?</h3>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
           I can look things up in your mail, calendar and money, open pages for you, and make changes once you
@@ -322,26 +336,31 @@ function Reply({
   item: ReplyItem
   onAnswerCard: (id: string, approve: boolean) => void
 }) {
-  const tools = item.trace.filter((t) => t.kind === 'tool')
+  const steps = item.trace.filter((t) => t.kind === 'tool').length
+  const hasCard = item.trace.some((t) => t.kind === 'card')
+  // A cancelled card already says nothing was changed.
+  const showError = item.error && !(item.error.reason === 'cancelled' && hasCard)
+  const footer = item.endedAt ? workedFor(item.endedAt - item.startedAt, steps) : null
   return (
     <article aria-label="Assistant reply" className="assistant-rise flex flex-col gap-2 pr-4">
-      {tools.length > 0 && (
-        <ul aria-label="Steps" className="flex flex-wrap gap-1.5">
-          {tools.map((t) => (
-            <ToolChip key={t.id} entry={t} />
-          ))}
-        </ul>
+      {groupTrace(item.trace).map((g) =>
+        g.kind === 'tools' ? (
+          <ul key={g.key} aria-label="Steps" className="flex flex-wrap gap-1.5">
+            {g.entries.map((t) => (
+              <ToolChip key={t.id} entry={t} />
+            ))}
+          </ul>
+        ) : (
+          <ConfirmationCard key={g.id} entry={g} onAnswer={onAnswerCard} />
+        ),
       )}
-      {item.trace
-        .filter((t) => t.kind === 'card')
-        .map((t) => (
-          <ConfirmationCard key={t.id} entry={t} onAnswer={onAnswerCard} />
-        ))}
       {item.status && <Working item={item} />}
       {item.answer && (
-        <p className="text-[13px] leading-[1.55] whitespace-pre-wrap text-ink select-text">{item.answer}</p>
+        <p className="text-[13px] leading-[1.55] whitespace-pre-wrap text-ink select-text [overflow-wrap:anywhere]">
+          {item.answer}
+        </p>
       )}
-      {item.error && (
+      {showError && item.error && (
         <p
           role={item.error.reason === 'failed' || item.error.reason === 'invalid' ? 'alert' : undefined}
           className="flex items-start gap-1.5 text-[12.5px] leading-snug text-ink-2"
@@ -354,12 +373,7 @@ function Reply({
           {item.error.message}
         </p>
       )}
-      {item.endedAt && (item.trace.length > 0 || item.endedAt - item.startedAt > 1500) && (
-        <p className="text-[11px] text-ink-3 tabular-nums">
-          Worked for {elapsed(item.endedAt - item.startedAt)}
-          {tools.length > 0 && ` · ${tools.length} step${tools.length === 1 ? '' : 's'}`}
-        </p>
-      )}
+      {footer && <p className="text-[11px] text-ink-3 tabular-nums">{footer}</p>}
     </article>
   )
 }
@@ -450,7 +464,7 @@ function ConfirmationCard({
       {card.details.length > 0 && (
         <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-[8px] bg-hover px-2.5 py-2 text-[12px] leading-snug select-text">
           {card.details.map((d, i) => (
-            <li key={i} className="break-words">
+            <li key={i} className="[overflow-wrap:anywhere]">
               {d}
             </li>
           ))}
@@ -472,7 +486,7 @@ function ConfirmationCard({
         ) : (
           <MessageSquareText size={13} className="mt-px shrink-0 text-ink-3" aria-hidden />
         )}
-        <span>{card.trigger.text}</span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{card.trigger.text}</span>
       </p>
 
       {card.blocked && (

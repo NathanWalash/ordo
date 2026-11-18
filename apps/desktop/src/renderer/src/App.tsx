@@ -71,7 +71,7 @@ export function App() {
   }, [])
 
   // ⌘K or ⌘J (Ctrl on Windows and Linux) opens and closes the assistant from anywhere.
-  const isMac = info?.platform === 'darwin'
+  const isMac = info ? info.platform === 'darwin' : navigator.userAgent.includes('Macintosh')
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
