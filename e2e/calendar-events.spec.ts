@@ -409,9 +409,16 @@ test('a repeating event stays where it was moved while Ordo asks, and goes back 
   expect(await onTop(ask.getByRole('heading'))).toBe(true)
   await expect(late.getByTestId('move-times')).toBeVisible()
   if (process.env['ORDO_SCREENSHOTS']) await shoot('week-recurring-ask')
+  // Another move while Ordo is asking is ignored, rather than replacing the question.
+  await late.press('Alt+ArrowDown')
+  await page.waitForTimeout(1500)
+  await expect(page.getByRole('dialog', { name: 'Change a repeating event?' })).toHaveCount(1)
   await ask.getByRole('button', { name: 'Cancel' }).click()
+  await expect(ask).toBeHidden()
   await expect(announced()).toHaveText('Move cancelled.')
   await expect(late.getByTestId('move-times')).toHaveCount(0)
+  await page.waitForTimeout(1500)
+  await expect(page.getByRole('dialog', { name: 'Change a repeating event?' })).toHaveCount(0)
   await month().click()
 })
 
