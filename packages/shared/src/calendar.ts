@@ -57,11 +57,17 @@ export type SetVisibleInput = z.infer<typeof SetVisibleSchema>
  */
 export interface CalendarOverlayItem {
   id: string
-  /** The day it falls on (local midnight). */
+  /** The day it falls on (local midnight), or the first day of a range. */
   date: Date
+  /** The last day of a range (local midnight, inclusive). Absent for a single day. */
+  until?: Date
   title: string
-  kind: 'bill' | 'renewal' | 'trial'
+  kind: 'bill' | 'renewal' | 'trial' | 'card'
   amount?: { value: number; currency: string }
+  /** A second line for the popover, e.g. the board a card is on. */
+  detail?: string
+  /** An app route that shows the item where it came from, e.g. `boards?card=…`. */
+  route?: string
 }
 
 export interface CalendarApi {

@@ -163,6 +163,11 @@ export async function importStatementFile(path: string, accountName?: string): P
   return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
 }
 
+/** Every imported transaction as stored, newest first: no categorising, for linking from Boards. */
+export function storedTransactions(): Transaction[] {
+  return moneyStore().transactions()
+}
+
 /** How much is stored, for `status`. */
 export function counts(): { transactions: number; accounts: number; bills: number } {
   const s = moneyStore()
