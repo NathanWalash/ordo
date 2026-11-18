@@ -112,9 +112,24 @@ answers, writing every amount as a placeholder for a number a tool returned:
 { "type": "answer", "text": "Italy cost you {{r1.netPence}} after {{r1.paidBackPence}} came back." }
 ```
 
-Ordo fills the placeholders in itself. An answer with an amount the model wrote (`£30`, `12.50`,
-`1250p`, `30 pounds`) or a placeholder that points nowhere is refused and asked again once. At most
-six tool calls, then the model must answer.
+Ordo fills the placeholders in itself, by the field they point at:
+
+- an amount: a whole number of pence in a field ending in `Pence`, shown as pounds;
+- a date (`date`, `from`, `to`, `lastIn`, `lastOut`, `lastDate`, `inDate`), shown as `3 Nov`;
+- a count (`total`, `shown`, `payments`, `leftOut`, `parts`, `days`);
+- a name (`name`, `inName`, `person`, `forPerson`, `from`), only if it has no digits and no currency
+  signs, so a bank reference like "£4,000.00 YOU OWE ME" can never stand in for an amount.
+
+Nothing else fills a placeholder: not categories, account names, reasons or notes.
+
+The model writes no numbers at all. After the placeholders are taken out, an answer is refused if it
+has any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`), or a number in words
+next to a money word (`five hundred pounds`, `twenty quid`, `a grand`, `GBP seventy`). A
+placeholder touching a digit, a currency sign, another placeholder, or a comma or full stop stuck to
+more text (`£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.a}}.5`) is refused too. So is a
+placeholder that points at nothing. The same rules apply to a clarifying question and its options,
+which may not contain placeholders at all. A refused reply is asked for again once. At most six tool
+calls, then the model must answer.
 
 The tools: `find_transactions`, `spending` (between two days, net of paybacks), `compare_months`,
 `events`, `event_cost`, `matches` (paybacks and pass-throughs, with how sure Ordo is), `share_of`
@@ -135,8 +150,12 @@ answers in the conversation. Never your whole statement, files or balances.
 
 **Remembering.** When you tell Ask Ordo something ("Genest's £30 was for Halloween"), it can suggest
 up to three facts to remember. Ordo checks each one against its schema, drops any that name payments
-or events the tools never showed (or an amount owed that Ordo didn't work out), and shows the rest
-as Ordo's own sentence with Save and Not now. Nothing is saved until you press Save. Clarifying
+or events the tools never showed (or an amount owed that Ordo didn't work out), and any payback or
+pass-through for money in that Ordo already knows about. It never suggests notes: lasting text is
+only ever yours. It shows the rest as Ordo's own sentence with Save and Not now. Nothing is saved
+until you press Save, and saving the same payback twice is refused, so a double click can't count it
+twice. Facts are sent back to the model as data: their kinds and the payments they link are what you
+confirmed, but their words are still treated as untrusted text. Clarifying
 questions ("Which trip do you mean?") come with short options that send your choice as the next
 question; turn them off with **Let Ask Ordo ask me back**. **Ask Ordo answers** chooses briefly or
 in detail.
@@ -144,8 +163,12 @@ in detail.
 **What Ordo knows** is stored in `money.sqlite` as facts: people (flatmate, friend…), events and
 trips, paybacks, pass-throughs, money held for someone, money owed to you, payments to ignore,
 income sources, how an account dates payments, and notes. Each one is checked again when read; you
-can forget any of them on the Ask Ordo page or with `money forget`. Ordo's own questions (who is
-this, was this a payback) are worked out without a model, from exact amounts and dates.
+can forget any of them on the Ask Ordo page or with `money forget`. Forgetting an event keeps the
+paybacks and money owed for it, linked to its payments instead; the app asks first and says what it
+kept. Ordo's own questions (who is this, was this a payback) are worked out without a model, from
+exact amounts and dates. "About half" means within 50p, and is only **likely** with a payback word
+(Splitwise, half, owe…) or someone you've told Ordo about; otherwise it's one **to check**. Names
+match as whole words, initials included: "Patrick O" is not any Patrick.
 
 ## Safety
 
