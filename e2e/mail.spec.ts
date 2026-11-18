@@ -669,11 +669,15 @@ test('scrolls past 500 messages without losing the list', async () => {
     .click()
   await expect(list().getByRole('option').first()).toBeVisible({ timeout: 20_000 })
   // Keep scrolling to the bottom: every page loads, past the 500 a single request can return
-  // (the folder's first sync keeps its newest 500).
+  // (the folder's first sync keeps its newest 500). Scroll the list's own box all the way down
+  // each time; scrolling an option that's already in view would do nothing.
   await expect
     .poll(
       async () => {
-        await list().getByRole('option').last().scrollIntoViewIfNeeded()
+        await list().evaluate((el) => {
+          const box = el.parentElement!
+          box.scrollTop = box.scrollHeight
+        })
         return list().getByRole('option').count()
       },
       { timeout: 30_000 },

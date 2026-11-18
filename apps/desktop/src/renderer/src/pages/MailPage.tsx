@@ -211,10 +211,10 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
       setList((cur) => {
         if (!cur) return cur
         const seen = new Set(cur.messages.map(keyOf))
-        return {
-          total: p.total,
-          messages: [...cur.messages, ...p.messages.filter((m) => !seen.has(keyOf(m)))],
-        }
+        const added = p.messages.filter((m) => !seen.has(keyOf(m)))
+        // Nothing new keeps the same rows, so the list doesn't ask for the same page again.
+        if (!added.length) return cur.total === p.total ? cur : { total: p.total, messages: cur.messages }
+        return { total: p.total, messages: [...cur.messages, ...added] }
       })
     } finally {
       loadingMore.current = false
