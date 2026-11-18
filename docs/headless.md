@@ -149,6 +149,14 @@ Shapes, trimmed:
   "rejected": [ { "address": "sam@friend.example", "reason": "Someone you’ve written to. Never included in bulk actions." } ],
   "summary": { "senders": 1, "emailsToTrash": 41, "unsubscribes": 1 } }
 
+// calendar events --json, and the ordo_calendar_events MCP tool. Timed events give instants (UTC);
+// all-day events give dates, YYYY-MM-DD, with an exclusive end as in iCalendar (a one-day event
+// on 10 July ends on 11 July). The human output shows times on this computer's clock.
+{ "from": "2026-07-01", "to": "2026-07-31", "total": 2, "offset": 0, "shown": 2, "events": [
+  { "title": "Holiday", "start": "2026-07-10", "end": "2026-07-11", "allDay": true, "calendar": "Home", "location": null },
+  { "title": "Dentist", "start": "2026-07-10T08:00:00.000Z", "end": "2026-07-10T09:00:00.000Z", "allDay": false,
+    "calendar": "Home", "location": "High Street" } ] }
+
 // money transactions --json (amounts are integer pence)
 { "currency": "GBP", "month": "2026-11", "account": null, "accounts": ["Monzo"],
   "summary": { "moneyInPence": 980000, "moneyOutPence": 42379 }, "total": 24, "offset": 0, "shown": 24,
