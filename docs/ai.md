@@ -117,19 +117,30 @@ Ordo fills the placeholders in itself, by the field they point at:
 - an amount: a whole number of pence in a field ending in `Pence`, shown as pounds;
 - a date (`date`, `from`, `to`, `lastIn`, `lastOut`, `lastDate`, `inDate`), shown as `3 Nov`;
 - a count (`total`, `shown`, `payments`, `leftOut`, `parts`, `days`);
-- a name (`name`, `inName`, `person`, `forPerson`, `from`), only if it has no digits and no currency
-  signs, so a bank reference like "£4,000.00 YOU OWE ME" can never stand in for an amount.
+- a name (`name`, `inName`, `person`, `forPerson`, `from`), only if it has no digits, no currency
+  signs and no amount in words, so a bank reference like "£4,000.00 YOU OWE ME" or a payee called
+  "five hundred pounds" can never stand in for an amount.
 
 Nothing else fills a placeholder: not categories, account names, reasons or notes.
 
 The model writes no numbers at all. After the placeholders are taken out, an answer is refused if it
-has any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`), or a number in words
-next to a money word (`five hundred pounds`, `twenty quid`, `a grand`, `GBP seventy`). A
-placeholder touching a digit, a currency sign, another placeholder, or a comma or full stop stuck to
-more text (`£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.a}}.5`) is refused too. So is a
-placeholder that points at nothing. The same rules apply to a clarifying question and its options,
-which may not contain placeholders at all. A refused reply is asked for again once. At most six tool
-calls, then the model must answer.
+has any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`), a number in words next
+to a money word (`five hundred pounds`, `one pound`, `twenty quid`, `a grand`, `GBP seventy`), or a
+number word on its own (`seventy`, `three hundred`, `a dozen`, `k`). Only "one", "half", "few" and
+"couple" are allowed on their own, because plain English needs them.
+
+A placeholder must stand apart from the model's words: before it, only the start, a space or an
+opening bracket or quote; after it, the end, a space, sentence punctuation followed by a space, or a
+possessive `'s`. So `£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.a}}.5`, `{{r1.total}}k`,
+`{{r1.total}}-odd` and `x{{r1.total}}` are refused, as is a multiplier word right after one
+(`{{r1.total}} thousand`, `grand`, `million`). So is a placeholder that points at nothing. Then the
+filled-in answer is checked once more, with the amounts, counts and dates Ordo filled in blanked
+out, so names and the model's words together can't spell an amount either.
+
+The same rules apply to a clarifying question and its options, which may not contain placeholders at
+all. A suggested fact's label is the model's words too: one with an amount or a placeholder is
+replaced with Ordo's own sentence for the fact. A refused reply is asked for again once. At most six
+tool calls, then the model must answer.
 
 The tools: `find_transactions`, `spending` (between two days, net of paybacks), `compare_months`,
 `events`, `event_cost`, `matches` (paybacks and pass-throughs, with how sure Ordo is), `share_of`
