@@ -11,6 +11,9 @@ import { launchApp } from './launch'
 // event, and Suggest with a stand-in for LM Studio.
 
 const shots = process.env['ORDO_SCREENSHOTS'] === '1'
+// CI runners' screens are about 1000px wide; BOARDS_VIEWPORT=1000x700 runs the same tests at that size.
+const [vw, vh] = (process.env['BOARDS_VIEWPORT'] ?? '1280x800').split('x').map(Number) as [number, number]
+const VIEWPORT = { width: vw, height: vh }
 
 let app: ElectronApplication
 let page: Page
@@ -104,7 +107,7 @@ test.beforeAll(async () => {
   const ics = icsFile(userData)
   app = await launchApp({ ORDO_USER_DATA: userData, ORDO_LMSTUDIO_URL: await startFakeLmStudio() })
   page = await app.firstWindow()
-  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.setViewportSize(VIEWPORT)
   // Stand in for the native open dialog (the .ics import).
   await app.evaluate(({ dialog }, path) => {
     dialog.showOpenDialog = (async () => ({
@@ -526,7 +529,7 @@ test('fits a narrow window', async () => {
   await expect(page.getByRole('dialog', { name: 'Fix the gate' })).toBeVisible()
   await shoot('narrow-card')
   await page.keyboard.press('Escape')
-  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.setViewportSize(VIEWPORT)
 })
 
 test('works beside the docked assistant: scrolls sideways and drags scroll at the edge', async () => {
@@ -556,5 +559,5 @@ test('works beside the docked assistant: scrolls sideways and drags scroll at th
   await page.mouse.up()
   await expect(card('Clear the gutters')).toBeVisible()
   await page.getByRole('button', { name: 'Assistant', exact: true }).click()
-  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.setViewportSize(VIEWPORT)
 })
