@@ -21,18 +21,18 @@ tools as Ordo's MCP server.
 - **New conversation** (the pencil in the header) forgets the conversation.
 
 Examples: "Which bills are due next?", "How much did I spend last month?", "What's on this week?",
-"What's overdue on my boards?", "Add a card to Home to book the MOT",
+"What did the bank email me about last week?", "What's overdue on my boards?", "Add a card to Home to book the MOT",
 "Show me August's spending" (opens Finances on August), "Undo clean-up 4", "Import
 /Users/me/Downloads/monzo.csv".
 
 ## What it can do
 
-| Kind     | Tools                                                                                                                                                        | How they run                                                      |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Read     | status, senders, clean-up plan, history, calendars, calendar events, bills, transactions, balances, boards, board cards                                      | Straight away. They change nothing.                               |
-| Refresh  | scan inbox, sync calendars                                                                                                                                   | Straight away. They fetch into Ordo's cache and change no server. |
-| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card | Only after you press **Confirm** on a card.                       |
-| Navigate | open a page (Finances can open on a month)                                                                                                                   | Straight away. It only moves the window.                          |
+| Kind     | Tools                                                                                                                                                                     | How they run                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Read     | status, senders, clean-up plan, history, mailboxes, messages, search mail, read a message, calendars, calendar events, bills, transactions, balances, boards, board cards | Straight away. They change nothing.                               |
+| Refresh  | scan inbox, check for new mail, sync calendars                                                                                                                            | Straight away. They fetch into Ordo's cache and change no server. |
+| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card              | Only after you press **Confirm** on a card.                       |
+| Navigate | open a page (Finances can open on a month)                                                                                                                                | Straight away. It only moves the window.                          |
 
 ## Privacy
 
@@ -42,7 +42,7 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
   assistant sends far more, so the first time you open it with a cloud provider it asks separately
   and says exactly what goes: your questions, and the Ordo data looked up to answer them,
   transactions with amounts and dates, balances, bills, calendar events, sender names, addresses
-  and subject lines, your boards’ cards, and your iCloud email address. Until you press **Allow**, nothing is sent and
+  and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. Until you press **Allow**, nothing is sent and
   there's nothing to type into; Ordo's main process refuses the question too. The OK is for that one
   provider (switching asks again), is kept in `assistant.json` in Ordo's data folder, and **Stop
   sharing** in the panel takes it back. Local models need no OK.
@@ -179,4 +179,6 @@ tool({
   later change cards say "Check this first" even when you did ask. Start a new conversation for a
   clean slate. The card is the real safeguard: read it before you confirm.
 - Results are cut at 16,000 characters each; the model is told to page with `limit` and `offset`.
+- The assistant reads mail as plain text and never marks it read. It has no tool to send, draft,
+  flag or move email; only the clean-up (with a card) moves mail.
 - The assistant can't connect accounts, change settings or send email. Those stay in the app.

@@ -130,7 +130,7 @@ export function systemPrompt(
   const tools = entries
     .map((e) => `- ${e.name} [${e.kind}]: ${e.description}\n  args: ${JSON.stringify(e.args)}`)
     .join('\n')
-  return `You are the assistant inside Ordo, the user's personal admin app for mail clean-up, calendar and money. You help them understand and use Ordo, using only the tools below.
+  return `You are the assistant inside Ordo, the user's personal admin app for mail, calendar, money and boards. You help them understand and use Ordo, using only the tools below.
 
 Reply with exactly one JSON object and nothing else, either:
 {"type":"tool","tool":"<tool name>","args":{...}} to call one tool, or
@@ -144,6 +144,7 @@ Rules:
 - ${OPEN_PAGE} opens a page in the app. Use it when the user asks to see, show or go to something, then say what you opened.
 - Amounts in tool results are in pence: write them as pounds, like £12.34. Dates in results are ISO.
 - Answer in short, plain British English. Plain text only: no Markdown headings, tables or bold. Short lists may use "- " at the start of a line.
+- Ordo has no tool to send, reply to, draft, flag or move email; if asked, say they can do that in Mail.
 - If Ordo's tools can't do something, say so plainly.
 
 Today is ${ctx.today}. The user is looking at ${ASSISTANT_PAGES[ctx.page].about}.
