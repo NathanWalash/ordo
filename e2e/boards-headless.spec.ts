@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -19,10 +22,33 @@ test.beforeAll(() => {
   const urgent = store.labels(board.id).find((l) => l.name === 'Urgent')!
   store.addCard({ boardId: board.id, title: 'Fix the gate', due: '2026-12-01', labelIds: [urgent.id] })
   store.addCard({ boardId: board.id, title: 'Clear gutters' })
+  // Deleted three days ago: the app would tidy it away; reading must not.
+  const old = store.addCard({ boardId: board.id, title: 'Deleted long ago' })
+  store.deleteCard(old.id)
   store.close()
+  const raw = new DatabaseSync(db)
+  raw
+    .prepare('UPDATE cards SET deleted_at = ? WHERE id = ?')
+    .run(new Date(Date.now() - 3 * 86_400_000).toISOString(), old.id)
+  raw.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  raw.close()
 })
 
+/** Every row in the database, to show a read changed nothing. */
+function snapshot(): string {
+  const raw = new DatabaseSync(db)
+  try {
+    raw.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    const tables = ['boards', 'columns', 'labels', 'fields', 'cards', 'checklist', 'links']
+    const rows = tables.map((t) => raw.prepare(`SELECT * FROM ${t} ORDER BY id`).all())
+    return createHash('sha256').update(JSON.stringify(rows)).digest('hex')
+  } finally {
+    raw.close()
+  }
+}
+
 test('boards list and boards cards read without changing anything', async () => {
+  const before = snapshot()
   const list = await ordo(['boards', 'list', '--json'], profile)
   expect(list.code).toBe(0)
   expect(json(list)).toEqual({ boards: [expect.objectContaining({ name: 'Home', cards: 2 })] })
@@ -38,6 +64,15 @@ test('boards list and boards cards read without changing anything', async () => 
   const missing = await ordo(['boards', 'cards', '--board', 'Garden', '--json'], profile)
   expect(missing.code).toBe(1)
   expect(json(missing)).toEqual({ error: { code: 'invalid', message: 'There’s no board called “Garden”.' } })
+
+  // Not a row changed, and the old delete is still there to tidy another day.
+  expect(snapshot()).toBe(before)
+  const raw = new DatabaseSync(db)
+  expect(raw.prepare("SELECT COUNT(*) AS n FROM cards WHERE title = 'Deleted long ago'").get()).toEqual({
+    n: 1,
+  })
+  raw.close()
+  expect(readFileSync(db).length).toBeGreaterThan(0)
 })
 
 test('add-card and move-card need --allow-changes and --confirm', async () => {
@@ -135,6 +170,12 @@ test.describe('MCP', () => {
     })
     expect(text(cards).cards.map((c: { title: string }) => c.title)).toEqual(['Fix the gate', 'Book the MOT'])
     await reader.close()
+    // The MCP server only read.
+    const raw = new DatabaseSync(db)
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM cards WHERE title = 'Deleted long ago'").get()).toEqual({
+      n: 1,
+    })
+    raw.close()
 
     const writer = await connect(['--allow-changes'])
     const refused = await writer.callTool({

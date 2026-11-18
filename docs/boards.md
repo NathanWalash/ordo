@@ -16,7 +16,8 @@ data folder). Nothing is uploaded.
   Rename, reorder and delete boards from the menu on each one.
 - **Columns** can be added, renamed, reordered and deleted. A column can have a **card limit**:
   over it, the column turns red. Nothing is blocked. A column marked **Cards here are done** (the
-  templates' Done) stops its cards being overdue and keeps them off the Calendar.
+  templates' Done) stops its cards being overdue and keeps them off the Calendar. Project's In
+  progress starts with a limit of 3; the others start without one.
 - **Cards** have a title, notes, labels, a due date or a date range, a checklist and the board's
   custom fields. Notes take simple markdown (bold, italic, code, lists, task lists, quotes,
   headings and https links); they're drawn without any HTML, so nothing in them can run.
@@ -24,8 +25,13 @@ data folder). Nothing is uploaded.
   (with coloured options), checkbox, link (https only) and person. Fields marked **On card** show
   on the card in the board.
 - **Archive** a card to take it off the board without deleting it; **Archived cards** in the
-  toolbar restores it. **Delete** shows **Undo** (or ⌘Z) straight afterwards. Deleted boards,
-  columns, cards, labels, fields and steps are removed for good a day later.
+  toolbar restores it. **Delete** shows **Undo** (or ⌘Z) straight afterwards, and several deletes
+  in a row are undone newest first. Undo puts a thing back where it was, even if something new has
+  been added there since; it won't put a card back into a column or board that has gone too.
+  Deleted boards, columns, cards, labels, fields and steps are removed for good a day later, by
+  the app when it starts; headless runs and agents never remove anything just by reading.
+- A link in notes whose words look like a different address from where it goes, or whose address
+  is an international (punycode) name, shows the real host next to it.
 
 ### Moving things
 
@@ -72,15 +78,15 @@ the day before), linked to the event.
 
 ## Suggest with AI
 
-**Suggest** on a card asks the model chosen in **Settings → AI** for:
+**Suggest** on a card asks the model chosen in **Settings → AI** (with **Use AI for Boards** on) for:
 
 - a due date, optionally based on one of the candidates (say, the day before an event);
 - a checklist breaking the task into steps;
 - labels from the board;
 - links to related upcoming events, bills, recent emails and other cards.
 
-Ordo gathers the candidates itself: events and bills in the next 60 days, emails from the last 30
-days and the other cards, kept to a few of each, related ones first (shared words, and dates close
+Ordo gathers the candidates itself: events and bills in the next 60 days (bills only with AI for
+Money on), emails from the last 30 days (only with sorting senders on) and the other cards, kept to a few of each, related ones first (shared words, and dates close
 to the card's). Emails and cards are only sent when they share words with the card. The model is
 given short ids (`e1`, `b2`, `m1`, `c3`, `l1`) and may only choose among them; it never sees Ordo's
 own ids. The reply must match a strict schema; dates must be real and from today on, ids must be
@@ -115,6 +121,8 @@ a cloud provider is only used after you've agreed to it in Settings.
 ## Limits
 
 - Boards are on this computer only: no sync between machines and no sharing.
+- A link to an all-day event is kept by its day, so it survives travelling across time zones; a
+  timed one by its start.
 - An email link uses the mailbox and UID from Mail's cache. If the mailbox is rebuilt on the server
   (a new UIDVALIDITY), old email links show as not found. The `messageId` field is stored when
   known; Mail doesn't record Message-ID headers yet.

@@ -58,6 +58,11 @@ function startFakeLmStudio(): Promise<string> {
       if (req.url === '/v1/models') return res.end(JSON.stringify({ data: [{ id: 'openai/gpt-oss-20b' }] }))
       const prompt: string = JSON.parse(body).messages.at(-1).content
       prompts.push(prompt)
+      // A slow model for one card, to show that closing the card stops the question.
+      if (prompt.includes('"title":"Slow card"')) {
+        setTimeout(() => res.end('{}'), 20_000).unref()
+        return
+      }
       // Pick the first event and label it was offered, a date and two steps.
       const event = /\{"id":"(e\d+)"[^\n]*Locksmith/.exec(prompt)?.[1] ?? null
       const content = {
@@ -91,6 +96,7 @@ test.beforeAll(async () => {
         model: 'openai/gpt-oss-20b',
         sortSenders: false,
         money: false,
+        boards: true,
         cloudConsent: null,
       },
     }),
@@ -244,7 +250,7 @@ test('columns: add, rename, set a limit, reorder with the keyboard', async () =>
   await page.getByRole('button', { name: 'In progress column options' }).click()
   await page.getByRole('menuitem', { name: 'Change card limit…' }).click()
   const limit = page.getByRole('dialog', { name: 'Card limit for In progress' })
-  await limit.getByLabel('Most cards').fill('1')
+  await limit.getByLabel('Card limit').fill('1')
   await limit.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByRole('region', { name: 'In progress, 2 of 1, over the limit' })).toBeVisible()
 
@@ -298,9 +304,15 @@ test('card details: notes, checklist, dates, labels and custom fields', async ()
     'href',
     'https://locks.example/gate',
   )
+  // Escape in a field puts back what was saved.
+  await detail.getByLabel('Owner', { exact: true }).fill('Bob')
+  await page.keyboard.press('Escape')
+  await expect(detail.getByLabel('Owner', { exact: true })).toHaveValue('Sam')
   await shoot('card')
   await page.keyboard.press('Escape')
   await expect(detail).toBeHidden()
+  // Focus goes back to the card it came from.
+  await expect(card('Fix the gate')).toBeFocused()
 
   const tile = card('Fix the gate')
   await expect(tile).toContainText('Blocked')
@@ -333,6 +345,9 @@ test('search and filters narrow the board', async () => {
   await page.getByRole('button', { name: 'Filter' }).click()
   await page.getByRole('menuitemcheckbox', { name: 'Overdue' }).click()
   await expect(page.getByText(/Showing 1 of 4 cards/)).toBeVisible()
+  // The filter menu stays open for ticking more than one thing.
+  await expect(page.getByRole('menu', { name: 'Filter cards' })).toBeVisible()
+  await page.keyboard.press('Escape')
   await shoot('filtered')
   await page.getByRole('button', { name: 'Clear', exact: true }).click()
   await expect(card('Paint the shed')).toBeVisible()
@@ -353,15 +368,29 @@ test('archive and restore, delete and undo', async () => {
   await card('Clear the gutters').focus()
   await page.keyboard.press('Backspace')
   await expect(card('Clear the gutters')).toBeHidden()
-  await expect(page.getByText('Deleted “Clear the gutters”')).toBeVisible()
+  await expect(page.getByRole('status').getByText('Deleted “Clear the gutters”')).toBeVisible()
   await shoot('undo')
+  await page.getByRole('button', { name: /Undo/ }).click()
+  await expect(card('Clear the gutters')).toBeVisible()
+  await expect(page.getByRole('status').getByText('Restored “Clear the gutters”')).toBeVisible()
+
+  // Two deletes in a row can both be undone, newest first.
+  await card('Clear the gutters').focus()
+  await page.keyboard.press('Backspace')
+  await card('Book boiler service').focus()
+  await page.keyboard.press('Backspace')
+  await expect(page.getByRole('button', { name: /Undo \(2\)/ })).toBeVisible()
+  await page.getByRole('button', { name: /Undo/ }).click()
+  await expect(card('Book boiler service')).toBeVisible()
   await page.getByRole('button', { name: /Undo/ }).click()
   await expect(card('Clear the gutters')).toBeVisible()
 })
 
 test('labels and fields are edited per board', async () => {
   await page.getByRole('button', { name: 'Labels and fields' }).click()
-  const sheet = page.getByRole('dialog', { name: 'Home: labels and fields' })
+  const sheet = page.getByRole('dialog', { name: 'Labels and fields' })
+  // Ready to type a new label straight away.
+  await expect(sheet.getByLabel('New label name')).toBeFocused()
   await sheet.getByLabel('New label name').fill('Garden')
   await sheet.getByRole('button', { name: 'Add label' }).click()
   await expect(sheet.getByRole('textbox', { name: 'Label name', exact: true }).last()).toHaveValue('Garden')
@@ -411,6 +440,26 @@ test('Suggest asks the local model and each suggestion can be added', async () =
   await page.keyboard.press('Escape')
 })
 
+test('closing a card stops its question, so another card can ask straight away', async () => {
+  await addCards('Backlog', ['Slow card'])
+  await card('Slow card').click()
+  const slow = page.getByRole('dialog', { name: 'Slow card' })
+  await slow.getByRole('button', { name: 'Suggest' }).click()
+  await expect(slow.getByRole('button', { name: 'Thinking…' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(slow).toBeHidden()
+
+  await card('Paint the shed').click()
+  const other = page.getByRole('dialog', { name: 'Paint the shed' })
+  await other.getByRole('button', { name: 'Suggest' }).click()
+  await expect(other.getByText('Suggested by LM Studio')).toBeVisible()
+  await expect(other.getByText(/Already asking/)).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await card('Slow card').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Delete' }).click()
+  await expect(card('Slow card')).toBeHidden()
+})
+
 test('dated cards show on the Calendar, and a card can be made from an event', async () => {
   await nav('Calendar').click()
   await page.getByRole('radio', { name: 'Agenda' }).click()
@@ -426,7 +475,7 @@ test('dated cards show on the Calendar, and a card can be made from an event', a
   await expect(sheet.getByLabel('Title')).toHaveValue('Locksmith for the gate')
   await sheet.getByRole('button', { name: 'The day before' }).click()
   await sheet.getByRole('button', { name: 'Create card' }).click()
-  await expect(page.getByText('Card added to Boards.')).toBeVisible()
+  await expect(page.getByText('Added to Home')).toBeVisible()
   await shoot('calendar')
   await page.getByRole('button', { name: 'Open', exact: true }).click()
   const detail = page.getByRole('dialog', { name: 'Locksmith for the gate' })
@@ -458,4 +507,24 @@ test('boards are listed, renamed, reordered and deleted with undo', async () => 
   await expect(thisWeek).toHaveCount(0)
   await page.getByRole('button', { name: /Undo/ }).click()
   await expect(thisWeek).toHaveCount(1)
+})
+
+test('fits a narrow window', async () => {
+  await page.setViewportSize({ width: 920, height: 700 })
+  await nav('Boards').click()
+  await page
+    .getByRole('complementary', { name: 'Boards' })
+    .locator('[data-board-id]', { hasText: 'Home' })
+    .click()
+  await expect(column('Backlog')).toBeVisible()
+  // Nothing in the toolbar wraps or is squeezed out.
+  const box = (await page.getByRole('button', { name: 'New card' }).boundingBox())!
+  expect(box.height).toBeLessThanOrEqual(30)
+  expect(box.x + box.width).toBeLessThanOrEqual(920)
+  await shoot('narrow-board')
+  await card('Fix the gate').click()
+  await expect(page.getByRole('dialog', { name: 'Fix the gate' })).toBeVisible()
+  await shoot('narrow-card')
+  await page.keyboard.press('Escape')
+  await page.setViewportSize({ width: 1280, height: 800 })
 })

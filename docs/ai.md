@@ -95,9 +95,12 @@ applies cached answers without calling the model; with AI for Money off, they ar
 ## Boards
 
 **Suggest** on a card (Boards) asks the same provider and model for a due date, a checklist, labels
-and links. It needs a model chosen in Settings → AI, and a cloud provider only after you've agreed
-to it there; there is no separate switch, because you press Suggest on one card at a time. Exactly
-this is sent, as JSON lines in `<card>`, `<labels>` and `<candidates>` blocks:
+and links. It needs a model chosen in Settings → AI and **Use AI for Boards** turned on there (off by
+default); a cloud provider needs the same consent as everything else. The Suggest button's tooltip
+says what goes where, and the first time with a cloud provider Ordo asks before anything is sent.
+Bills are only offered with **AI for Money** on, and emails only with **sorting senders** on, the
+switches that already cover them. Exactly this is sent, as JSON lines in `<card>`, `<labels>` and
+`<candidates>` blocks:
 
 ```json
 {"title":"Fix the gate","notes":"Latch is loose. - check hinges","due":null,"checklist":["Buy hinges"],"labels":["Blocked"]}
@@ -114,7 +117,8 @@ this is sent, as JSON lines in `<card>`, `<labels>` and `<candidates>` blocks:
 - At most 12 upcoming events and 8 bills in the next 60 days, related ones first, then the soonest:
   an event's title, calendar, time and day; a bill's name and due day (never its amount).
 - At most 8 emails from the last 30 days and 6 other cards, **only** ones that share a distinctive
-  word with the card: subject, sender name and day; card title, board and column.
+  word with the card: subject, the sender's display name (left out when there's only an address)
+  and day; card title, board and column.
 
 Never email bodies, addresses, attachments, account details, transactions or balances, and never
 Ordo's own ids: candidates and labels get short ids for this one request. The reply must be
