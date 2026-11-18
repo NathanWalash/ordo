@@ -42,7 +42,7 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
   assistant sends far more, so the first time you open it with a cloud provider it asks separately
   and says exactly what goes: your questions, and the Ordo data looked up to answer them,
   transactions with amounts and dates, balances, bills, calendar events, sender names, addresses
-  and subject lines, your boards' cards, and your iCloud email address. Until you press **Allow**, nothing is sent and
+  and subject lines, your boards’ cards, and your iCloud email address. Until you press **Allow**, nothing is sent and
   there's nothing to type into; Ordo's main process refuses the question too. The OK is for that one
   provider (switching asks again), is kept in `assistant.json` in Ordo's data folder, and **Stop
   sharing** in the panel takes it back. Local models need no OK.

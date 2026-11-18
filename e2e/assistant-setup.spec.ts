@@ -62,7 +62,7 @@ test('a cloud provider needs its own OK for the assistant, which can be withdraw
     await expect(panel.getByText('Claude Code CLI · haiku · Cloud')).toBeVisible()
     const ask = panel.getByRole('region', { name: 'Let the assistant send your data to Anthropic?' })
     await expect(ask).toContainText(
-      'transactions with amounts and dates, balances, bills, calendar events, sender names, addresses and subject lines, and your iCloud email address.',
+      'transactions with amounts and dates, balances, bills, calendar events, sender names, addresses and subject lines, your boards’ cards, and your iCloud email address.',
     )
     // Nothing to type into until the user agrees.
     await expect(panel.getByRole('textbox', { name: 'Ask the assistant' })).toHaveCount(0)
