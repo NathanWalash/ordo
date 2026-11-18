@@ -2,7 +2,7 @@
 // ledger, so transfers, held money, pass-throughs and ignored payments are never spending.
 
 import { addMonths, toISODate, type ISODate } from './dates'
-import { factsOf, type MoneyFact } from './memory'
+import { paybackFacts, type MoneyFact } from './memory'
 import type { Ledger } from './ledger'
 import type { Transaction } from './types'
 
@@ -65,10 +65,11 @@ export function spendBetween(
     cats.set(c, (cats.get(c) ?? 0) + e.spend)
   }
   // A payback counts where the spending it paid back was: in that period and that category, shared
-  // in proportion when it covered several outgoings. A payback for an event (no outgoings named)
-  // counts when it came in, and only without a category.
+  // in proportion when it covered several outgoings, and only for the part of each outgoing that is
+  // still your spending (not ignored, passed through, a transfer or money you passed on). A payback
+  // for an event (no outgoings named) counts when it came in, and only without a category.
   let paidBack = 0
-  for (const p of factsOf(facts, 'payback')) {
+  for (const p of paybackFacts(facts)) {
     const inn = byId.get(p.inId)
     if (!inn || ledger.get(inn.id)?.role !== 'payback') continue
     const outs = p.outIds.map((id) => byId.get(id)).filter((t): t is Transaction => !!t)
@@ -77,8 +78,10 @@ export function spendBetween(
       continue
     }
     const total = outs.reduce((n, o) => n - o.amount, 0)
-    const here = outs.filter((o) => within(o) && inCategory(o)).reduce((n, o) => n - o.amount, 0)
-    paidBack += total > 0 ? Math.round((inn.amount * here) / total) : 0
+    const here = outs
+      .filter((o) => within(o) && inCategory(o))
+      .reduce((n, o) => n + (ledger.get(o.id)?.spend ?? 0), 0)
+    paidBack += total > 0 ? Math.min(here, Math.round((inn.amount * here) / total)) : 0
   }
   return {
     from,

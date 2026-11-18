@@ -2,7 +2,15 @@
 // (paybacks, resales), and what it cost you in the end. Whole pence throughout.
 
 import type { Ledger } from './ledger'
-import { aliasesFor, counterpartName, factsOf, involves, type FactOf, type MoneyFact } from './memory'
+import {
+  aliasesFor,
+  counterpartName,
+  factsOf,
+  involves,
+  paybackFacts,
+  type FactOf,
+  type MoneyFact,
+} from './memory'
 import type { Transaction } from './types'
 
 export interface EventLine {
@@ -101,9 +109,10 @@ export function eventCost(
 
   const members = new Set(outgoings.map((l) => l.id))
   const counted = new Set(back.map((l) => l.id))
-  for (const p of factsOf(facts, 'payback')) {
+  for (const p of paybackFacts(facts)) {
     const inn = byId.get(p.inId)
-    if (!inn || counted.has(inn.id)) continue
+    // Money in you since ignored (or made a transfer) no longer pays anything back.
+    if (!inn || counted.has(inn.id) || ledger.get(inn.id)?.role !== 'payback') continue
     let amount: number
     if (p.eventId === event.id) amount = inn.amount
     else {

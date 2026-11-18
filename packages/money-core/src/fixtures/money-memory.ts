@@ -34,7 +34,7 @@ export const TRANSACTIONS: Transaction[] = [
 
   // Ryanair flights on HSBC; Amelie paid her half (it didn't split evenly).
   tx('h-ryanair', 'HSBC', '2026-08-15', 'Ryanair', -297.77, 'Transport', 'RYANAIR DAC DUBLIN )))'),
-  tx('m-amelie', 'Monzo', '2026-08-20', 'Amelie R', 148.8, 'Income', 'AMELIE R FLIGHTS'),
+  tx('m-amelie', 'Monzo', '2026-08-20', 'Amelie R', 148.8, 'Income', 'AMELIE R HALF FLIGHTS'),
 
   // Four August party payments the person wants left out of comparisons.
   tx('m-party-1', 'Monzo', '2026-08-08', 'Party Hire Co', -120, 'Entertainment'),

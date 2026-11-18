@@ -10,7 +10,7 @@ import { describeFacts } from './describe'
 import { allEventCosts, eventCost, type EventCost } from './events'
 import { buildLedger, type Ledger } from './ledger'
 import { counterparts, heldBalances, owedToYou } from './loose-ends'
-import { counterpartName, factsOf, involves, type MoneyFact } from './memory'
+import { counterpartName, factsOf, involves, paybackFacts, type MoneyFact } from './memory'
 import { findMatches, shareAfterPaybacks } from './paybacks'
 import type { Transaction } from './types'
 
@@ -222,7 +222,7 @@ export function moneyTools(ctx: ToolContext) {
         return !!t && (!a.from || t.date >= a.from) && (!a.to || t.date <= a.to)
       }
       const confirmed = [
-        ...factsOf(facts, 'payback').map((p) => ({
+        ...paybackFacts(facts).map((p) => ({
           kind: 'payback',
           inId: p.inId,
           outIds: p.outIds,
@@ -259,7 +259,7 @@ export function moneyTools(ctx: ToolContext) {
       return { confirmed, suggested }
     },
     share_of: (a) => {
-      const s = shareAfterPaybacks(a.id, transactions, facts)
+      const s = shareAfterPaybacks(a.id, transactions, facts, ledger)
       if (!s) return { error: 'That is not an outgoing transaction id.' }
       const t = byId.get(a.id)!
       return {
@@ -282,7 +282,7 @@ export function moneyTools(ctx: ToolContext) {
         lastIn: h.lastIn ?? null,
         lastOut: h.lastOut ?? null,
       })),
-      owed: owedToYou(transactions, facts).map((o) => ({
+      owed: owedToYou(transactions, facts, ledger).map((o) => ({
         person: o.person,
         amountPence: o.amount,
         receivedPence: o.received,

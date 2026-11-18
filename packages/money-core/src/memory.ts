@@ -148,6 +148,22 @@ export type FactOf<K extends MoneyFactKind> = Extract<MoneyFact, { kind: K }>
 export const factsOf = <K extends MoneyFactKind>(facts: readonly MoneyFact[], kind: K): FactOf<K>[] =>
   facts.filter((f): f is FactOf<K> => f.kind === kind)
 
+/**
+ * Payback facts, one per payment in: if the same money in was saved twice (a double click, an old
+ * file), only the first counts, so a £30 payback never takes £60 off.
+ */
+export function paybackFacts(facts: readonly MoneyFact[]): FactOf<'payback'>[] {
+  const seen = new Set<string>()
+  return factsOf(facts, 'payback').filter((p) => !seen.has(p.inId) && seen.add(p.inId))
+}
+
+/** Is this money in already a payback or a pass-through? (`except` skips the fact being replaced.) */
+export function inIdTaken(facts: readonly MoneyFact[], inId: string, except?: string): boolean {
+  return facts.some(
+    (f) => f.id !== except && (f.kind === 'payback' || f.kind === 'pass-through') && f.inId === inId,
+  )
+}
+
 /** Every transaction id a fact points at, to check they exist. */
 export function factTransactionIds(f: MoneyFactData): string[] {
   switch (f.kind) {
@@ -174,15 +190,18 @@ export const counterpartName = (t: Transaction) => t.merchant ?? t.description
 /** A key for the other party: `Genest J` → `genestj`. */
 export const counterpartKey = (t: Transaction) => merchantKey(counterpartName(t))
 
+/** Words in lower case, initials kept: `Patrick O` → `patrick`, `o`. */
 const words = (s: string) =>
   s
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 2)
+    .filter(Boolean)
 
 /**
- * Does this payment come from (or go to) `name`? Either the counterpart's key starts with the
- * name's (`gabesmith` for `Gabe`), or every word of the name is in the description.
+ * Does this payment come from (or go to) `name`? Either the counterpart is exactly that name, or
+ * every word of the name, initials included, is a whole word of the description or merchant:
+ * `Gabe` matches `GABE S RENT`, and `Patrick O` matches `PATRICK O RENT` but not `PATRICK SMITH`
+ * or `PATRICK OBRIEN PLUMBING`. Names shorter than three letters never match by themselves.
  */
 export function involves(t: Transaction, name: string, aliases: readonly string[] = []): boolean {
   const key = counterpartKey(t)
@@ -190,7 +209,7 @@ export function involves(t: Transaction, name: string, aliases: readonly string[
   for (const n of [name, ...aliases]) {
     const k = merchantKey(n)
     if (k.length < 3) continue
-    if (key === k || (key.startsWith(k) && k.length >= 4)) return true
+    if (key === k) return true
     const ws = words(n)
     if (ws.length && ws.every((w) => text.has(w))) return true
   }

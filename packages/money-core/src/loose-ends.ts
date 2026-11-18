@@ -3,7 +3,15 @@
 
 import { daysBetween } from './dates'
 import type { Ledger } from './ledger'
-import { aliasesFor, counterpartKey, counterpartName, factsOf, involves, type MoneyFact } from './memory'
+import {
+  aliasesFor,
+  counterpartKey,
+  counterpartName,
+  factsOf,
+  involves,
+  paybackFacts,
+  type MoneyFact,
+} from './memory'
 import type { Transaction } from './types'
 
 export interface HeldBalance {
@@ -88,9 +96,13 @@ export function heldBalances(
  * What people still owe you. Each owed fact is paid down by confirmed paybacks from the same
  * person for the same outgoings or event.
  */
-export function owedToYou(transactions: readonly Transaction[], facts: readonly MoneyFact[]): OwedItem[] {
+export function owedToYou(
+  transactions: readonly Transaction[],
+  facts: readonly MoneyFact[],
+  ledger: Ledger,
+): OwedItem[] {
   const byId = new Map(transactions.map((t) => [t.id, t]))
-  const paybacks = factsOf(facts, 'payback')
+  const paybacks = paybackFacts(facts)
   const used = new Set<string>()
   return factsOf(facts, 'owed')
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -100,7 +112,7 @@ export function owedToYou(transactions: readonly Transaction[], facts: readonly 
       for (const p of paybacks) {
         if (used.has(p.inId)) continue
         const inn = byId.get(p.inId)
-        if (!inn) continue
+        if (!inn || ledger.get(inn.id)?.role !== 'payback') continue
         const same =
           (o.eventId !== undefined && p.eventId === o.eventId) || p.outIds.some((id) => o.outIds.includes(id))
         const fromThem =
@@ -211,7 +223,9 @@ export function regularRuns(
     if (role === 'own-transfer' || role === 'ignored' || role === 'pass-through') continue
     const key = counterpartKey(t)
     if (key.length < 3) continue
-    groups.set(key, [...(groups.get(key) ?? []), t])
+    const list = groups.get(key)
+    if (list) list.push(t)
+    else groups.set(key, [t])
   }
   const runs: RegularRun[] = []
   for (const [key, txs] of groups) {

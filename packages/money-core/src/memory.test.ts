@@ -356,7 +356,7 @@ describe('loose ends', () => {
       date: '2026-10-31',
       outIds: ['m-halloween-1'],
     })
-    expect(owedToYou(TRANSACTIONS, [owed])).toEqual([
+    expect(owedToYou(TRANSACTIONS, [owed], ledgerWith([owed]))).toEqual([
       expect.objectContaining({ person: 'Someone', amount: 3000, received: 0, outstanding: 3000 }),
     ])
     const fromGenest = fact({
@@ -366,7 +366,9 @@ describe('loose ends', () => {
       date: '2026-10-31',
       eventId: 'ev-halloween',
     })
-    expect(owedToYou(TRANSACTIONS, [fromGenest, GENEST_PAYBACK])[0]).toMatchObject({
+    expect(
+      owedToYou(TRANSACTIONS, [fromGenest, GENEST_PAYBACK], ledgerWith([GENEST_PAYBACK]))[0],
+    ).toMatchObject({
       received: 3000,
       outstanding: 0,
     })
@@ -387,7 +389,7 @@ describe('loose ends', () => {
       date: '2026-10-31',
       eventId: 'ev-halloween',
     })
-    const r = owedToYou(TRANSACTIONS, [a, b, GENEST_PAYBACK])
+    const r = owedToYou(TRANSACTIONS, [a, b, GENEST_PAYBACK], ledgerWith([GENEST_PAYBACK]))
     expect(r.map((o) => o.outstanding)).toEqual([0, 3000])
   })
 
