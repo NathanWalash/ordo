@@ -192,6 +192,24 @@ describe('AI sort', () => {
   })
 })
 
+describe('importing a calendar file', () => {
+  it('accepts a file saved with a byte order mark, as Windows Notepad does', async () => {
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Test//EN',
+      'BEGIN:VEVENT',
+      'UID:bom-1',
+      `DTSTART:${new Date().getUTCFullYear()}1201T090000Z`,
+      'SUMMARY:Dentist',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n')
+    const r = await calendar.addIcsText(`${String.fromCharCode(0xfeff)}${ics}`, 'dentist.ics')
+    expect(r).toMatchObject({ ok: true })
+  })
+})
+
 describe('importing a statement file', () => {
   const CSV = 'Date,Description,Amount\r\n13/11/2026,TESCO STORES,-£3.41\r\n'
 

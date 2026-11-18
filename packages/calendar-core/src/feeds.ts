@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto'
 import ICAL from 'ical.js'
 import { normaliseColor } from './caldav'
-import { parseIcs } from './ics'
+import { parseCalendars, parseIcs } from './ics'
 import type { CalendarEvent, CalendarProvider, DateRange, RemoteCalendar } from './types'
 
 /** Feeds bigger than this are refused. Years of a busy work calendar are a few MB. */
@@ -70,9 +70,9 @@ export function checkFeedUrl(input: string, { allowLoopback = false } = {}): Fee
 export function describeIcs(text: string): { name?: string; color?: string; events: number } | null {
   if (!/BEGIN:VCALENDAR/i.test(text.slice(0, 4096))) return null
   try {
-    const jcal = ICAL.parse(text)
-    const roots = (Array.isArray(jcal[0]) ? jcal : [jcal]) as unknown[]
-    const cals = roots.map((r) => new ICAL.Component(r as never)).filter((c) => c.name === 'vcalendar')
+    const cals = parseCalendars(text)
+      .map((r) => new ICAL.Component(r as never))
+      .filter((c) => c.name === 'vcalendar')
     const first = cals[0]
     if (!first) return null
     const prop = (name: string) => {
@@ -133,7 +133,13 @@ export async function fetchFeed(start: string, opts: FetchFeedOptions = {}): Pro
     }
     const location = res.headers.get('location')
     if (res.status >= 300 && res.status < 400 && location) {
-      const next = check(new URL(location, url).href)
+      let target: string
+      try {
+        target = new URL(location, url).href
+      } catch {
+        throw new FeedError('url', 'That calendar link redirects somewhere Ordo won’t follow.')
+      }
+      const next = check(target)
       if (!next.ok) throw new FeedError('url', 'That calendar link redirects somewhere Ordo won’t follow.')
       url = next.url
       continue
@@ -144,7 +150,13 @@ export async function fetchFeed(start: string, opts: FetchFeedOptions = {}): Pro
       throw new FeedError('not-found', 'Nothing was found at that link. It may have been reset.')
     if (!res.ok)
       throw new FeedError('network', `The calendar’s server answered with an error (${res.status}).`)
-    return readLimited(res, maxBytes)
+    try {
+      return await readLimited(res, maxBytes)
+    } catch (err) {
+      if (err instanceof FeedError || opts.signal?.aborted) throw err
+      // The connection dropped or timed out part way through the download.
+      throw new FeedError('network', 'The calendar stopped downloading part way. Try again in a moment.')
+    }
   }
   throw new FeedError('url', 'That calendar link redirects too many times.')
 }

@@ -258,16 +258,24 @@ async function addFeed(
   feed: Omit<StoredFeed, 'id' | 'color'> & { color?: string },
   text: string,
 ): Promise<AddCalendarOutcome> {
-  const r = await withWriteLock('adding a calendar', async () => {
+  const r = await withWriteLock('adding a calendar', async (): Promise<AddCalendarOutcome> => {
     const s = openStore()
     const id = `feed:${randomUUID()}`
+    const window = syncWindow()
+    // Read the events before saving anything: a calendar that fails here must not be left half
+    // added (saved, with no events, and "already added" when you try again).
+    let events: CalendarEvent[]
+    try {
+      events = parseIcs(text, { calendarId: id, range: window })
+    } catch {
+      return { ok: false, error: 'not-calendar', message: 'Ordo couldn’t read the events in that calendar.' }
+    }
     s.addFeed({ ...feed, id, color: feed.color ?? COLORS[s.feedCount() % COLORS.length] })
     s.setCalendars(
       s.feeds().map((f) => ({ id: f.id, name: f.name, color: f.color, readOnly: true })),
       FEEDS,
     )
-    const window = syncWindow()
-    s.replaceEvents(id, parseIcs(text, { calendarId: id, range: window }), window)
+    s.replaceEvents(id, events, window)
     return { ok: true as const, calendar: s.calendars().find((c) => c.id === id)! }
   })
   return r instanceof Locked ? { ok: false, error: 'locked', message: r.message } : r
