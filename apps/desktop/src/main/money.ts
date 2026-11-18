@@ -51,13 +51,13 @@ import {
   type MoneyOverview,
   type MoneyResult,
   type StatementFile,
-  type StatementFilePreview,
   type StatementInput,
   type StatementPreview,
   type TransactionPage,
 } from '@ordo/shared'
 import { aiSettings, message as aiMessage, resolveModel, usableProvider } from './ai'
 import { cachedInboxHeaders } from './mail'
+import { pathProblem } from './paths'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
@@ -134,10 +134,13 @@ export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 type StatementRead = { ok: true; fileName: string; text: string } | { ok: false; message: string }
 
 /**
- * Read a statement named by a path (headless mode and the assistant). The path must resolve to a
- * regular `.csv` file under 5 MB.
+ * Read a statement named by a path (headless mode and the assistant). The path must be local and
+ * resolve to a regular `.csv` file under 5 MB.
  */
 async function readStatementFile(path: string): Promise<StatementRead> {
+  // Before any file-system call: a UNC or device path could reach the network or a device.
+  const problem = pathProblem(path, { requireAbsolute: false })
+  if (problem) return { ok: false, message: problem }
   let real: string
   try {
     real = await realpath(resolve(path))
@@ -174,27 +177,6 @@ export async function importStatementFile(path: string, accountName?: string): P
   const read = await readStatementFile(path)
   if (!read.ok) return read
   return importStatement({ fileName: read.fileName, text: read.text, accountName })
-}
-
-/** What importing a statement from a path would add, without saving anything. */
-export async function previewStatementFile(
-  path: string,
-  accountName?: string,
-): Promise<StatementFilePreview> {
-  const read = await readStatementFile(path)
-  if (!read.ok) return read
-  const p = previewStatement({ fileName: read.fileName, text: read.text })
-  if (!p.ok) return { ok: false, message: p.message }
-  return {
-    ok: true,
-    fileName: read.fileName,
-    accountName: accountName ?? p.suggestedAccount,
-    layout: p.layout,
-    count: p.count,
-    skipped: p.skipped,
-    from: p.from,
-    to: p.to,
-  }
 }
 
 /** How much is stored, for `status`. */

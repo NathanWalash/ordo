@@ -117,13 +117,26 @@ describe('change previews', () => {
     expect(p.blocked).toBe('None of these senders can be cleared.')
   })
 
-  it('describes an import from the file itself', async () => {
-    const p = await previewTool(fakeServices(), t('ordo_import_statement'), { path: '/tmp/monzo.csv' })
+  it('describes an import without opening the file', async () => {
+    const services = fakeServices()
+    const p = await previewTool(services, t('ordo_import_statement'), { path: '/tmp/monzo.csv' })
     expect(p).toMatchObject({
-      title: 'Import 3 transactions into Monzo',
-      details: ['File: /tmp/monzo.csv', 'Monzo statement, 2026-10-01 to 2026-10-31'],
+      title: 'Import a bank statement',
+      details: ['File: /tmp/monzo.csv', 'Account: named from the file'],
     })
+    expect(p.notes[0]).toMatch(/opens the file only after you confirm/)
+    expect(services.money.importFile).not.toHaveBeenCalled()
   })
+
+  it.each(['\\\\server\\share\\a.csv', '//server/share/a.csv', 'relative.csv'])(
+    'refuses to import from %s, through MCP and the assistant alike',
+    async (path) => {
+      const services = fakeServices()
+      const r = await runTool(services, t('ordo_import_statement'), { path }, allow)
+      expect(r).toMatchObject({ ok: false, code: 'usage' })
+      expect(services.money.importFile).not.toHaveBeenCalled()
+    },
+  )
 
   it('blocks an undo of a clean-up that does not exist', async () => {
     const p = await previewTool(fakeServices(), t('ordo_undo'), { id: 9 })

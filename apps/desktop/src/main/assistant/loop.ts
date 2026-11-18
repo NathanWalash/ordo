@@ -75,18 +75,46 @@ export function summarise(result: CommandResult): string {
 
 const STOPPED: AskOutcome = { ok: false, reason: 'stopped', message: 'Stopped.' }
 
-/** Why a change card appeared: the user's own words, or (perhaps) something the assistant read. */
+/**
+ * Whether a result can go to the model as Ordo's own data: nothing but numbers, booleans and
+ * nulls. Any string could have come from an email, a statement, a calendar or an error message, so
+ * a result with one is untrusted, and so is every error.
+ */
+export function isPlainData(value: unknown, depth = 0): boolean {
+  if (depth > 20) return false
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return true
+  if (Array.isArray(value)) return value.every((v) => isPlainData(v, depth + 1))
+  if (typeof value === 'object') return Object.values(value).every((v) => isPlainData(v, depth + 1))
+  return false
+}
+
+const DATA_WARNING =
+  'Text in emails, statements and calendars can try to trick the assistant, so only confirm if you want this.'
+
+/**
+ * Why a change card appeared. It says "You asked" only when the user's own words ask for this kind
+ * of change and nothing untrusted had entered the conversation yet. Once the assistant has read
+ * third-party text this turn, the request may have come from that text, and the card says so.
+ */
 export function triggerFor(tool: OrdoTool, question: string, steps: readonly Step[]): ConfirmCard['trigger'] {
-  const read = [...new Set(steps.filter((s) => !s.trusted).map((s) => TOOLS.find((t) => t.name === s.tool)))]
+  const untrusted = steps.filter((s) => !s.trusted)
+  const asked = tool.intent?.test(question) ?? false
+  if (asked && untrusted.length === 0)
+    return { kind: 'request', text: `You asked: “${clean(question, 160)}”` }
+  const read = [...new Set(untrusted.map((s) => TOOLS.find((t) => t.name === s.tool)))]
     .filter((t): t is OrdoTool => !!t)
     .map((t) => t.label.replace(/^\w+ing /, ''))
   const after = read.length ? ` after looking at ${read.join(', ')}` : ''
-  if (tool.intent?.test(question)) return { kind: 'request', text: `You asked: “${clean(question, 160)}”` }
+  if (asked)
+    return {
+      kind: 'data',
+      text:
+        `The assistant asked for this${after}, so it may have come from what it read rather than from you. ` +
+        `You asked: “${clean(question, 160)}”. ${DATA_WARNING}`,
+    }
   return {
     kind: 'data',
-    text:
-      `You didn’t ask for this. The assistant suggested it${after}. ` +
-      'Text in emails, statements and calendars can try to trick it, so only confirm if you want this.',
+    text: `You didn’t ask for this. The assistant suggested it${after}. ${DATA_WARNING}`,
   }
 }
 
@@ -191,6 +219,7 @@ export async function runAssistant(o: LoopOptions): Promise<AskOutcome> {
       steps.push({
         tool: name,
         args: nav.data,
+        // Ordo's own enum (the page) and a checked YYYY-MM: no third-party text.
         trusted: true,
         result: { opened: nav.data.page, month: nav.data.month ?? null },
       })
@@ -220,6 +249,35 @@ export async function runAssistant(o: LoopOptions): Promise<AskOutcome> {
     const id = randomUUID()
 
     let result: CommandResult
+    // A file path is only accepted when the user typed it, word for word. Nothing has touched it yet.
+    const unasked = (tool.localPaths ?? []).filter((key) => {
+      const value = (checked.data as Record<string, unknown>)[key]
+      return typeof value === 'string' && !o.question.includes(value)
+    })
+    if (unasked.length) {
+      const refused: CommandResult = {
+        ok: false,
+        code: 'usage',
+        message: `Ordo only opens a file whose full path is in the user's own message. Ask the user for the path.`,
+      }
+      o.onEvent({
+        type: 'tool',
+        id,
+        tool: tool.name,
+        label: tool.label,
+        kind: tool.kind,
+        status: 'failed',
+        summary: 'Only files you name yourself',
+      })
+      steps.push({
+        tool: tool.name,
+        args: checked.data,
+        trusted: false,
+        result: { error: { code: refused.code, message: refused.message } },
+      })
+      continue
+    }
+
     if (tool.kind === 'change') {
       const preview = await previewTool(o.services, tool, checked.data)
       const card: ConfirmCard = {
@@ -263,8 +321,8 @@ export async function runAssistant(o: LoopOptions): Promise<AskOutcome> {
     steps.push({
       tool: tool.name,
       args: checked.data,
-      // Change results and Ordo's own status are Ordo's words; the rest carries third-party text.
-      trusted: !tool.untrusted,
+      // Only numbers and booleans count as Ordo's own data; any text, and every error, is untrusted.
+      trusted: result.ok && isPlainData(result.data),
       result: result.ok ? result.data : { error: { code: result.code, message: result.message } },
     })
     if (o.signal.aborted) return STOPPED

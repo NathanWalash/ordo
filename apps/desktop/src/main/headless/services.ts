@@ -34,7 +34,6 @@ export function mainServices(): OrdoServices {
       overview: money.overview,
       transactions: money.transactions,
       importFile: money.importStatementFile,
-      previewFile: money.previewStatementFile,
       counts: money.counts,
       aiSort: (onProgress) => money.aiSort(onProgress),
     },

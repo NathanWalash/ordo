@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { CHANGE_COMMANDS, commandFrom, MAX_EVENT_DAYS, UsageError, type CommandName } from './args'
 import { gate, runCommand, type CommandResult, type OrdoServices } from './commands'
+import { pathProblem } from '../paths'
 
 /**
  * Ordo's tool registry: every tool an agent can call, in one list. The MCP server (`mcp.ts`) and
@@ -56,9 +57,15 @@ export interface OrdoTool<S extends z.ZodRawShape = z.ZodRawShape> {
    * Without them, the confirmation card warns that the request may have come from data.
    */
   intent?: RegExp
+  /**
+   * Arguments that name a file on this computer. They must be absolute local paths (never UNC or
+   * device paths), the assistant accepts them only when the user typed them, and previews must not
+   * touch them: the file is read only after the user confirms.
+   */
+  localPaths?: readonly (keyof S & string)[]
   /** Run it. Only ever call this through `runTool`, which validates and gates. */
   run(services: OrdoServices, args: z.output<z.ZodObject<S>>, ctx: RunContext): Promise<CommandResult>
-  /** Change tools: what would happen, without doing it. */
+  /** Change tools: what would happen, without doing it, and without touching any `localPaths`. */
   preview?(services: OrdoServices, args: z.output<z.ZodObject<S>>): Promise<ChangePreview>
 }
 
@@ -284,7 +291,8 @@ export const TOOLS: readonly OrdoTool[] = [
     kind: 'change',
     label: 'Clearing senders',
     command: 'cleanup run',
-    intent: /unsubscri|clean|clear|trash|delete|remove|get rid|bin\b|tidy|declutter|unclutter/i,
+    intent:
+      /\b(?:unsubscribe (?:me )?from|clean (?:up|out)|clear (?:out|up|away)|(?:move|send|put) .{0,80}\bto (?:the )?trash|trash (?:them|those|these|it|all)|get rid of)\b/i,
     description:
       'Unsubscribe from the given senders and move their cached inbox emails to Trash (nothing is deleted; ' +
       'ordo_undo puts them back). Call ordo_cleanup_plan first and show the user the plan. People are refused.',
@@ -342,7 +350,7 @@ export const TOOLS: readonly OrdoTool[] = [
     kind: 'change',
     label: 'Undoing a clean-up',
     command: 'undo',
-    intent: /undo|restore|put .*back|bring .*back|revert|move .*back/i,
+    intent: /\b(?:undo|restore|revert|(?:put|bring|move) .{0,60}\bback)\b/i,
     description:
       'Move a clean-up’s emails from Trash back to the inbox (unsubscribes can’t be undone). Ids come from ordo_history.',
     untrusted: false,
@@ -375,30 +383,34 @@ export const TOOLS: readonly OrdoTool[] = [
     kind: 'change',
     label: 'Importing a statement',
     command: 'money import',
-    intent: /import|statement|csv|add .*(account|transactions)/i,
+    intent: /\bimport\b/i,
     description:
       'Import a bank statement into Ordo Money from a path on this computer: a regular .csv file under 5 MB. ' +
       'Transactions already imported are skipped.',
     untrusted: false,
     input: {
-      path: z.string().min(1).max(4096).describe('Path to the .csv file'),
+      path: z
+        .string()
+        .min(1)
+        .max(4096)
+        .refine((p) => pathProblem(p, { requireAbsolute: true }) === null, {
+          message: 'Give the full local path to the .csv file (not a network path)',
+        })
+        .describe('Full path to the .csv file on this computer'),
       account: z.string().max(60).optional().describe('Account name (default: from the file)'),
     },
+    localPaths: ['path'],
     run: viaCommand('money import', (a: { path: string; account?: string }) => ({
       input: { file: a.path, account: a.account },
     })),
-    async preview(services, a) {
-      const p = await services.money.previewFile(a.path, a.account)
-      if (!p.ok)
-        return { title: 'Import a statement', details: [`File: ${a.path}`], notes: [], blocked: p.message }
+    // Nothing here reads the file: a model chose the path, so it's only opened after Confirm.
+    async preview(_services, a) {
       return {
-        title: `Import ${plural(p.count, 'transaction')} into ${p.accountName}`,
-        details: [
-          `File: ${a.path}`,
-          `${p.layout} statement, ${p.from} to ${p.to}`,
-          ...(p.skipped > 0 ? [`${plural(p.skipped, 'row')} Ordo can’t read will be skipped`] : []),
+        title: 'Import a bank statement',
+        details: [`File: ${a.path}`, `Account: ${a.account ?? 'named from the file'}`],
+        notes: [
+          'Ordo opens the file only after you confirm: a regular .csv file under 5 MB. Transactions you’ve already imported are skipped, and you can remove the account in Finances.',
         ],
-        notes: ['Transactions you’ve already imported are skipped. You can remove the account in Finances.'],
       }
     },
   }),
@@ -408,7 +420,8 @@ export const TOOLS: readonly OrdoTool[] = [
     kind: 'change',
     label: 'Sorting merchants with AI',
     command: 'money sort',
-    intent: /sort|categor/i,
+    intent:
+      /\b(?:sort|categori[sz]e)\b.{0,40}\b(?:merchants?|transactions?|spending|payments?|money|finances)\b/i,
     description:
       'Ask the model chosen in Ordo’s Settings → AI to categorise the merchants left in Other and to match ' +
       'bank payments to email senders the rules couldn’t. Needs AI for Money turned on in Ordo. Only merchant ' +
@@ -435,7 +448,7 @@ export const TOOLS: readonly OrdoTool[] = [
     kind: 'change',
     label: 'Sorting senders with AI',
     command: 'ai sort',
-    intent: /sort|categor/i,
+    intent: /\b(?:sort|categori[sz]e)\b.{0,40}\b(?:senders?|e?mails?|inbox)\b/i,
     description:
       'Ask the model chosen in Ordo’s Settings → AI to sort the senders in Other. Sender names and subject lines go to ' +
       'that model; a cloud provider is only used if the user agreed to it in Ordo.',

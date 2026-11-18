@@ -73,16 +73,6 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
         uncategorisedMerchants: 0,
       }),
       importFile: vi.fn(async () => ({ ok: true as const, accountName: 'Monzo', added: 3, duplicates: 0 })),
-      previewFile: vi.fn(async (_path: string, account?: string) => ({
-        ok: true as const,
-        fileName: 'monzo.csv',
-        accountName: account ?? 'Monzo',
-        layout: 'Monzo',
-        count: 3,
-        skipped: 0,
-        from: '2026-10-01',
-        to: '2026-10-31',
-      })),
       counts: () => ({ transactions: 0, accounts: 0, bills: 0 }),
       aiSort: vi.fn(async () => ({
         ok: false as const,
