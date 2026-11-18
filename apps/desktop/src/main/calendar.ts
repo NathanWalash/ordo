@@ -7,9 +7,11 @@ import {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarUnavailableError,
   CalendarStore,
   checkFeedUrl,
   describeIcs,
+  readIcs,
   FEED_MAX_BYTES,
   FeedError,
   FeedProvider,
@@ -71,12 +73,18 @@ function account() {
   return a
 }
 
-function explain(err: unknown): { error: CalendarSyncError; message: string } {
+export function explain(err: unknown): { error: CalendarSyncError; message: string } {
   if (err instanceof CalendarAuthError)
     return {
       error: 'auth',
       message:
         "iCloud didn't accept your app-specific password for Calendar. Reconnect your account and try again.",
+    }
+  if (err instanceof CalendarUnavailableError)
+    return {
+      error: 'network',
+      message:
+        'iCloud Calendar is busy or limiting requests right now. Wait a few minutes and try again, and check Apple’s System Status page if it keeps happening.',
     }
   if (err instanceof CalendarConnectionError)
     return {
@@ -249,18 +257,26 @@ function feedFailure(err: unknown): AddCalendarOutcome {
  */
 async function addFeed(
   feed: Omit<StoredFeed, 'id' | 'color'> & { color?: string },
-  text: string,
+  calendars: NonNullable<ReturnType<typeof readIcs>>,
 ): Promise<AddCalendarOutcome> {
-  const r = await withWriteLock('adding a calendar', async () => {
+  const r = await withWriteLock('adding a calendar', async (): Promise<AddCalendarOutcome> => {
     const s = openStore()
     const id = `feed:${randomUUID()}`
+    const window = syncWindow()
+    // Read the events before saving anything: a calendar that fails here must not be left half
+    // added (saved, with no events, and "already added" when you try again).
+    let events: CalendarEvent[]
+    try {
+      events = parseIcs(calendars, { calendarId: id, range: window })
+    } catch {
+      return { ok: false, error: 'not-calendar', message: 'Ordo couldn’t read the events in that calendar.' }
+    }
     s.addFeed({ ...feed, id, color: feed.color ?? COLORS[s.feedCount() % COLORS.length] })
     s.setCalendars(
       s.feeds().map((f) => ({ id: f.id, name: f.name, color: f.color, readOnly: true })),
       FEEDS,
     )
-    const window = syncWindow()
-    s.replaceEvents(id, parseIcs(text, { calendarId: id, range: window }), window)
+    s.replaceEvents(id, events, window)
     return { ok: true as const, calendar: s.calendars().find((c) => c.id === id)! }
   })
   return r instanceof Locked ? { ok: false, error: 'locked', message: r.message } : r
@@ -294,8 +310,9 @@ export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
   } catch (err) {
     return feedFailure(err)
   }
-  const info = describeIcs(text)
-  if (!info)
+  const calendars = readIcs(text)
+  const info = calendars && describeIcs(calendars)
+  if (!calendars || !info)
     return {
       ok: false,
       error: 'not-calendar',
@@ -309,17 +326,19 @@ export async function addLink(input: unknown): Promise<AddCalendarOutcome> {
       secret: seal(check.url),
       host: check.host,
     },
-    text,
+    calendars,
   )
 }
 
 /** Add an .ics file's events as a calendar of their own. */
 export async function addIcsText(text: string, fileName: string): Promise<AddCalendarOutcome> {
-  const info = describeIcs(text)
-  if (!info) return { ok: false, error: 'not-calendar', message: `${fileName} isn’t a calendar file.` }
+  const calendars = readIcs(text)
+  const info = calendars && describeIcs(calendars)
+  if (!calendars || !info)
+    return { ok: false, error: 'not-calendar', message: `${fileName} isn’t a calendar file.` }
   account()
   const name = nameFor(info.name, basename(fileName, extname(fileName)) || 'Imported calendar')
-  return addFeed({ kind: 'file', name, color: info.color, ics: text }, text)
+  return addFeed({ kind: 'file', name, color: info.color, ics: text }, calendars)
 }
 
 /** Pick an .ics file and add it. Null when the picker is cancelled. */

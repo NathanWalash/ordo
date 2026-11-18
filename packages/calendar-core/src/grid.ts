@@ -131,8 +131,11 @@ export interface TimedBlock<T> {
  */
 export function layoutDay<T extends Span>(items: T[], day: Date, minHeight = 15): TimedBlock<T>[] {
   const { start: dayStart, end: dayEnd } = dayRange(day)
-  const minutes = (d: Date) => (d.getTime() - dayStart.getTime()) / 60_000
-  const dayLength = minutes(dayEnd)
+  // Minutes on the clock, as the grid's hour lines show them. Counting real time since midnight
+  // put every event an hour off on the days the clocks change.
+  const dayLength = 24 * 60
+  const minutes = (d: Date) =>
+    d <= dayStart ? 0 : d >= dayEnd ? dayLength : d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60
   const blocks = items
     .filter((i) => overlaps(i.start, i.end, { start: dayStart, end: dayEnd }))
     .sort((a, b) => a.start.getTime() - b.start.getTime() || b.end.getTime() - a.end.getTime())

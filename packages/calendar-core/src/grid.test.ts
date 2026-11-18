@@ -114,4 +114,26 @@ describe('layoutDay', () => {
     expect(layoutDay(items, d(11, 16))[0]).toMatchObject({ top: 1320, height: 120 })
     expect(layoutDay(items, d(11, 17))[0]).toMatchObject({ top: 0, height: 60 })
   })
+
+  it.each([
+    ['Europe/London', 3, 29], // clocks go forward
+    ['Europe/London', 10, 25], // and back
+    ['America/New_York', 3, 8],
+    ['Pacific/Auckland', 4, 5],
+  ])('puts events at their clock time on the day the clocks change (%s, %i/%i)', (zone, month, day) => {
+    const tz = process.env['TZ']
+    process.env['TZ'] = zone
+    try {
+      const items = [
+        timed('a', d(month, day, 9), d(month, day, 10)),
+        timed('b', d(month, day, 23), d(month, day + 1)),
+      ]
+      const [a, b] = layoutDay(items, d(month, day))
+      expect(a).toMatchObject({ top: 540, height: 60 })
+      expect(b!.top + b!.height).toBe(1440)
+    } finally {
+      if (tz === undefined) delete process.env['TZ']
+      else process.env['TZ'] = tz
+    }
+  })
 })

@@ -23,6 +23,17 @@ describe('parseAmount', () => {
     expect(parseAmount('GBP 10.00')).toBe(1000)
   })
 
+  it('reads a decimal comma instead of making the amount 100 times bigger', () => {
+    expect(parseAmount('-3,41')).toBe(-341)
+    expect(parseAmount('1.234,56')).toBe(123456)
+    expect(parseAmount('12,5')).toBe(1250)
+    expect(parseAmount('(3,41)')).toBe(-341)
+    expect(parseAmount('3,41 DR')).toBe(-341)
+    // Three digits after a comma are thousands.
+    expect(parseAmount('1,234')).toBe(123400)
+    expect(parseAmount('1,234,567.89')).toBe(123456789)
+  })
+
   it('is exact where floats are not', () => {
     expect(parseAmount('0.29')).toBe(29) // 0.29 * 100 = 28.999999999999996
     expect(parseAmount('1.005')).toBe(101)
