@@ -313,8 +313,34 @@ describe('updateEventIcs: one event', () => {
     expect(l).toContain('SEQUENCE:1')
     expect(l).toContain('BEGIN:VTIMEZONE')
 
+    // Only the alarm the editor showed changes; the second one stays.
     const noAlert = updateEventIcs(rich, { uid: 'r' }, { ...before, alert: null }, 'all', { now: NOW })
-    expect(lines(noAlert)).not.toContain('BEGIN:VALARM')
+    expect(lines(noAlert).filter((x) => x === 'BEGIN:VALARM')).toHaveLength(1)
+    expect(lines(noAlert)).toContain('TRIGGER:-P1D')
+    expect(lines(noAlert)).not.toContain('TRIGGER:-PT10M')
+    const sooner = updateEventIcs(rich, { uid: 'r' }, { ...before, alert: 5 }, 'all', { now: NOW })
+    expect(lines(sooner).filter((x) => x.startsWith('TRIGGER'))).toEqual(['TRIGGER:-PT5M', 'TRIGGER:-P1D'])
+    expect(readEvent(sooner, { uid: 'r' }).draft.alert).toBe(5)
+  })
+
+  it('adds an alert before an alarm it can’t show, keeping that alarm', () => {
+    const absolute = cal(
+      'BEGIN:VEVENT',
+      'UID:a',
+      'DTSTART:20261102T090000Z',
+      'SUMMARY:Flight',
+      'BEGIN:VALARM',
+      'ACTION:DISPLAY',
+      'TRIGGER;VALUE=DATE-TIME:20261101T180000Z',
+      'X-APPLE-DEFAULT-ALARM:TRUE',
+      'END:VALARM',
+      'END:VEVENT',
+    )
+    const before = readEvent(absolute, { uid: 'a' }).draft
+    expect(before.alert).toBeNull()
+    const ics = updateEventIcs(absolute, { uid: 'a' }, { ...before, alert: 60 }, 'all')
+    expect(lines(ics)).toContain('TRIGGER:-PT1H')
+    expect(lines(ics)).toContain('X-APPLE-DEFAULT-ALARM:TRUE')
   })
 
   it('starts repeating when a repeat is added', () => {

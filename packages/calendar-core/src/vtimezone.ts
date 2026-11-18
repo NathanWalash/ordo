@@ -131,14 +131,20 @@ export function buildVTimezone(
   if (!Number.isFinite(fromYear) || !Number.isFinite(toYear)) return null
   fromYear = clampYear(fromYear)
   toYear = Math.min(clampYear(Math.max(toYear, fromYear)), fromYear + VTIMEZONE_MAX_SPAN)
-  const key = `${tz}|${fromYear}|${toYear}`
+  const zone = ianaZone(tz)
+  if (!zone) return null
+  // Aliases of one zone (`/mozilla.org/…/Europe/London`, `Europe/London`) share the work.
+  const key = `${zone}|${fromYear}|${toYear}`
   let jcal = built.get(key)
   if (jcal === undefined) {
-    jcal = build(tz, fromYear, toYear)?.toJSON() ?? null
+    jcal = build(zone, fromYear, toYear)?.toJSON() ?? null
     if (built.size > 50) built.clear()
     built.set(key, jcal)
   }
-  return jcal ? new ICAL.Component(structuredClone(jcal) as never) : null
+  if (!jcal) return null
+  const vtz = new ICAL.Component(structuredClone(jcal) as never)
+  vtz.updatePropertyWithValue('tzid', tz)
+  return vtz
 }
 
 /** Scanning a zone's changes takes a few milliseconds: remember the result. */

@@ -348,4 +348,43 @@ describe('eventDetails', () => {
     })
     expect(eventDetails(store, { calendarId: HOME, uid: 'missing' })).toBeNull()
   })
+
+  it('marks an event in a time zone Ordo can’t work out as not editable, and refuses changes', async () => {
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'BEGIN:VEVENT',
+      'UID:odd',
+      'DTSTART;TZID=Somewhere Else:20261120T090000',
+      'SUMMARY:Odd',
+      'END:VEVENT',
+      'END:VCALENDAR',
+      '',
+    ].join('\r\n')
+    server.objects.set(`${HOME}odd.ics`, { ics, etag: 70 })
+    await syncCalendars(server, store, { window: WINDOW, force: true })
+    expect(eventDetails(store, { calendarId: HOME, uid: 'odd' }, opts.me)).toMatchObject({
+      editable: false,
+      reason: expect.stringContaining('time zone Ordo doesn’t know'),
+    })
+    const d = eventDetails(store, { calendarId: HOME, uid: 'odd' }, opts.me)!.draft
+    await expect(
+      updateEvent(server, store, { calendarId: HOME, uid: 'odd' }, { ...d, title: 'x' }, 'all', opts),
+    ).rejects.toMatchObject({ kind: 'read-only' })
+    expect(server.calls).toEqual([])
+  })
+
+  it('reports a made-up occurrence as not found, without writing', async () => {
+    const { uid } = await createEvent(
+      server,
+      store,
+      HOME,
+      draft({ repeat: { frequency: 'weekly', count: 2 } }),
+      opts,
+    )
+    const ref = { calendarId: HOME, uid, recurrenceId: '2026-11-20T13:37:00.000Z' }
+    expect(eventDetails(store, ref, opts.me)).toBeNull()
+    await expect(deleteEvent(server, store, ref, 'this', opts)).rejects.toMatchObject({ kind: 'not-found' })
+    expect(server.calls).toEqual(['create'])
+  })
 })

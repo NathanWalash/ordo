@@ -72,7 +72,13 @@ function refusal(store: CalendarStore, calendarId: string): EventChangeError | n
   return null
 }
 
+/** Why Ordo won't change this particular event (someone else's invitation, a zone it can't read). */
 function invitation(facts: EventFacts, me: string | undefined): EventChangeError | null {
+  if (facts.unknownZone)
+    return new EventChangeError(
+      'read-only',
+      `This event uses a time zone Ordo doesn’t know (“${facts.unknownZone.slice(0, 60)}”), so Ordo won’t change it. Change it in the app that made it.`,
+    )
   if (!facts.organizer || !me || facts.organizer.toLowerCase() === me.toLowerCase()) return null
   return new EventChangeError(
     'invitation',
