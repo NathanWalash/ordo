@@ -92,6 +92,37 @@ Answers are cached in `money.sqlite` per merchant (or pair), model and a fingerp
 sent, so running again only asks about new or changed merchants. Listing transactions and bills
 applies cached answers without calling the model; with AI for Money off, they aren't applied.
 
+## Boards
+
+**Suggest** on a card (Boards) asks the same provider and model for a due date, a checklist, labels
+and links. It needs a model chosen in Settings → AI, and a cloud provider only after you've agreed
+to it there; there is no separate switch, because you press Suggest on one card at a time. Exactly
+this is sent, as JSON lines in `<card>`, `<labels>` and `<candidates>` blocks:
+
+```json
+{"title":"Fix the gate","notes":"Latch is loose. - check hinges","due":null,"checklist":["Buy hinges"],"labels":["Blocked"]}
+{"id":"l1","name":"Blocked"}
+{"id":"e1","kind":"event","title":"Locksmith for the gate","detail":"Family · 09:00","date":"2026-11-21"}
+{"id":"b1","kind":"bill","title":"Home insurance","detail":"£24 monthly","date":"2026-12-01"}
+{"id":"m1","kind":"email","title":"Your locksmith booking","detail":"Lock & Key Ltd","date":"2026-11-15"}
+{"id":"c1","kind":"card","title":"Paint the shed","detail":"Home · Up next","date":null}
+```
+
+- The card: its title, notes as plain text (cut to 1,500 characters), dates, checklist steps and
+  label names.
+- The board's labels, by name.
+- At most 12 upcoming events and 8 bills in the next 60 days, related ones first, then the soonest:
+  title, calendar or amount, and day.
+- At most 8 emails from the last 30 days and 6 other cards, **only** ones that share a distinctive
+  word with the card: subject, sender name and day; card title, board and column.
+
+Never email bodies, addresses, attachments, account details, transactions or balances, and never
+Ordo's own ids: candidates and labels get short ids for this one request. The reply must be
+`{"due": {"date", "basedOn"} | null, "checklist": [...], "labels": [...], "links": [...]}`; ids not
+sent, past or impossible dates and repeats are dropped, steps are cleaned of control characters
+and cut to 120 characters. Suggestions are only shown: nothing is changed until you add one.
+Suggestions aren't cached.
+
 ## Safety
 
 Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as
@@ -143,6 +174,7 @@ while Ordo is open, press **Check again**.
 - `packages/ai` has the `ModelProvider` interface (`.`) and the adapters (`./node`).
 - `aiCategorise` in `packages/mail-core` does the sorting; `window.ordo.ai` exposes status, test and
   sorting to the renderer.
+- `suggestForCard` in `packages/boards-core` does Boards' Suggest; `window.ordo.boards.suggest()` runs it.
 - `aiCategoriseTransactions` and `aiMatchBills` in `packages/money-core` do Money's;
   `window.ordo.money.aiSort()` runs both, and `money sort` / `ordo_money_sort` in headless mode.
 - Unpackaged builds take `ORDO_LMSTUDIO_URL`, `ORDO_OLLAMA_URL` and `ORDO_AI_CLI_PATH` for tests.
