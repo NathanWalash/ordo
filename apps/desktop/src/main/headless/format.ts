@@ -7,9 +7,15 @@ import type { CommandResult } from './commands'
  * control characters before it reaches a terminal (no escape sequences, no fake lines).
  */
 
-// C0 and C1 control characters, DEL, and bidi overrides/isolates.
+// C0 and C1 control characters, DEL, bidi overrides/isolates and marks, zero-width characters,
+// line and paragraph separators, and the byte order mark.
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
+
+/** Like `UNSAFE`, but keeping tabs and line breaks: for multi-line text such as an answer. */
+export const UNSAFE_KEEP_LINES =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
 
 export function clean(value: unknown, max = 80): string {
   const s = String(value ?? '').replace(UNSAFE, ' ')

@@ -322,6 +322,9 @@ describe('output', () => {
   it('strips control characters and bidi tricks from third-party text', () => {
     expect(clean('Evil\u001b[2J\r\nCorp‮')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
+    // Zero-width, direction marks, line and paragraph separators and the BOM go too.
+    for (const code of [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2028, 0x2029, 0x061c, 0xfeff])
+      expect(clean(`a${String.fromCharCode(code)}b`)).toBe('a b')
     const text = formatHuman('senders', {
       ok: true,
       data: {

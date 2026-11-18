@@ -127,7 +127,7 @@ describe('LmStudioProvider', () => {
       await serve((_req, res) => send(res, 400, { error: { message: 'Model not loaded' } })),
     )
     await expect(p.complete({ system: 's', prompt: 'p', model: 'm' })).rejects.toThrow(
-      'LM Studio returned an error (400): Model not loaded',
+      'LM Studio couldn’t answer (error 400: Model not loaded). Check it’s running with a model loaded, then try again.',
     )
   })
 
@@ -208,7 +208,7 @@ describe('OllamaProvider', () => {
   it("surfaces Ollama's error string", async () => {
     const p = new OllamaProvider(await serve((_req, res) => send(res, 404, { error: "model 'x' not found" })))
     await expect(p.complete({ system: 's', prompt: 'p', model: 'x' })).rejects.toThrow(
-      "Ollama returned an error (404): model 'x' not found",
+      "Ollama couldn’t answer (error 404: model 'x' not found). Check it’s running with a model loaded, then try again.",
     )
   })
 })

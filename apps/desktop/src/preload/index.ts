@@ -80,6 +80,7 @@ const api: OrdoApi = {
     info: () => ipcRenderer.invoke(ASSISTANT_IPC.info),
     ask: (input) => ipcRenderer.invoke(ASSISTANT_IPC.ask, input),
     confirm: (input) => ipcRenderer.invoke(ASSISTANT_IPC.confirm, input),
+    setCloudConsent: (input) => ipcRenderer.invoke(ASSISTANT_IPC.consent, input),
     stop: () => ipcRenderer.invoke(ASSISTANT_IPC.stop),
     clear: () => ipcRenderer.invoke(ASSISTANT_IPC.clear),
     onEvent: (listener) => {

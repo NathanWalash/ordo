@@ -1,36 +1,70 @@
-import { ipcMain, type WebContents } from 'electron'
-import { providerInfo } from '@ordo/ai'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { app, ipcMain, type WebContents } from 'electron'
+import { z } from 'zod'
+import { AiError, PROVIDER_IDS, providerInfo } from '@ordo/ai'
 import {
   ASSISTANT_IPC,
-  ASSISTANT_PAGES,
   AskInputSchema,
+  AssistantPageSchema,
+  CloudConsentInputSchema,
   ConfirmInputSchema,
   type AskOutcome,
   type AssistantEvent,
   type AssistantInfo,
-  type AssistantPage,
 } from '@ordo/shared'
 import { aiSettings, resolveModel, usableProvider } from '../ai'
+import { clean } from '../headless/format'
 import { mainServices } from '../headless/services'
-import { runAssistant } from './loop'
+import { runAssistant, tidy } from './loop'
 import type { Turn } from './prompt'
 
 /**
- * The in-app assistant's main-process side. The conversation lives in memory only: closing Ordo
- * or pressing Clear forgets it, and tool results are never kept past the question they answered.
+ * The in-app assistant's main-process side. The conversation lives in memory only: closing Ordo,
+ * reloading the window or pressing New conversation forgets it, and tool results are never kept
+ * past the question they answered.
  */
 
 /** Earlier questions and answers sent with each new question. */
-const MAX_HISTORY = 8
+export const MAX_HISTORY = 8
 const MAX_HISTORY_CHARS = 2000
+/** A card nobody answers counts as Cancel after this long. */
+export const CONFIRM_TIMEOUT_MS = 10 * 60_000
+
+/** What a cloud model sees through the assistant. Shown before the user agrees, and in docs/assistant.md. */
+export const CLOUD_SENDS =
+  'Your questions, and the Ordo data the assistant looks up to answer them: transactions with amounts and dates, ' +
+  'balances, bills, calendar events, sender names, addresses and subject lines, and your iCloud email address.'
 
 let history: Turn[] = []
 let running: AbortController | null = null
+/** The window that asked the current question: only it may answer its cards. */
+let owner: WebContents | null = null
 /** Bumped by Clear, so an answer that finishes afterwards isn't added back. */
 let generation = 0
 const pending = new Map<string, (approved: boolean) => void>()
 
 const cut = (s: string) => (s.length > MAX_HISTORY_CHARS ? `${s.slice(0, MAX_HISTORY_CHARS)}…` : s)
+
+// The assistant's own cloud consent, separate from AI sorting's: it sends far more.
+
+const ConsentFile = z.object({ cloudConsent: z.enum(PROVIDER_IDS).nullable() }).strict()
+const consentFile = () => join(app.getPath('userData'), 'assistant.json')
+
+function readConsent(): z.infer<typeof ConsentFile>['cloudConsent'] {
+  try {
+    return ConsentFile.parse(JSON.parse(readFileSync(consentFile(), 'utf8'))).cloudConsent
+  } catch {
+    return null
+  }
+}
+
+function writeConsent(value: z.infer<typeof ConsentFile>['cloudConsent']): void {
+  const file = consentFile()
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(`${file}.tmp`, `${JSON.stringify({ cloudConsent: value }, null, 2)}\n`)
+  renameSync(`${file}.tmp`, file)
+}
 
 /** "Wednesday 18 November 2026 (2026-11-18)", in local time. */
 export function today(now = new Date()): string {
@@ -45,10 +79,12 @@ export function today(now = new Date()): string {
 }
 
 export function info(): AssistantInfo {
+  const busy = running !== null
   const ai = aiSettings()
   if (ai.provider === 'none')
     return {
       ready: false,
+      busy,
       provider: 'none',
       label: null,
       model: null,
@@ -56,7 +92,7 @@ export function info(): AssistantInfo {
       message: 'Choose a model in Settings → AI to use the assistant.',
     }
   const p = providerInfo(ai.provider)
-  const base = { provider: ai.provider, label: p.label, model: ai.model, kind: p.kind }
+  const base = { busy, provider: ai.provider, label: p.label, model: ai.model, kind: p.kind }
   if (!usableProvider(ai))
     return {
       ...base,
@@ -67,14 +103,29 @@ export function info(): AssistantInfo {
     ...base,
     ready: true,
     ...(p.kind === 'cloud' && {
-      dataNotice:
-        `Your questions, and the Ordo data the assistant looks up to answer them (sender names and subject lines, ` +
-        `calendar events, transactions, bills and balances), go to ${p.vendor} under your own account.`,
+      cloud: { vendor: p.vendor ?? p.label, sends: CLOUD_SENDS, consent: readConsent() === ai.provider },
     }),
   }
 }
 
-export async function ask(raw: unknown, sender: WebContents): Promise<AskOutcome> {
+/** Agree, or stop agreeing, that the assistant may send Ordo data to the chosen cloud provider. */
+export function setCloudConsent(raw: unknown): AssistantInfo {
+  const parsed = CloudConsentInputSchema.safeParse(raw)
+  if (parsed.success) {
+    const ai = aiSettings()
+    if (!parsed.data.allow) writeConsent(null)
+    // Only for the provider in use, and only once the user agreed to it in Settings → AI.
+    else if (ai.provider !== 'none' && providerInfo(ai.provider).kind === 'cloud' && usableProvider(ai))
+      writeConsent(ai.provider)
+  }
+  return info()
+}
+
+interface AskOptions {
+  confirmTimeoutMs?: number
+}
+
+export async function ask(raw: unknown, sender: WebContents, options: AskOptions = {}): Promise<AskOutcome> {
   const parsed = AskInputSchema.safeParse(raw)
   if (!parsed.success)
     return { ok: false, reason: 'invalid', message: parsed.error.issues[0]?.message ?? 'Invalid question.' }
@@ -83,17 +134,48 @@ export async function ask(raw: unknown, sender: WebContents): Promise<AskOutcome
   const ai = aiSettings()
   const provider = usableProvider(ai)
   if (!provider) return { ok: false, reason: 'no-model', message: info().message ?? 'Choose a model first.' }
+  // A cloud model only gets Ordo data once the user agreed to it for the assistant.
+  if (provider.kind === 'cloud' && readConsent() !== ai.provider)
+    return {
+      ok: false,
+      reason: 'consent',
+      message: `The assistant needs your OK before it sends anything to ${providerInfo(provider.id).vendor}.`,
+    }
 
   const ctrl = (running = new AbortController())
+  owner = sender
   const started = generation
   const send = (e: AssistantEvent) => {
     if (!sender.isDestroyed()) sender.send(ASSISTANT_IPC.event, e)
   }
-  const page: AssistantPage =
-    parsed.data.page in ASSISTANT_PAGES ? (parsed.data.page as AssistantPage) : 'home'
+  // If the window goes away or reloads mid-question, stop, and forget what it can no longer show.
+  const gone = () => clear()
+  const navigated = (...args: unknown[]) => {
+    const details = args[0] as { isSameDocument?: boolean; isMainFrame?: boolean } | undefined
+    const sameDocument = details?.isSameDocument ?? args[2] === true
+    const mainFrame = details?.isMainFrame ?? args[3] !== false
+    if (!sameDocument && mainFrame) gone()
+  }
+  sender.once('destroyed', gone)
+  sender.once('render-process-gone', gone)
+  sender.on('did-start-navigation', navigated)
+  const page = AssistantPageSchema.catch('home').parse(parsed.data.page)
   try {
-    const model = await resolveModel(ai).catch(() => undefined)
-    const outcome = await runAssistant({
+    let model: string | undefined
+    try {
+      model = await resolveModel(ai)
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'failed',
+        message:
+          err instanceof AiError
+            ? clean(tidy(err.message), 300)
+            : 'Ordo couldn’t reach the model. Try again.',
+      }
+    }
+    const timeoutMs = options.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS
+    const { tainted, ...outcome } = await runAssistant({
       provider,
       model,
       services: mainServices(),
@@ -107,22 +189,41 @@ export async function ask(raw: unknown, sender: WebContents): Promise<AskOutcome
       confirm: (id) =>
         new Promise<boolean>((resolve) => {
           if (ctrl.signal.aborted) return resolve(false)
-          pending.set(id, resolve)
-          ctrl.signal.addEventListener('abort', () => resolve(false), { once: true })
+          const timer = setTimeout(() => resolve(false), timeoutMs)
+          pending.set(id, (yes) => {
+            clearTimeout(timer)
+            resolve(yes)
+          })
+          ctrl.signal.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer)
+              resolve(false)
+            },
+            { once: true },
+          )
         }).finally(() => pending.delete(id)),
     })
     if (outcome.ok && started === generation)
-      history = [...history, { user: cut(parsed.data.text), answer: cut(outcome.answer) }].slice(-MAX_HISTORY)
+      history = [...history, { user: cut(parsed.data.text), answer: cut(outcome.answer), tainted }].slice(
+        -MAX_HISTORY,
+      )
     return outcome
   } finally {
-    running = null
+    sender.removeListener('destroyed', gone)
+    sender.removeListener('render-process-gone', gone)
+    sender.removeListener('did-start-navigation', navigated)
+    if (running === ctrl) {
+      running = null
+      owner = null
+    }
   }
 }
 
-/** Answer a card. Only a card the current run is waiting on can be answered, and only once. */
-export function confirm(raw: unknown): void {
+/** Answer a card. Only the asking window, only a card the current run is waiting on, and only once. */
+export function confirm(raw: unknown, sender: WebContents): void {
   const parsed = ConfirmInputSchema.safeParse(raw)
-  if (!parsed.success) return
+  if (!parsed.success || sender !== owner) return
   const resolve = pending.get(parsed.data.id)
   pending.delete(parsed.data.id)
   resolve?.(parsed.data.approve)
@@ -132,16 +233,21 @@ export function stop(): void {
   running?.abort()
 }
 
+/** Stop anything running and forget the conversation. */
 export function clear(): void {
   stop()
   generation++
   history = []
 }
 
+/** For tests: the history the next question would carry. */
+export const currentHistory = (): readonly Turn[] => history
+
 export function registerAssistantIpc(): void {
   ipcMain.handle(ASSISTANT_IPC.info, () => info())
   ipcMain.handle(ASSISTANT_IPC.ask, (e, input: unknown) => ask(input, e.sender))
-  ipcMain.handle(ASSISTANT_IPC.confirm, (_e, input: unknown) => confirm(input))
+  ipcMain.handle(ASSISTANT_IPC.confirm, (e, input: unknown) => confirm(input, e.sender))
+  ipcMain.handle(ASSISTANT_IPC.consent, (_e, input: unknown) => setCloudConsent(input))
   ipcMain.handle(ASSISTANT_IPC.stop, () => stop())
   ipcMain.handle(ASSISTANT_IPC.clear, () => clear())
 }
