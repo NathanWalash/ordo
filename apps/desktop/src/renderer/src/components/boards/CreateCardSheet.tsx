@@ -20,7 +20,7 @@ export function CreateCardSheet({
   event: CalendarEvent
   calendarName?: string
   onClose: () => void
-  onCreated: (cardId: string) => void
+  onCreated: (cardId: string, boardName: string) => void
 }) {
   const api = window.ordo.boards
   const day = toISODate(event.start)
@@ -31,6 +31,8 @@ export function CreateCardSheet({
   const [title, setTitle] = useState(event.title)
   const [due, setDue] = useState(day)
   const [busy, setBusy] = useState(false)
+  // A board made for this card on an earlier try, so trying again doesn't make another.
+  const [madeBoard, setMadeBoard] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -60,7 +62,7 @@ export function CreateCardSheet({
 
   const create = async () => {
     setBusy(true)
-    let board = boardId
+    let board = boardId || madeBoard
     if (!board) {
       // No boards yet: make a simple one to put it on.
       const made = await api.createBoard({ name: 'To do', template: 'simple' })
@@ -69,6 +71,7 @@ export function CreateCardSheet({
         return setError(made.message)
       }
       board = made.value.id
+      setMadeBoard(board)
     }
     const r = await api.addCard({
       boardId: board,
@@ -88,7 +91,7 @@ export function CreateCardSheet({
       },
     })
     setBusy(false)
-    if (r.ok) onCreated(r.value.id)
+    if (r.ok) onCreated(r.value.id, (await api.list()).find((b) => b.id === board)?.name ?? 'Boards')
     else setError(r.message)
   }
 

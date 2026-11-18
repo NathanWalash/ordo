@@ -25,6 +25,7 @@ export function ArchivedSheet({
 }) {
   const api = window.ordo.boards
   const [cards, setCards] = useState<Card[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
   useEffect(() => {
     let live = true
@@ -56,7 +57,16 @@ export function ArchivedSheet({
         </>
       }
     >
-      {cards?.length === 0 ? (
+      {error && (
+        <p role="alert" className="text-[12px] text-danger">
+          {error}
+        </p>
+      )}
+      {cards === null ? (
+        <p className="py-6 text-center text-[13px] text-ink-2" role="status">
+          Loading…
+        </p>
+      ) : cards.length === 0 ? (
         <p className="py-6 text-center text-[13px] text-ink-2">
           Nothing archived. Archive cards you’re finished with to keep the board tidy without deleting them.
         </p>
@@ -76,7 +86,8 @@ export function ArchivedSheet({
               <Button
                 icon={<ArchiveRestore size={13} />}
                 onClick={async () => {
-                  await api.archiveCard({ id: c.id, archived: false })
+                  const r = await api.archiveCard({ id: c.id, archived: false })
+                  setError(r.ok ? null : r.message)
                   await after()
                 }}
               >
@@ -89,6 +100,7 @@ export function ArchivedSheet({
                 onClick={async () => {
                   const r = await api.deleteCard(c.id)
                   if (r.ok) onDeleted(c, r.value)
+                  setError(r.ok ? null : r.message)
                   await after()
                 }}
                 className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-danger"
@@ -144,7 +156,7 @@ export function LimitSheet({
       }
     >
       <TextField
-        label="Most cards"
+        label="Card limit"
         type="number"
         min={0}
         max={999}

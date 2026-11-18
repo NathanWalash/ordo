@@ -62,7 +62,7 @@ export function NewBoardSheet({
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1.5 text-[13px] font-semibold">Start from</legend>
         <div role="radiogroup" aria-label="Template" className="grid grid-cols-3 gap-2">
-          {TEMPLATES.map((t) => {
+          {TEMPLATES.map((t, i) => {
             const on = t.id === template
             return (
               <button
@@ -70,7 +70,21 @@ export function NewBoardSheet({
                 type="button"
                 role="radio"
                 aria-checked={on}
+                tabIndex={on ? 0 : -1}
                 onClick={() => setTemplate(t.id)}
+                onKeyDown={(e) => {
+                  // Arrow keys move the choice, like any radio group; Tab leaves it.
+                  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+                  if (!step) return
+                  e.preventDefault()
+                  const next = TEMPLATES[(i + step + TEMPLATES.length) % TEMPLATES.length]!
+                  setTemplate(next.id)
+                  const group = e.currentTarget.parentElement
+                  requestAnimationFrame(() =>
+                    group?.querySelector<HTMLElement>(`[data-template="${next.id}"]`)?.focus(),
+                  )
+                }}
+                data-template={t.id}
                 className={`flex flex-col gap-2 rounded-lg border p-2 text-left ${
                   on ? 'border-accent ring-1 ring-accent' : 'border-sep hover:bg-hover'
                 }`}
@@ -79,7 +93,7 @@ export function NewBoardSheet({
                   className="flex h-14 gap-[3px] overflow-hidden rounded-md bg-lane p-1.5"
                   aria-hidden="true"
                 >
-                  {t.columns.slice(0, 5).map((c, i) => (
+                  {t.columns.map((c, i) => (
                     <span key={c.name} className="flex flex-1 flex-col gap-[3px]">
                       <span className="h-[3px] rounded-full bg-ink-3/60" />
                       {Array.from({ length: Math.max(1, 3 - i) }, (_, j) => (

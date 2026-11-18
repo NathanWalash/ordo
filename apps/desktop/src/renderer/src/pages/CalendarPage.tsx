@@ -28,6 +28,7 @@ import { WeekView } from '../components/calendar/WeekView'
 import { firstDayOfWeek, toItems, viewTitle, type CalendarItem } from '../components/calendar/model'
 import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
 import { CreateCardSheet } from '../components/boards/CreateCardSheet'
+import { useToast } from '../components/boards/UndoToast'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
 interface Props {
@@ -352,7 +353,7 @@ function CalendarBrowser({
   const [overlays, setOverlays] = useState<CalendarOverlayItem[]>([])
   const [selected, setSelected] = useState<{ item: CalendarItem; anchor: DOMRect } | null>(null)
   const [creating, setCreating] = useState<Extract<CalendarItem, { type: 'event' }> | null>(null)
-  const [created, setCreated] = useState<string | null>(null)
+  const toast = useToast()
   const [overlayKey, setOverlayKey] = useState(0)
   const firstDay = useMemo(() => firstDayOfWeek(), [])
   const range = useMemo(() => visibleRange(view, cursor, firstDay), [view, cursor, firstDay])
@@ -365,12 +366,6 @@ function CalendarBrowser({
       live = false
     }
   }, [loadEvents, range, reloadKey, overlayKey])
-
-  useEffect(() => {
-    if (!created) return
-    const t = setTimeout(() => setCreated(null), 6000)
-    return () => clearTimeout(t)
-  }, [created])
 
   // Keep "today" right if the app stays open past midnight.
   useEffect(() => {
@@ -474,32 +469,21 @@ function CalendarBrowser({
           event={creating.event}
           calendarName={creating.calendar?.name}
           onClose={() => setCreating(null)}
-          onCreated={(id) => {
+          onCreated={(id, boardName) => {
             setCreating(null)
-            setCreated(id)
             setOverlayKey((k) => k + 1)
+            toast.show(`Added to ${boardName}`, {
+              action: {
+                label: 'Open',
+                onClick: () => {
+                  window.location.hash = `/boards?card=${encodeURIComponent(id)}`
+                },
+              },
+            })
           }}
         />
       )}
-      {created && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center">
-          <div
-            role="status"
-            className="glass-panel pointer-events-auto flex h-10 items-center gap-3 rounded-xl pr-1.5 pl-4 text-[13px]"
-          >
-            Card added to Boards.
-            <button
-              type="button"
-              onClick={() => {
-                window.location.hash = `/boards?card=${encodeURIComponent(created)}`
-              }}
-              className="h-7 rounded-md px-2 font-medium text-accent hover:bg-hover"
-            >
-              Open
-            </button>
-          </div>
-        </div>
-      )}
+      {toast.node}
     </div>
   )
 }

@@ -47,6 +47,9 @@ describe('Boards IPC contract', () => {
     const ok = (target: unknown) => LinkInputSchema.safeParse({ cardId: 'c', target, title: 'x' }).success
     expect(ok({ kind: 'event', calendarId: 'cal', uid: 'u', start: '2026-11-20T09:00:00.000Z' })).toBe(true)
     expect(ok({ kind: 'event', calendarId: 'cal', uid: 'u', start: 'tomorrow' })).toBe(false)
+    // An all-day occurrence is named by its day.
+    expect(ok({ kind: 'event', calendarId: 'cal', uid: 'u', start: '2026-11-20' })).toBe(true)
+    expect(ok({ kind: 'event', calendarId: 'cal', uid: 'u', start: '2026-02-30' })).toBe(false)
     expect(ok({ kind: 'email', mailbox: 'INBOX', uid: 4 })).toBe(true)
     expect(ok({ kind: 'email', mailbox: 'INBOX', uid: 0 })).toBe(false)
     expect(ok({ kind: 'bill', billId: 'b' })).toBe(true)

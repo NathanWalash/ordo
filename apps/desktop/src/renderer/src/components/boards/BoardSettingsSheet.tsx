@@ -61,8 +61,10 @@ export function BoardSettingsSheet({ view, onClose, onChanged, offerUndo }: Prop
 
   return (
     <Sheet
-      title={`${view.board.name}: labels and fields`}
+      title="Labels and fields"
+      subtitle={view.board.name}
       icon={<Settings2 size={22} />}
+      initialFocus={tab === 'labels' ? '[aria-label="New label name"]' : undefined}
       width={560}
       onClose={onClose}
       onSubmit={onClose}
@@ -131,7 +133,7 @@ function LabelsEditor({
   return (
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col divide-y divide-sep rounded-lg border border-sep" aria-label="Labels">
-        {view.labels.length === 0 && <li className="px-3 py-2.5 text-[12px] text-ink-3">No labels yet.</li>}
+        {view.labels.length === 0 && <li className="px-3 py-2.5 text-[12px] text-ink-2">No labels yet.</li>}
         {view.labels.map((l) => (
           <li key={l.id} className="flex items-center gap-2 px-2 py-1.5">
             <ColorButton
@@ -206,7 +208,7 @@ function FieldsEditor({
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col divide-y divide-sep rounded-lg border border-sep" aria-label="Fields">
         {view.fields.length === 0 && (
-          <li className="px-3 py-2.5 text-[12px] text-ink-3">
+          <li className="px-3 py-2.5 text-[12px] text-ink-2">
             No fields yet. Fields add your own details to every card, like a priority or an owner.
           </li>
         )}
@@ -220,7 +222,7 @@ function FieldsEditor({
                 {FIELD_ICONS[f.type]}
               </span>
               <InlineText value={f.name} label="Field name" onSave={(v) => void save(f, { name: v })} />
-              <span className="w-[72px] shrink-0 text-[12px] text-ink-3">{FIELD_TYPE_LABELS[f.type]}</span>
+              <span className="w-[72px] shrink-0 text-[12px] text-ink-2">{FIELD_TYPE_LABELS[f.type]}</span>
               <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-ink-2">
                 On card
                 <Switch
@@ -239,24 +241,16 @@ function FieldsEditor({
               />
             </div>
             {f.type === 'select' && (
-              <OptionsEditor field={f} onSave={(options) => void save(f, { options })} />
+              <OptionsEditor
+                field={f}
+                used={(optionId) => view.cards.filter((c) => c.fields[f.id] === optionId).length}
+                onSave={(options) => void save(f, { options })}
+              />
             )}
           </li>
         ))}
       </ul>
       <div className="flex items-center gap-2">
-        <select
-          value={type}
-          aria-label="New field type"
-          onChange={(e) => setType(e.target.value as FieldType)}
-          className="h-7 rounded-md border border-sep bg-field px-2 text-[13px] text-ink shadow-[0_1px_1px_rgb(0_0_0/0.06)] outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-        >
-          {FIELD_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {FIELD_TYPE_LABELS[t]}
-            </option>
-          ))}
-        </select>
         <input
           value={name}
           maxLength={40}
@@ -271,6 +265,18 @@ function FieldsEditor({
           }}
           className="h-7 min-w-0 flex-1 rounded-md border border-sep bg-field px-2 text-[13px] outline-none select-text placeholder:text-ink-3 focus:border-accent focus:ring-1 focus:ring-accent"
         />
+        <select
+          value={type}
+          aria-label="New field type"
+          onChange={(e) => setType(e.target.value as FieldType)}
+          className="h-7 rounded-md border border-sep bg-field px-2 text-[13px] text-ink shadow-[0_1px_1px_rgb(0_0_0/0.06)] outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        >
+          {FIELD_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {FIELD_TYPE_LABELS[t]}
+            </option>
+          ))}
+        </select>
         <Button icon={<Plus size={13} />} onClick={() => void add()} disabled={!name.trim()}>
           Add field
         </Button>
@@ -282,8 +288,19 @@ function FieldsEditor({
 /** A select option; new ones have no id yet. */
 type NewOption = { id?: string; name: string; color: LabelColor }
 
-function OptionsEditor({ field, onSave }: { field: FieldDef; onSave: (options: NewOption[]) => void }) {
+function OptionsEditor({
+  field,
+  used,
+  onSave,
+}: {
+  field: FieldDef
+  /** How many cards have this option chosen. */
+  used: (optionId: string) => number
+  onSave: (options: NewOption[]) => void
+}) {
   const [name, setName] = useState('')
+  const [removing, setRemoving] = useState<{ id: string; name: string; cards: number } | null>(null)
+  const remove = (id: string) => onSave(field.options.filter((x) => x.id !== id))
   const add = () => {
     if (!name.trim()) return
     const used = new Set(field.options.map((o) => o.color))
@@ -296,7 +313,7 @@ function OptionsEditor({ field, onSave }: { field: FieldDef; onSave: (options: N
       {field.options.map((o) => (
         <span
           key={o.id}
-          className="inline-flex h-6 items-center gap-1 rounded-md border border-sep pr-0.5 pl-1 text-[12px]"
+          className="inline-flex h-7 items-center gap-0.5 rounded-md border border-sep pr-0.5 pl-0.5 text-[12px]"
         >
           <ColorButton
             small
@@ -308,8 +325,13 @@ function OptionsEditor({ field, onSave }: { field: FieldDef; onSave: (options: N
           <button
             type="button"
             aria-label={`Remove ${o.name}`}
-            onClick={() => onSave(field.options.filter((x) => x.id !== o.id))}
-            className="flex size-4 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink"
+            onClick={() => {
+              // Cards using it lose it, so ask first.
+              const cards = used(o.id)
+              if (cards) setRemoving({ id: o.id, name: o.name, cards })
+              else remove(o.id)
+            }}
+            className="flex size-6 items-center justify-center rounded text-ink-2 hover:bg-hover hover:text-ink"
           >
             <X size={11} />
           </button>
@@ -328,8 +350,30 @@ function OptionsEditor({ field, onSave }: { field: FieldDef; onSave: (options: N
           }
         }}
         onBlur={add}
-        className="h-6 w-28 rounded-md border border-dashed border-sep bg-transparent px-1.5 text-[12px] outline-none select-text placeholder:text-ink-3 focus:border-accent"
+        className="h-7 w-28 rounded-md border border-dashed border-sep bg-transparent px-1.5 text-[12px] outline-none select-text placeholder:text-ink-3 focus:border-accent"
       />
+      {removing && (
+        <div
+          role="alert"
+          className="flex w-full items-center gap-2 rounded-md bg-hover px-2.5 py-1.5 text-[12px]"
+        >
+          <span className="flex-1">
+            {removing.cards === 1 ? '1 card uses' : `${removing.cards} cards use`} {removing.name}. Remove it
+            from
+            {removing.cards === 1 ? ' it' : ' them'}?
+          </span>
+          <Button onClick={() => setRemoving(null)}>Keep</Button>
+          <Button
+            className="!bg-danger !text-white"
+            onClick={() => {
+              remove(removing.id)
+              setRemoving(null)
+            }}
+          >
+            Remove
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -402,7 +446,7 @@ export function ColorButton({
         aria-label={`${label}: ${LABEL_COLOR_NAMES[color]}`}
         aria-haspopup="menu"
         onClick={(e) => setAnchor(e.currentTarget.getBoundingClientRect())}
-        className={`flex shrink-0 items-center justify-center rounded-md hover:bg-hover ${small ? 'size-4' : 'size-7'}`}
+        className={`flex shrink-0 items-center justify-center rounded-md hover:bg-hover ${small ? 'size-6' : 'size-7'}`}
       >
         <span
           className={`rounded-full ring-1 ring-black/10 ring-inset ${small ? 'size-2.5' : 'size-3.5'}`}

@@ -159,6 +159,55 @@ describe('boards service', () => {
     expect(boards.dueDates('nonsense')).toEqual([])
   })
 
+  it.each(['Pacific/Auckland', 'America/Los_Angeles'])(
+    'gives a range its inclusive last day and an exclusive end, leaving done cards out, in %s',
+    async (tz) => {
+      const zone = process.env['TZ']
+      process.env['TZ'] = tz
+      try {
+        const board = ok(await boards.createBoard({ name: `Range ${tz}`, template: 'simple' }))
+        const [todo, , done] = boards.board(board.id)!.columns
+        ok(
+          await boards.addCard({
+            boardId: board.id,
+            columnId: todo!.id,
+            title: 'Trip',
+            start: '2026-03-27',
+            due: '2026-03-30',
+          }),
+        )
+        ok(
+          await boards.addCard({
+            boardId: board.id,
+            columnId: done!.id,
+            title: 'Finished',
+            due: '2026-03-28',
+          }),
+        )
+        const day = (d: number) => new Date(2026, 2, d)
+        const titles = (start: number, end: number) =>
+          boards
+            .dueDates({ start: day(start), end: day(end) })
+            .filter((i) => i.detail === `Range ${tz}`)
+            .map((i) => i.title)
+        const [trip] = boards
+          .dueDates({ start: day(20), end: day(40) })
+          .filter((i) => i.detail === `Range ${tz}`)
+        // Whole local days, across the clocks changing.
+        expect([trip!.date.getDate(), trip!.date.getHours()]).toEqual([27, 0])
+        expect([trip!.until!.getDate(), trip!.until!.getHours()]).toEqual([30, 0])
+        expect(titles(30, 31)).toEqual(['Trip']) // its last day counts
+        expect(titles(31, 40)).toEqual([]) // the day after doesn't
+        expect(titles(20, 27)).toEqual([]) // the range's end is exclusive
+        expect(titles(20, 28)).toEqual(['Trip'])
+        ok(await boards.deleteBoard(board.id))
+      } finally {
+        if (zone === undefined) delete process.env['TZ']
+        else process.env['TZ'] = zone
+      }
+    },
+  )
+
   it('links to calendar events and other cards, and resolves them again', async () => {
     const day = addDays(toISODate(), 5).replace(/-/g, '')
     const ics = [

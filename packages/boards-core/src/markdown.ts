@@ -237,6 +237,36 @@ export function parseMarkdown(source: string): Block[] {
   return blocks
 }
 
+const bareHost = (host: string) =>
+  host
+    .toLowerCase()
+    .replace(/^www\./, '')
+    .replace(/\.$/, '')
+
+/**
+ * The host to show next to a link whose words could mislead: when they look like a web address
+ * on another host than the link goes to, or when the link's host is an international (punycode)
+ * name that can imitate another. Null when the link's text is honest enough on its own.
+ */
+export function linkHostNote(href: string, text: string): string | null {
+  let host: string
+  try {
+    host = new URL(href).hostname
+  } catch {
+    return null
+  }
+  if (host.split('.').some((part) => part.startsWith('xn--'))) return host
+  const shown = /^\s*(?:[a-z][a-z0-9+.-]*:\/\/)?([^\s/?#:@]+\.[^\s/?#:@]{2,})/i.exec(text)?.[1]
+  if (!shown) return null
+  let shownHost: string
+  try {
+    shownHost = new URL(`https://${shown}`).hostname
+  } catch {
+    return host
+  }
+  return bareHost(shownHost) === bareHost(host) ? null : host
+}
+
 /** The notes as plain text, markup removed: for search and the AI prompt. */
 export function plainText(blocks: Block[]): string {
   const inline = (xs: Inline[]): string =>

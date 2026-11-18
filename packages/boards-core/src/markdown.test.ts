@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseInline, parseMarkdown, plainText } from './markdown'
+import { linkHostNote, parseInline, parseMarkdown, plainText } from './markdown'
 
 describe('parseInline', () => {
   it('reads bold, italic, code and links', () => {
@@ -122,6 +122,26 @@ describe('parseMarkdown', () => {
       },
     ])
     expect(parseMarkdown('```\ncode')).toEqual([{ type: 'code', text: 'code' }])
+  })
+})
+
+describe('linkHostNote', () => {
+  it('names the real host when the words point somewhere else', () => {
+    expect(linkHostNote('https://evil.example/login', 'https://bank.example')).toBe('evil.example')
+    expect(linkHostNote('https://evil.example/', 'bank.example/login')).toBe('evil.example')
+    expect(linkHostNote('https://evil.example/', 'www.bank.example')).toBe('evil.example')
+  })
+
+  it('always names an international host, which can imitate another', () => {
+    expect(linkHostNote('https://xn--pple-43d.example/', 'Apple')).toBe('xn--pple-43d.example')
+    expect(linkHostNote('https://аpple.example/', 'Apple')).toMatch(/^xn--/)
+  })
+
+  it('stays quiet when the words are plain or match the host', () => {
+    expect(linkHostNote('https://plumb.example/x', 'their site')).toBeNull()
+    expect(linkHostNote('https://www.bank.example/', 'https://bank.example')).toBeNull()
+    expect(linkHostNote('https://bank.example/a', 'BANK.example/b')).toBeNull()
+    expect(linkHostNote('not a url', 'x.example')).toBeNull()
   })
 })
 

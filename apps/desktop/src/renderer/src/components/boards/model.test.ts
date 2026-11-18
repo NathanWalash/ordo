@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { Column } from '@ordo/boards-core'
 import {
   byColumn,
+  chipStyle,
   datesLabel,
+  suggestTitle,
+  toneStyle,
   dayLabel,
   focusTarget,
   fullIndex,
@@ -106,5 +109,42 @@ describe('dates', () => {
     expect(datesLabel({ start: '2026-11-18', due: '2026-11-20' }, today)).toBe('18 – 20 Nov')
     expect(datesLabel({ start: '2026-11-28', due: '2026-12-02' }, today)).toBe('28 Nov – 2 Dec')
     expect(datesLabel({ start: null, due: null }, today)).toBeNull()
+  })
+})
+
+describe('colours', () => {
+  it('mixes coloured text towards the ink by a per-theme amount, for contrast', () => {
+    expect(chipStyle('red').color).toBe('color-mix(in srgb, var(--label-red) var(--chip-mix), var(--ink))')
+    expect(toneStyle('var(--danger)').color).toBe(
+      'color-mix(in srgb, var(--danger) var(--chip-mix), var(--ink))',
+    )
+    expect(toneStyle('var(--danger)', 12).background).toContain('12%')
+  })
+})
+
+describe('suggestTitle', () => {
+  const local = { label: 'LM Studio', kind: 'local' as const }
+  const cloud = { label: 'Claude Code CLI', kind: 'cloud' as const, vendor: 'Anthropic' }
+
+  it('says what goes where before anything is sent', () => {
+    expect(suggestTitle({ ready: true, provider: local, sends: ['event', 'card'] })).toBe(
+      'Asks LM Studio on this computer about this card, with related upcoming events and other cards.',
+    )
+    expect(suggestTitle({ ready: true, provider: cloud, sends: ['event', 'bill', 'email', 'card'] })).toBe(
+      'Sends this card, with related upcoming events, bills, email subjects and other cards, to Anthropic through Claude Code CLI.',
+    )
+  })
+
+  it("says why it can't run", () => {
+    expect(
+      suggestTitle({
+        ready: false,
+        error: 'off',
+        message: 'Turn on AI for Boards in Settings → AI first.',
+        provider: local,
+        sends: [],
+      }),
+    ).toBe('Turn on AI for Boards in Settings → AI first.')
+    expect(suggestTitle(null)).toMatch(/Suggest/)
   })
 })

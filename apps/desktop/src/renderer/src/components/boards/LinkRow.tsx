@@ -62,7 +62,7 @@ export function LinkRow({
     </>
   )
   return (
-    <li className="group flex items-center gap-1 rounded-md hover:bg-hover">
+    <li className={`group flex items-center gap-1 rounded-md hover:bg-hover ${actions ? 'pr-2' : ''}`}>
       {onOpen ? (
         <button
           type="button"

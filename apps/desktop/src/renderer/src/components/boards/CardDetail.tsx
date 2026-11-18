@@ -47,7 +47,7 @@ import { LinkPicker } from './LinkPicker'
 import { LinkRow } from './LinkRow'
 import { FIELD_ICONS } from './BoardSettingsSheet'
 import { Suggestions, flatten, suggestionKey, type Suggestion } from './Suggestions'
-import { chipStyle, labelColor, reorder } from './model'
+import { KIND_WORDS, chipStyle, labelColor, listOf, reorder, suggestTitle } from './model'
 
 interface Props {
   cardId: string
@@ -62,28 +62,6 @@ interface Props {
   /** Open the board's labels and fields. */
   onOpenBoardSettings: () => void
   announce: (message: string) => void
-}
-
-const KIND_WORDS: Record<SuggestInfo['sends'][number], string> = {
-  event: 'upcoming events',
-  bill: 'bills',
-  email: 'email subjects',
-  card: 'other cards',
-}
-
-/** "events, bills and other cards" */
-const listOf = (words: string[]) =>
-  words.length < 2 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
-
-/** What pressing Suggest will do, said before anything is sent. */
-export function suggestTitle(info: SuggestInfo | null): string {
-  if (!info) return 'Suggest a due date, steps, labels and links'
-  if (!info.ready) return info.message
-  const related = listOf(info.sends.map((k) => KIND_WORDS[k]))
-  const p = info.provider!
-  return p.kind === 'local'
-    ? `Asks ${p.label} on this computer about this card, with related ${related}.`
-    : `Sends this card, with related ${related}, to ${p.vendor ?? p.label} through ${p.label}.`
 }
 
 const cloudKey = (label: string) => `ordo.boards.suggest-cloud-ok.${label}`

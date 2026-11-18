@@ -24,7 +24,15 @@ export {
   type FieldCheck,
 } from './fields'
 export { TEMPLATES, template, type BoardTemplate, type TemplateField } from './templates'
-export { MAX_NOTES, parseInline, parseMarkdown, plainText, type Block, type Inline } from './markdown'
+export {
+  MAX_NOTES,
+  linkHostNote,
+  parseInline,
+  parseMarkdown,
+  plainText,
+  type Block,
+  type Inline,
+} from './markdown'
 export {
   DUE_FILTERS,
   dueState,

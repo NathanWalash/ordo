@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Search } from 'lucide-react'
 import type { ISODate, LinkCandidate, LinkKind } from '@ordo/boards-core'
@@ -43,6 +43,26 @@ export function LinkPicker({
   const [results, setResults] = useState<LinkCandidate[] | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // Focus goes back to "Link…" when the picker closes.
+  const opener = useRef<Element | null>(document.activeElement)
+  useEffect(() => {
+    const back = opener.current
+    return () => {
+      if (back instanceof HTMLElement && back.isConnected) back.focus()
+    }
+  }, [])
+
+  const rows = () => [...(list.current?.querySelectorAll<HTMLElement>('[data-result]') ?? [])]
+  /** ↑ and ↓ move through the results; ↑ from the first goes back to the search field. */
+  const onListKey = (e: ReactKeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const all = rows()
+    const i = all.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'ArrowUp' && i <= 0) return input.current?.focus()
+    all[Math.min(all.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))]?.focus()
+  }
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -108,21 +128,46 @@ export function LinkPicker({
           }}
         />
         <label className="relative flex items-center">
-          <Search size={13} className="pointer-events-none absolute left-2 text-ink-3" aria-hidden="true" />
+          <Search size={13} className="pointer-events-none absolute left-2 text-ink-2" aria-hidden="true" />
           <input
             ref={input}
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setResults(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                rows()[0]?.focus()
+              }
+              // Return picks the first result.
+              if (e.key === 'Enter' && results?.[0]) {
+                e.preventDefault()
+                onPick(results[0])
+              }
+            }}
             placeholder={`Search ${KINDS.find((k) => k.value === kind)!.label.toLowerCase()}`}
             aria-label="Search"
             className="h-7 w-full rounded-md border border-sep bg-field pr-2 pl-7 text-[13px] outline-none select-text placeholder:text-ink-3 focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </label>
       </div>
-      <ul className="min-h-0 flex-1 overflow-y-auto p-1.5" aria-label="Results" aria-busy={results === null}>
+      <ul
+        ref={list}
+        onKeyDown={onListKey}
+        className="min-h-0 flex-1 overflow-y-auto p-1.5"
+        aria-label="Results"
+        aria-busy={results === null}
+      >
+        {results === null && (
+          <li className="px-3 py-6 text-center text-[12px] text-ink-2" role="status">
+            Searching…
+          </li>
+        )}
         {results?.length === 0 && (
-          <li className="px-3 py-6 text-center text-[12px] leading-relaxed text-ink-3">
+          <li className="px-3 py-6 text-center text-[12px] leading-relaxed text-ink-2">
             {query ? 'Nothing matches.' : EMPTY[kind]}
           </li>
         )}
@@ -130,6 +175,8 @@ export function LinkPicker({
           <li key={c.key}>
             <button
               type="button"
+              data-result
+              tabIndex={-1}
               onClick={() => onPick(c)}
               className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-hover focus-visible:bg-hover"
             >
@@ -139,7 +186,7 @@ export function LinkPicker({
                 {c.detail && <span className="block truncate text-[11px] text-ink-2">{c.detail}</span>}
               </span>
               {c.date && (
-                <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">
+                <span className="shrink-0 text-[11px] text-ink-2 tabular-nums">
                   {dayLabel(c.date, today)}
                 </span>
               )}

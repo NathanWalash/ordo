@@ -1,6 +1,13 @@
 import { Fragment, useMemo, type ReactNode } from 'react'
 import { Check } from 'lucide-react'
-import { parseMarkdown, type Inline } from '@ordo/boards-core'
+import { linkHostNote, parseMarkdown, type Inline } from '@ordo/boards-core'
+
+const textOf = (nodes: Inline[]): string =>
+  nodes
+    .map((n) =>
+      n.type === 'text' || n.type === 'code' ? n.text : n.type === 'br' ? ' ' : textOf(n.children),
+    )
+    .join('')
 
 /**
  * Card notes, drawn from the parsed tree element by element. No HTML is ever inserted, so notes
@@ -13,7 +20,7 @@ export function Markdown({ source }: { source: string }) {
       {blocks.map((b, i) => {
         switch (b.type) {
           case 'heading': {
-            const size = b.level === 1 ? 'text-[16px]' : b.level === 2 ? 'text-[14px]' : 'text-[13px]'
+            const size = b.level === 1 ? 'text-[15px]' : 'text-[13px]'
             return (
               <p key={i} role="heading" aria-level={b.level + 2} className={`${size} font-semibold`}>
                 <Inlines nodes={b.children} />
@@ -52,21 +59,19 @@ export function Markdown({ source }: { source: string }) {
                   <li key={j} className={tasks ? 'flex items-start gap-2' : ''}>
                     {tasks && it.checked === null && (
                       <span className="flex size-3.5 shrink-0 items-center justify-center" aria-hidden="true">
-                        <span className="mt-[3px] size-1 rounded-full bg-ink-2" />
+                        <span className="mt-[8px] size-1 rounded-full bg-ink-2" />
                       </span>
                     )}
                     {it.checked !== null && (
                       <span
                         role="img"
                         aria-label={it.checked ? 'Done' : 'Not done'}
-                        className={`mt-[3px] flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border ${
-                          it.checked ? 'border-accent bg-accent text-white' : 'border-ink-3'
-                        }`}
+                        className="mt-[3px] flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-ink-2 text-ink-2"
                       >
                         {it.checked && <Check size={10} strokeWidth={3} />}
                       </span>
                     )}
-                    <span className={it.checked ? 'text-ink-3 line-through' : ''}>
+                    <span className={it.checked ? 'text-ink-2 line-through' : ''}>
                       <Inlines nodes={it.children} />
                     </span>
                   </li>
@@ -105,21 +110,27 @@ function Inlines({ nodes }: { nodes: Inline[] }): ReactNode {
             <Inlines nodes={n.children} />
           </em>
         )
-      case 'link':
+      case 'link': {
+        // Words that look like another address than the link's, or an international host, get the
+        // real host beside them.
+        const note = linkHostNote(n.href, textOf(n.children))
         // The main process only ever opens https links, in the browser.
         return (
-          <a
-            key={i}
-            href={n.href}
-            target="_blank"
-            rel="noreferrer noopener"
-            title={n.href}
-            className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Inlines nodes={n.children} />
-          </a>
+          <Fragment key={i}>
+            <a
+              href={n.href}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={n.href}
+              className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Inlines nodes={n.children} />
+            </a>
+            {note && <span className="text-[12px] text-ink-2"> ({note})</span>}
+          </Fragment>
         )
+      }
     }
   })
 }

@@ -44,9 +44,8 @@ export function BoardList({ boards, selected, onSelect, onNew, onRename, onMove,
   }
 
   return (
-    <aside className="flex w-[196px] shrink-0 flex-col border-r border-sep" aria-label="Boards">
+    <aside className="flex w-[180px] shrink-0 flex-col border-r border-sep" aria-label="Boards">
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        <h2 className="px-1 pb-1 text-[11px] font-semibold text-ink-3">Boards</h2>
         <ul ref={list} className="flex flex-col gap-px">
           {boards.map((b, i) => (
             <li key={b.id} className="group relative">
@@ -75,6 +74,7 @@ export function BoardList({ boards, selected, onSelect, onNew, onRename, onMove,
                     setMenu({ board: b, anchor: { x: e.clientX, y: e.clientY } })
                   }}
                   aria-current={b.id === selected ? 'page' : undefined}
+                  aria-label={`${b.name}, ${b.cards} ${b.cards === 1 ? 'card' : 'cards'}${b.overdue ? `, ${b.overdue} overdue` : ''}`}
                   className={`flex h-7 w-full items-center gap-2 rounded-md pr-7 pl-1.5 text-left text-[13px] ${
                     b.id === selected ? 'bg-selected' : 'hover:bg-hover'
                   }`}
@@ -84,18 +84,13 @@ export function BoardList({ boards, selected, onSelect, onNew, onRename, onMove,
                     className={`shrink-0 ${b.id === selected ? 'text-accent' : 'text-ink-2'}`}
                   />
                   <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                  {b.overdue > 0 ? (
-                    <span
-                      className="shrink-0 text-[11px] font-medium text-danger tabular-nums group-hover:invisible"
-                      title={`${b.overdue} overdue`}
-                    >
-                      {b.overdue}
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-[11px] text-ink-3 tabular-nums group-hover:invisible">
-                      {b.cards}
-                    </span>
-                  )}
+                  <span
+                    className="flex shrink-0 items-center gap-1.5 text-[11px] text-ink-2 tabular-nums group-hover:invisible"
+                    title={b.overdue ? `${b.overdue} overdue` : undefined}
+                  >
+                    {b.overdue > 0 && <span className="size-1.5 rounded-full bg-danger" />}
+                    {b.cards}
+                  </span>
                 </button>
               )}
               {renaming !== b.id && (
@@ -104,7 +99,7 @@ export function BoardList({ boards, selected, onSelect, onNew, onRename, onMove,
                   aria-label={`${b.name} options`}
                   title="Options"
                   onClick={(e) => setMenu({ board: b, anchor: e.currentTarget.getBoundingClientRect() })}
-                  className="absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded text-ink-3 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-black/5 hover:text-ink focus-visible:opacity-100 dark:hover:bg-white/10"
+                  className="absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded text-ink-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-black/5 hover:text-ink focus-visible:opacity-100 dark:hover:bg-white/10"
                 >
                   <Ellipsis size={13} />
                 </button>
@@ -121,7 +116,7 @@ export function BoardList({ boards, selected, onSelect, onNew, onRename, onMove,
           New board…
         </button>
       </div>
-      <div className="border-t border-sep px-4 py-2.5 text-[11px] leading-snug text-ink-3">
+      <div className="border-t border-sep px-4 py-2.5 text-[11px] leading-snug text-ink-2">
         Stored on this computer
       </div>
       {menu && (

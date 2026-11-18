@@ -111,7 +111,7 @@ export function Suggestions({
                     Due <strong className="font-semibold">{dayLabel(s.date, today)}</strong>
                     {s.basedOn && <span className="text-ink-2"> · from {s.basedOn.title}</span>}
                   </span>
-                  {actions(s, `due date ${s.date}`)}
+                  {actions(s, `due date ${dayLabel(s.date, today)}`)}
                 </li>
               )
             if (s.kind === 'step')
@@ -159,7 +159,7 @@ export function Suggestions({
           })}
         </ul>
       )}
-      <p className="border-t border-[color-mix(in_srgb,var(--label-purple)_18%,transparent)] px-3 py-1.5 text-[11px] text-ink-3">
+      <p className="border-t border-[color-mix(in_srgb,var(--label-purple)_18%,transparent)] px-3 py-1.5 text-[11px] text-ink-2">
         {provider.kind === 'local'
           ? `Asked ${provider.label} on this computer about this card and ${sent} related ${sent === 1 ? 'item' : 'items'}.`
           : `Sent this card and ${sent} related ${sent === 1 ? 'title' : 'titles'} to ${provider.vendor ?? provider.label}, under your own account.`}{' '}
