@@ -62,8 +62,12 @@ export function parseCsv(text: string): string[][] {
         i++
       } else if (c === '"') quoted = false
       else cell += c
-    } else if (c === '"') quoted = true
-    else if (c === delimiter) {
+    } else if (c === '"' && cell.trim() === '') {
+      // A quote only opens a quoted field at its start (RFC 4180). One inside a field, like
+      // `ARGOS 32" TV`, is just a character; treating it as a quote swallowed the rows after it.
+      quoted = true
+      cell = ''
+    } else if (c === delimiter) {
       row.push(cell)
       cell = ''
     } else if (c === '\n' || c === '\r') {
@@ -82,7 +86,12 @@ export function parseCsv(text: string): string[][] {
 }
 
 function guessDelimiter(src: string): string {
-  const head = src.split(/\r?\n/).slice(0, 10).join('\n')
+  // Commas inside quoted descriptions ("REWE, BERLIN, DE") don't count.
+  const head = src
+    .split(/\r?\n/)
+    .slice(0, 10)
+    .join('\n')
+    .replace(/"[^"]*"/g, '')
   const count = (d: string) => head.split(d).length - 1
   return [',', ';', '\t'].reduce((best, d) => (count(d) > count(best) ? d : best), ',')
 }
