@@ -1,5 +1,6 @@
 import {
   addDays,
+  sameDay,
   startOfDay,
   type CalendarEvent,
   type CalendarView,
@@ -73,6 +74,18 @@ export const ink = (color: string) => `color-mix(in srgb, ${color} 62%, var(--in
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 export const formatTime = (d: Date) => timeFormat.format(d)
+
+/**
+ * What the agenda shows for an item under `day`: its start time on its first day, "Until" its
+ * end on its last, and "All day" for an all-day item or the days in between.
+ */
+export function agendaTime(item: { start: Date; end: Date; allDay: boolean }, day: Date): string {
+  if (item.allDay) return 'All day'
+  if (sameDay(item.start, day)) return formatTime(item.start)
+  // The end is exclusive: an event that ends at midnight ends on the day before.
+  if (sameDay(new Date(item.end.getTime() - 1), day)) return `Until ${formatTime(item.end)}`
+  return 'All day'
+}
 
 /** Short time for dense cells: "9:30" or "18:00", without the AM/PM where the locale allows. */
 export function formatTimeShort(d: Date): string {

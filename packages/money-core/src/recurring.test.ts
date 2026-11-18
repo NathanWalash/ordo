@@ -108,6 +108,48 @@ describe('detectRecurring', () => {
     expect(c!.transactionIds).toHaveLength(3)
   })
 
+  it('keeps a bill on the 31st on the last day of the month, not the 28th for good', () => {
+    const txs = ['2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31', '2027-02-28'].map((d) =>
+      tx(d, -4500, 'Council Tax'),
+    )
+    expect(detectRecurring(txs, '2027-03-01')[0]!.nextDue).toBe('2027-03-31')
+    const april = [...txs, tx('2027-03-31', -4500, 'Council Tax'), tx('2027-04-30', -4500, 'Council Tax')]
+    expect(detectRecurring(april, '2027-05-01')[0]!.nextDue).toBe('2027-05-31')
+  })
+
+  it('counts from the last payment when the billing day really changed', () => {
+    const days = ['01', '02', '03', '04', '05', '06', '07', '08'].map((m) => `2026-${m}-15`)
+    const moved = [...days, '2026-09-03', '2026-10-03'].map((d) => tx(d, -999, 'Netflix'))
+    expect(detectRecurring(moved, '2026-10-04')[0]!.nextDue).toBe('2026-11-03')
+  })
+
+  it('counts four-weekly payments from the last one', () => {
+    const dates = ['2026-01-01', '2026-01-29', '2026-02-26', '2026-03-26', '2026-04-23', '2026-05-21']
+    const [c] = detectRecurring(
+      dates.map((d) => tx(d, -999, 'Gym')),
+      '2026-05-22',
+    )
+    expect(c!.nextDue).toBe('2026-06-21')
+  })
+
+  it('grows in line with the statement, not with its square', () => {
+    // Years of daily shop with one merchant, every amount a little different.
+    const statement = (n: number) =>
+      Array.from({ length: n }, (_, i) => tx(addDays('2020-01-01', i % 2000), -(500 + i), 'Corner Shop'))
+    const time = (n: number) => {
+      const txs = statement(n)
+      let best = Infinity
+      for (let run = 0; run < 3; run++) {
+        const start = performance.now()
+        detectRecurring(txs, '2026-11-17')
+        best = Math.min(best, performance.now() - start)
+      }
+      return best
+    }
+    // Four times the rows: about four times the time if linear, sixteen if quadratic.
+    expect(time(16_000) / Math.max(time(4_000), 2)).toBeLessThan(10)
+  })
+
   it('finds the subscriptions in a real-looking statement', () => {
     const text = readFileSync(new URL('./fixtures/monzo.csv', import.meta.url), 'utf8')
     const r = parseStatement(text, { accountName: 'Monzo' })

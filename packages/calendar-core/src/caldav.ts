@@ -18,6 +18,10 @@ export class CalendarAuthError extends Error {
 export class CalendarConnectionError extends Error {
   override name = 'CalendarConnectionError'
 }
+/** The server answered, but is busy, limiting requests or down for now (HTTP 429, 502, 503, 504). */
+export class CalendarUnavailableError extends CalendarConnectionError {
+  override name = 'CalendarUnavailableError'
+}
 
 /** Read-only CalDAV provider. With iCloud, sign in with the Apple ID email and an app-specific password. */
 export class CalDavProvider implements CalendarProvider {
@@ -31,9 +35,19 @@ export class CalDavProvider implements CalendarProvider {
       credentials: { username: config.username, password: config.password },
       authMethod: 'Basic',
       defaultAccountType: 'caldav',
-      fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeout) }),
+      fetch: async (input, init) => {
+        const res = await fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeout) })
+        // tsdav often reports a refused request as "cannot find principalUrl": remember why. Only
+        // statuses that explain a failure count (discovery tolerates redirects, 400 and 405 from
+        // .well-known), and a busy server outranks a refusal.
+        if (severity(res.status) > severity(this.failedStatus)) this.failedStatus = res.status
+        return res
+      },
     })
   }
+
+  /** The most telling HTTP error status in the current call, if any. */
+  private failedStatus: number | null = null
 
   async connect(): Promise<void> {
     await this.call(() => this.client.login())
@@ -92,17 +106,28 @@ export class CalDavProvider implements CalendarProvider {
   }
 
   private async call<T>(fn: () => Promise<T>): Promise<T> {
+    this.failedStatus = null
     try {
       return await fn()
     } catch (err) {
-      throw classify(err)
+      throw classify(err, this.failedStatus)
     }
   }
 }
 
-function classify(err: unknown): Error {
-  const message = err instanceof Error ? err.message : String(err)
+/** 2: busy or down (429, 5xx). 1: refused (401, 403). 0: anything else. */
+function severity(status: number | null): number {
+  if (status === null) return 0
+  if (status === 429 || status >= 500) return 2
+  return status === 401 || status === 403 ? 1 : 0
+}
+
+function classify(err: unknown, status: number | null = null): Error {
+  const raw = err instanceof Error ? err.message : String(err)
+  const message = status ? `${raw} (HTTP ${status})` : raw
   if (/\b401\b|Invalid credentials|Unauthorized/i.test(message)) return new CalendarAuthError(message)
+  if (/\b(429|502|503|504)\b|Too Many Requests|Service Unavailable|Gateway Time-?out/i.test(message))
+    return new CalendarUnavailableError(message)
   if (err instanceof TypeError || (err instanceof Error && ['TimeoutError', 'AbortError'].includes(err.name)))
     return new CalendarConnectionError(message)
   return err instanceof Error ? err : new Error(message)

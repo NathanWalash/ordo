@@ -4,6 +4,7 @@ export {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarUnavailableError,
   ICLOUD_CALDAV_URL,
   isReadOnly,
   normaliseColor,
@@ -20,6 +21,7 @@ export {
 export {
   checkFeedUrl,
   describeIcs,
+  readIcs,
   FEED_MAX_BYTES,
   LOCAL_ADDRESS_MESSAGE,
   FeedError,

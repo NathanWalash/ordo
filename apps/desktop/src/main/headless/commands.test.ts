@@ -135,6 +135,7 @@ describe('commands', () => {
     expect(r).toEqual({
       ok: true,
       data: {
+        category: null,
         total: 2,
         offset: 0,
         shown: 1,
@@ -155,6 +156,11 @@ describe('commands', () => {
     expect(await run({ name: 'senders', limit: 50, category: 'people' })).toMatchObject({
       data: { total: 1, senders: [{ address: 'sam@friend.example', protected: true }] },
     })
+  })
+
+  it('an empty category says so, instead of asking for a scan', async () => {
+    const r = await cli(fakeServices(), 'senders', '--category', 'receipts')
+    expect(r.stdout).toBe('No senders in receipts.\n')
   })
 
   it('cleanup plan sends the same request the review sheet would', async () => {
@@ -322,6 +328,11 @@ describe('output', () => {
   it('strips control characters and bidi tricks from third-party text', () => {
     expect(clean('Evil\u001b[2J\r\nCorp‮')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
+    // Right-to-left and left-to-right marks reorder text; line and paragraph separators start lines.
+    const sneaky = ['a', 0x200f, 'b', 0x200e, 'c', 0x061c, 'd', 0x2028, 'e', 0x2029, 'f']
+      .map((p) => (typeof p === 'number' ? String.fromCharCode(p) : p))
+      .join('')
+    expect(clean(sneaky)).toBe('a b c d e f')
     const text = formatHuman('senders', {
       ok: true,
       data: {
@@ -378,5 +389,58 @@ describe('output', () => {
         '  Refused sam@friend.example: Someone you’ve written to.',
       ].join('\n'),
     )
+  })
+})
+
+describe('calendar events', () => {
+  it('shows all-day events on their own day and times on this computer’s clock', async () => {
+    const tz = process.env['TZ']
+    process.env['TZ'] = 'Europe/London' // BST in July: local midnight is 23:00 UTC the day before
+    try {
+      const services = fakeServices()
+      services.calendar.events = () => [
+        {
+          uid: 'a',
+          calendarId: 'c',
+          title: 'Holiday',
+          start: new Date(2026, 6, 10),
+          end: new Date(2026, 6, 11),
+          allDay: true,
+        },
+        {
+          uid: 'b',
+          calendarId: 'c',
+          title: 'Dentist',
+          start: new Date(2026, 6, 10, 9, 0),
+          end: new Date(2026, 6, 10, 10, 0),
+          allDay: false,
+        },
+      ]
+      const json = await cli(
+        services,
+        'calendar',
+        'events',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--json',
+      )
+      const events = JSON.parse(json.stdout).events
+      expect(events[0]).toMatchObject({
+        title: 'Holiday',
+        start: '2026-07-10',
+        end: '2026-07-11',
+        allDay: true,
+      })
+      expect(events[1]).toMatchObject({ title: 'Dentist', start: '2026-07-10T08:00:00.000Z' })
+
+      const human = await cli(services, 'calendar', 'events', '--from', '2026-07-01', '--to', '2026-07-31')
+      expect(human.stdout).toContain('2026-07-10 all day')
+      expect(human.stdout).toContain('2026-07-10 09:00')
+    } finally {
+      if (tz === undefined) delete process.env['TZ']
+      else process.env['TZ'] = tz
+    }
   })
 })

@@ -7,9 +7,9 @@ import type { CommandResult } from './commands'
  * control characters before it reaches a terminal (no escape sequences, no fake lines).
  */
 
-// C0 and C1 control characters, DEL, and bidi overrides/isolates.
+// C0 and C1 control characters, DEL, bidi marks, overrides and isolates, and Unicode line breaks.
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
 
 export function clean(value: unknown, max = 80): string {
   const s = String(value ?? '').replace(UNSAFE, ' ')
@@ -24,6 +24,13 @@ export function pounds(pence: number | null | undefined): string {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const when = (iso: unknown) => (typeof iso === 'string' ? iso.replace('T', ' ').slice(0, 16) : 'never')
+const pad = (n: number) => String(n).padStart(2, '0')
+/** An instant as this computer's clock shows it, `YYYY-MM-DD HH:MM`, for event times. */
+function localTime(iso: unknown): string {
+  const d = typeof iso === 'string' ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return when(iso)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function table(rows: string[][]): string {
   if (!rows.length) return ''
@@ -66,7 +73,9 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
 
   senders: (d) =>
     d.total === 0
-      ? 'No senders. Run `scan` first.'
+      ? d.category
+        ? `No senders in ${d.category === 'uncategorised' ? 'Other' : d.category}.`
+        : 'No senders. Run `scan` first.'
       : table([
           ['EMAILS', 'CATEGORY', 'UNSUBSCRIBE', 'SENDER'],
           ...d.senders.map((s: any) => [
@@ -143,7 +152,7 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       ? `No events from ${d.from} to ${d.to}.`
       : table(
           d.events.map((e: any) => [
-            e.allDay ? `${String(e.start).slice(0, 10)} all day` : when(e.start),
+            e.allDay ? `${String(e.start).slice(0, 10)} all day` : localTime(e.start),
             clean(e.title, 60),
             e.calendar ? `(${clean(e.calendar, 30)})` : '',
           ]),

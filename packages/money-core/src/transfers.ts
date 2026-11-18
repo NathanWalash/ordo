@@ -44,13 +44,21 @@ function mentions(t: Transaction, account: string): boolean {
 export function pairOwnTransfers(transactions: Transaction[], maxDays = 3): Transaction[] {
   const used = new Set<string>()
   const pairs = new Map<string, Transaction>()
-  const ins = transactions.filter((t) => t.amount > 0)
+  // Money in, by amount: only the same amount can pair, so don't look at the rest (comparing
+  // every payment out with every payment in made big statements slow on every page load).
+  const insByAmount = new Map<number, Transaction[]>()
+  for (const t of transactions)
+    if (t.amount > 0) {
+      const list = insByAmount.get(t.amount)
+      if (list) list.push(t)
+      else insByAmount.set(t.amount, [t])
+    }
   const outs = transactions.filter((t) => t.amount < 0).sort((a, b) => a.date.localeCompare(b.date))
   for (const out of outs) {
     let best: Transaction | undefined
     let bestGap = Infinity
-    for (const inn of ins) {
-      if (used.has(inn.id) || inn.accountName === out.accountName || inn.amount !== -out.amount) continue
+    for (const inn of insByAmount.get(-out.amount) ?? []) {
+      if (used.has(inn.id) || inn.accountName === out.accountName) continue
       const gap = Math.abs(toMs(inn.date) - toMs(out.date)) / DAY_MS
       if (gap > maxDays || gap >= bestGap) continue
       const evidence =
