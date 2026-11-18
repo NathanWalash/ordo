@@ -3,6 +3,7 @@ import { app } from 'electron'
 import { analyseSenders } from '@ordo/mail-core'
 import {
   ICLOUD_IMAP,
+  ICLOUD_SMTP,
   ImapMailProvider,
   MailAuthError,
   MailConnectionError,
@@ -14,6 +15,7 @@ import {
   scanMailbox,
   testImapLogin,
   type ImapConfig,
+  type SmtpConfig,
 } from '@ordo/mail-core/node'
 import {
   ConnectInputSchema,
@@ -64,6 +66,21 @@ export function imapConfig(user: string, pass: string): ImapConfig {
       pass,
     }
   return { ...ICLOUD_IMAP, user, pass }
+}
+
+/** iCloud SMTP by default. Tests can point an unpackaged build at a local server, like ORDO_IMAP_*. */
+export function smtpConfig(user: string, pass: string): SmtpConfig {
+  const host = !app.isPackaged ? process.env['ORDO_SMTP_HOST'] : undefined
+  if (host)
+    return {
+      host,
+      port: Number(process.env['ORDO_SMTP_PORT'] ?? 3025),
+      secure: process.env['ORDO_SMTP_SECURE'] === '1',
+      requireTLS: process.env['ORDO_SMTP_REQUIRE_TLS'] === '1',
+      user,
+      pass,
+    }
+  return { ...ICLOUD_SMTP, user, pass }
 }
 
 const ICLOUD_DOMAINS = /@(icloud|me|mac)\.com$/i
@@ -154,21 +171,59 @@ export async function connect(input: ConnectInput): Promise<ConnectResult> {
   return { ok: true, email: result.email }
 }
 
+/** Scans and syncs still running, so disconnecting can wait for them before clearing the cache. */
+const inflight = new Set<Promise<unknown>>()
+const stoppers = new Set<() => void>()
+
+/**
+ * Track a piece of mail work that writes to the cache: `stop` is called when the account is
+ * disconnected, and disconnecting waits for the work to settle before clearing the cache.
+ */
+export function trackMailWork<T>(work: Promise<T>, stop?: () => void): Promise<T> {
+  inflight.add(work)
+  if (stop) stoppers.add(stop)
+  const done = () => {
+    inflight.delete(work)
+    if (stop) stoppers.delete(stop)
+  }
+  work.then(done, done)
+  return work
+}
+
+/** The longest disconnecting waits for running work before clearing anyway. */
+const DISCONNECT_WAIT_MS = 10_000
+
 export async function disconnect(): Promise<void> {
   running?.abort()
+  for (const stop of stoppers) stop()
   deleteAccount()
+  // A sync that was running would otherwise write old mail into the cache after it's cleared.
+  const pending = [...inflight].map((p) => p.catch(() => {}))
+  await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, DISCONNECT_WAIT_MS))])
   mailStore().clear()
 }
 
-/** Fetch new inbox headers into the cache. `onProgress` streams how far it has got. */
-export async function scan(onProgress?: (p: ScanProgress) => void): Promise<ScanOutcome> {
+/** A scan of the inbox is running in this process. */
+export const isScanning = () => running !== null
+
+/**
+ * Fetch new inbox headers into the cache. `onProgress` streams how far it has got. `then` runs
+ * afterwards on the same connection and under the same lock (the mail client uses it to refresh
+ * flags and the folder list).
+ */
+export async function scan(
+  onProgress?: (p: ScanProgress) => void,
+  then?: (provider: ImapMailProvider) => Promise<void>,
+): Promise<ScanOutcome> {
   const a = loadAccount()
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
-  if (running) return { ok: false, error: 'unknown', message: 'A scan is already running.' }
-  if (changing) return { ok: false, error: 'unknown', message: 'Wait for the clean-up to finish.' }
+  if (running) return { ok: false, error: 'busy', message: 'A scan is already running.' }
+  if (changing) return { ok: false, error: 'busy', message: 'Wait for the clean-up to finish.' }
   const ctrl = (running = new AbortController())
   try {
-    const result = await withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress))
+    const result = await trackMailWork(
+      withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress, then)),
+    )
     return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
   } finally {
     running = null
@@ -179,12 +234,14 @@ async function fetchHeaders(
   a: { email: string; password: string },
   signal: AbortSignal,
   onProgress?: (p: ScanProgress) => void,
+  then?: (provider: ImapMailProvider) => Promise<void>,
 ): Promise<ScanOutcome> {
   const provider = new ImapMailProvider(imapConfig(a.email, a.password))
   try {
     await provider.connect()
     const result = await scanMailbox(provider, mailStore(), { mailbox: INBOX, signal, onProgress })
     if (!result.stopped) recordScan(new Date())
+    if (!result.stopped) await then?.(provider)
     return { ok: true, ...result }
   } catch (err) {
     return { ok: false, ...explain(err) }

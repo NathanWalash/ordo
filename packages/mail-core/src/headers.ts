@@ -1,4 +1,4 @@
-import type { MessageHeader } from './types'
+import type { Address, MessageHeader } from './types'
 
 /**
  * Parse a raw RFC 5322 header block into lower-cased name → value pairs.
@@ -21,8 +21,32 @@ export interface RawFetchedMessage {
   uid: number
   flags?: Set<string>
   internalDate?: Date | string
-  envelope?: { date?: Date | string; subject?: string; from?: { name?: string; address?: string }[] }
+  envelope?: {
+    date?: Date | string
+    subject?: string
+    messageId?: string
+    from?: RawAddress[]
+    to?: RawAddress[]
+    cc?: RawAddress[]
+  }
   headers?: Uint8Array | string
+}
+
+interface RawAddress {
+  name?: string
+  address?: string
+}
+
+/** Envelope addresses, without empty ones (group syntax) and with names trimmed. */
+export function toAddresses(list: readonly RawAddress[] | undefined): Address[] {
+  const out: Address[] = []
+  for (const a of list ?? []) {
+    const address = a.address?.trim()
+    if (!address) continue
+    const name = a.name?.trim()
+    out.push(name ? { address, name } : { address })
+  }
+  return out
 }
 
 export const SCAN_HEADER_FIELDS = [
@@ -31,6 +55,7 @@ export const SCAN_HEADER_FIELDS = [
   'list-unsubscribe-post',
   'precedence',
   'auto-submitted',
+  'content-type',
 ] as const
 
 /** Convert one fetched message to a MessageHeader, or null if it has no usable sender. */
@@ -55,5 +80,11 @@ export function toMessageHeader(msg: RawFetchedMessage, mailbox: string): Messag
     listUnsubscribePost: h['list-unsubscribe-post'],
     precedence: h['precedence'],
     autoSubmitted: h['auto-submitted'],
+    flagged: msg.flags?.has('\\Flagged') ?? false,
+    answered: msg.flags?.has('\\Answered') ?? false,
+    to: toAddresses(msg.envelope?.to),
+    cc: toAddresses(msg.envelope?.cc),
+    messageId: msg.envelope?.messageId?.trim() || undefined,
+    hasAttachments: /^\s*multipart\/mixed\b/i.test(h['content-type'] ?? '') || undefined,
   }
 }

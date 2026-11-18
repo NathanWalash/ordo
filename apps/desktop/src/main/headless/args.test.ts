@@ -92,6 +92,36 @@ describe('parseInvocation', () => {
     })
   })
 
+  it('parses the read-only mail commands', () => {
+    expect(command('mail', 'list').command).toEqual({
+      name: 'mail list',
+      mailbox: 'INBOX',
+      unread: false,
+      limit: 25,
+    })
+    expect(command('mail', 'list', '--mailbox', 'Sent Messages', '--unread').command).toMatchObject({
+      mailbox: 'Sent Messages',
+      unread: true,
+    })
+    expect(command('mail', 'search', 'gas bill', '--server').command).toEqual({
+      name: 'mail search',
+      query: 'gas bill',
+      server: true,
+      limit: 25,
+    })
+    expect(command('mail', 'read', '42', '--mailbox', 'Archive').command).toEqual({
+      name: 'mail read',
+      uid: 42,
+      mailbox: 'Archive',
+    })
+    expect(command('mail', 'sync').command).toEqual({ name: 'mail sync', mailbox: 'INBOX' })
+    expect(() => parseInvocation(['mail', 'read'])).toThrow(/needs a message uid/)
+    expect(() => parseInvocation(['mail', 'read', 'x'])).toThrow(UsageError)
+    expect(() => parseInvocation(['mail', 'search'])).toThrow(/something to look for/)
+    expect(() => parseInvocation(['mail', 'send'])).toThrow(/Unknown command: mail send/)
+    expect(() => parseInvocation(['mail', 'list', '--mailbox', 'a\u0007b'])).toThrow(/not a mailbox path/)
+  })
+
   it('checks dates and ranges for calendar events', () => {
     expect(command('calendar', 'events', '--from', '2026-11-01', '--to', '2026-11-30').command).toEqual({
       name: 'calendar events',

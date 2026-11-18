@@ -109,7 +109,7 @@ const review = () => page.getByRole('dialog')
 const storeCheckbox = () => page.getByRole('checkbox', { name: `Select ${STORE}` })
 
 test('connects and scans', async () => {
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await page.getByRole('button', { name: 'Connect iCloud' }).click()
   await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
   await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)

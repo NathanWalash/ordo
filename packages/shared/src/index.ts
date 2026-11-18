@@ -3,6 +3,7 @@ import type { CategorisedSender, ScanProgress, ScanResult } from '@ordo/mail-cor
 import type { SettingsApi } from './settings'
 import type { AiApi } from './ai'
 import type { CleanupApi } from './cleanup'
+import type { MailApi } from './mail'
 import type { AssistantApi } from './assistant'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
@@ -53,12 +54,13 @@ export type AccountStatus =
 
 /** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
 export type ScanOutcome =
-  ({ ok: true } & ScanResult) | { ok: false; error: ConnectError | 'locked'; message: string }
+  ({ ok: true } & ScanResult) | { ok: false; error: ConnectError | 'locked' | 'busy'; message: string }
 
 export type { CategorisedSender, ScanProgress }
 export * from './settings'
 export * from './ai'
 export * from './cleanup'
+export * from './mail'
 export * from './assistant'
 
 /**
@@ -94,6 +96,7 @@ export interface OrdoApi {
   boards: BoardsApi
   calendar: CalendarApi
   cleanup: CleanupApi
+  mail: MailApi
   assistant: AssistantApi
 }
 

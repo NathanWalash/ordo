@@ -18,7 +18,7 @@ test.afterAll(async () => {
 const sheet = () => page.getByRole('dialog', { name: 'Connect iCloud Mail' })
 
 test('the connect sheet checks what you type', async () => {
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await page.getByRole('button', { name: 'Connect iCloud' }).click()
   await expect(sheet()).toBeVisible()
   await expect(page.getByLabel('Apple ID email')).toBeFocused()
@@ -61,7 +61,7 @@ test('an unreachable mail server says so, with a next step', async () => {
   const offline = await launchApp({ ORDO_IMAP_HOST: '127.0.0.1', ORDO_IMAP_PORT: '9' })
   try {
     const win = await offline.firstWindow()
-    await win.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+    await win.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
     await win.getByRole('button', { name: 'Connect iCloud' }).click()
     await win.getByLabel('Apple ID email').fill('you@icloud.com')
     await win.getByLabel('App-specific password').fill('abcd-efgh-ijkl-mnop')
@@ -75,8 +75,11 @@ test('an unreachable mail server says so, with a next step', async () => {
 
 test('disconnecting forgets the account', async () => {
   test.skip(!imapPort, 'Needs the connected account from the previous test')
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
-  await expect(page.getByRole('heading', { name: `Connected as ${TEST_ACCOUNT.email}` })).toBeVisible()
-  await page.getByRole('button', { name: 'Disconnect' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Settings' }).click()
+  const account = page.getByRole('region', { name: 'Account' })
+  await expect(account.getByText(`Connected as ${TEST_ACCOUNT.email}.`, { exact: false })).toBeVisible()
+  await account.getByRole('button', { name: 'Disconnect' }).click()
+  await expect(account.getByRole('button', { name: 'Connect iCloud' })).toBeVisible()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await expect(page.getByRole('heading', { name: 'Connect your iCloud account' })).toBeVisible()
 })

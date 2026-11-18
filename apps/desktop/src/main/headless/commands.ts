@@ -24,16 +24,24 @@ import type {
   CleanupRequest,
   CleanupSummary,
   ImportOutcome,
+  MailboxInfo,
+  MailOutcome,
+  MailRefreshProgress,
+  MessageContent,
+  MessageListQuery,
+  MessageSummary,
   MoneyAiOutcome,
   MoneyAiProgress,
   MoneyOverview,
   ScanOutcome,
   ScanProgress,
+  SearchQueryInput,
+  ServerSearchInput,
   TransactionPage,
   TransactionQuery,
   UndoOutcome,
 } from '@ordo/shared'
-import type { CleanupPlan, PlannedSender } from '@ordo/mail-core'
+import { bodyText, type CleanupPlan, type PlannedSender } from '@ordo/mail-core'
 import { localZone } from '@ordo/calendar-core'
 import type { LockHolder } from '../lock'
 import { CHANGE_COMMANDS, type Command } from './args'
@@ -55,6 +63,18 @@ export interface OrdoServices {
     run(request: CleanupRequest, onProgress?: (p: CleanupProgress) => void): Promise<CleanupOutcome>
     history(): CleanupSummary[]
     undo(id: number): Promise<UndoOutcome>
+  }
+  /** The mail client, read-only. Headless mode can never send mail or change messages. */
+  mail: {
+    mailboxes(): MailboxInfo[]
+    refresh(
+      input: { mailbox: string },
+      onProgress?: (p: MailRefreshProgress) => void,
+    ): Promise<MailOutcome<{ added: number; removed: number; changed: number }>>
+    messages(query: MessageListQuery): { total: number; messages: MessageSummary[] }
+    search(query: SearchQueryInput): MessageSummary[]
+    searchServer(query: ServerSearchInput): Promise<MailOutcome<{ messages: MessageSummary[] }>>
+    open(ref: { mailbox: string; uid: number }): Promise<MailOutcome<{ message: MessageContent }>>
   }
   calendar: {
     status(): CalendarStatus
@@ -139,6 +159,7 @@ export interface BoardCardRow {
 /** Progress for long-running commands; the CLI prints it to stderr. */
 export interface Progress {
   scan?: (p: ScanProgress) => void
+  mail?: (p: MailRefreshProgress) => void
   cleanup?: (p: CleanupProgress) => void
   calendar?: (p: CalendarSyncProgress) => void
   ai?: (p: AiSortProgress) => void
@@ -204,6 +225,10 @@ const fromService = (r: { error?: string; message: string }): CommandResult =>
         : 'failed',
     r.message,
   )
+
+/** A mail read that didn't work: a message or folder that's gone is `not_found`. */
+const fromMail = (r: { error?: string; message: string }): CommandResult =>
+  r.error === 'not-found' ? fail('not_found', r.message) : fromService(r)
 
 /** A calendar change that didn't happen, as a headless error code. */
 function fromChange(r: Extract<CalendarChangeOutcome, { ok: false }>): CommandResult {
@@ -484,6 +509,26 @@ export function cleanupView(c: CleanupSummary) {
   }
 }
 
+/** Characters of a message's text `mail read` returns. */
+const MAIL_TEXT_MAX = 100_000
+
+const address = (a: { address: string; name?: string }) => ({ address: a.address, name: a.name ?? null })
+
+export function messageRow(m: MessageSummary) {
+  return {
+    mailbox: m.mailbox,
+    uid: m.uid,
+    date: iso(m.date),
+    from: address(m.from),
+    to: m.to.map(address),
+    subject: m.subject,
+    unread: !m.seen,
+    flagged: m.flagged,
+    answered: m.answered,
+    attachments: m.hasAttachments,
+  }
+}
+
 /** A local day `YYYY-MM-DD` as local midnight. */
 function day(d: string): Date {
   const [y, m, dd] = d.split('-').map(Number) as [number, number, number]
@@ -630,10 +675,114 @@ export async function runCommand(
         : fromService(r)
     }
 
+    case 'mail mailboxes': {
+      if (!connected()) return NOT_CONNECTED
+      const boxes = services.mail.mailboxes()
+      return {
+        ok: true,
+        data: {
+          mailboxes: boxes.map((m) => ({
+            path: m.path,
+            name: m.name,
+            role: m.role,
+            messages: m.total,
+            unread: m.unread,
+          })),
+        },
+      }
+    }
+
+    case 'mail sync': {
+      if (!connected()) return NOT_CONNECTED
+      const r = await services.mail.refresh({ mailbox: command.mailbox }, options.progress?.mail)
+      if (!r.ok) return fromMail(r)
+      return {
+        ok: true,
+        data: { mailbox: command.mailbox, added: r.added, removed: r.removed, changed: r.changed },
+      }
+    }
+
+    case 'mail list': {
+      if (!connected()) return NOT_CONNECTED
+      const r = services.mail.messages({
+        mailbox: command.mailbox,
+        limit: command.limit,
+        offset,
+        unread: command.unread || undefined,
+      })
+      return {
+        ok: true,
+        data: {
+          mailbox: command.mailbox,
+          total: r.total,
+          offset,
+          shown: r.messages.length,
+          messages: r.messages.map(messageRow),
+        },
+      }
+    }
+
+    case 'mail search': {
+      if (!connected()) return NOT_CONNECTED
+      if (command.server) {
+        const mailbox = command.mailbox ?? 'INBOX'
+        const r = await services.mail.searchServer({ query: command.query, mailbox, limit: command.limit })
+        if (!r.ok) return fromMail(r)
+        return {
+          ok: true,
+          data: { query: command.query, where: 'server', mailbox, messages: r.messages.map(messageRow) },
+        }
+      }
+      const found = services.mail.search({
+        query: command.query,
+        mailbox: command.mailbox,
+        limit: command.limit,
+      })
+      return {
+        ok: true,
+        data: {
+          query: command.query,
+          where: 'cache',
+          mailbox: command.mailbox ?? null,
+          messages: found.map(messageRow),
+        },
+      }
+    }
+
+    case 'mail read': {
+      if (!connected()) return NOT_CONNECTED
+      const r = await services.mail.open({ mailbox: command.mailbox, uid: command.uid })
+      if (!r.ok) return fromMail(r)
+      const m = r.message
+      const text = bodyText(m, { links: true })
+      return {
+        ok: true,
+        data: {
+          mailbox: m.mailbox,
+          uid: m.uid,
+          date: iso(m.date),
+          from: m.from ? address(m.from) : null,
+          to: m.to.map(address),
+          cc: m.cc.map(address),
+          replyTo: m.replyTo.map(address),
+          subject: m.subject,
+          messageId: m.messageId,
+          unread: !m.seen,
+          flagged: m.flagged,
+          // The plain-text body, or the HTML as text with link addresses: never HTML.
+          text: text.slice(0, MAIL_TEXT_MAX),
+          truncated: m.truncated || text.length > MAIL_TEXT_MAX,
+          attachments: m.attachments
+            .filter((a) => !a.inline)
+            .map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.size })),
+        },
+      }
+    }
+
     case 'calendar sync': {
       if (!hasCalendars()) return NOT_CONNECTED
       const r = await services.calendar.sync(options.progress?.calendar)
-      if (!r.ok) return fromService(r)
+      if (!r.ok) return fromMail(r)
       const { ok: _ok, ...rest } = r
       return { ok: true, data: rest }
     }

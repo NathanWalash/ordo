@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { CategorisedSender } from '@ordo/shared'
+import type { CategorisedSender, MessageContent, MessageSummary } from '@ordo/shared'
 import type { BoardCardRow, OrdoServices } from './commands'
 
 /** A sender as the analysis would return it. */
@@ -16,6 +16,54 @@ export function sender(address: string, extra: Partial<CategorisedSender> = {}):
     bulk: false,
     automated: false,
     category: 'uncategorised',
+    ...extra,
+  }
+}
+
+/** A message list row. */
+export function summary(uid: number, extra: Partial<MessageSummary> = {}): MessageSummary {
+  return {
+    mailbox: 'INBOX',
+    uid,
+    date: new Date('2026-11-16T10:00:00Z'),
+    from: { address: 'sam@friend.example', name: 'Sam' },
+    to: [{ address: 'me@icloud.example' }],
+    subject: 'Lunch?',
+    seen: false,
+    flagged: true,
+    answered: false,
+    hasAttachments: false,
+    ...extra,
+  }
+}
+
+/** A message as `open` returns it: HTML only, with a link and an escape sequence in it. */
+export function content(extra: Partial<MessageContent> = {}): MessageContent {
+  return {
+    mailbox: 'INBOX',
+    uid: 7,
+    date: new Date('2026-11-16T10:00:00Z'),
+    subject: 'Lunch?',
+    from: { address: 'sam@friend.example', name: 'Sam' },
+    to: [{ address: 'me@icloud.example' }],
+    cc: [],
+    bcc: [],
+    replyTo: [],
+    messageId: '<lunch@friend.example>',
+    inReplyTo: null,
+    references: [],
+    seen: false,
+    flagged: true,
+    answered: false,
+    draft: false,
+    text: null,
+    html: '<p>Fancy <b>lunch</b>?\u001b[2J</p><p><a href="https://cafe.example/menu">The menu</a></p><script>x()</script>',
+    truncated: false,
+    attachments: [
+      { part: '2', filename: 'menu.pdf', contentType: 'application/pdf', size: 1000, inline: false },
+      { part: '3', filename: 'logo.png', contentType: 'image/png', size: 10, inline: true, contentId: 'l' },
+    ],
+    inlineImages: {},
     ...extra,
   }
 }
@@ -58,6 +106,25 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       run: vi.fn(async () => ({ ok: false as const, error: 'invalid' as const, message: 'Nothing to do' })),
       history: () => [],
       undo: vi.fn(async () => ({ ok: true as const, restored: 2, missing: 0 })),
+    },
+    mail: {
+      mailboxes: () => [
+        { path: 'INBOX', name: 'Inbox', role: 'inbox', delimiter: '/', total: 2, unread: 1 },
+        { path: 'Projects', name: 'Projects', role: null, delimiter: '/', total: 0, unread: 0 },
+      ],
+      refresh: vi.fn(async () => ({ ok: true as const, added: 1, removed: 0, changed: 2 })),
+      messages: vi.fn(() => ({ total: 1, messages: [summary(7)] })),
+      search: vi.fn(() => [summary(7)]),
+      searchServer: vi.fn(async () => ({ ok: true as const, messages: [summary(3)] })),
+      open: vi.fn(async (ref: { mailbox: string; uid: number }) =>
+        ref.uid === 7
+          ? { ok: true as const, message: content() }
+          : {
+              ok: false as const,
+              error: 'not-found' as const,
+              message: 'This message isn’t there any more.',
+            },
+      ),
     },
     calendar: {
       status: () => ({ connected: false, lastSync: null, syncing: false, subscriptions: 0 }),

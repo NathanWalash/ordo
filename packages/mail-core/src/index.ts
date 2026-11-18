@@ -46,4 +46,39 @@ export {
   type AiSortProgress,
   type AiSortResult,
 } from './ai-sort'
-export { parseHeaderBlock, toMessageHeader, SCAN_HEADER_FIELDS, type RawFetchedMessage } from './headers'
+export {
+  parseHeaderBlock,
+  toAddresses,
+  toMessageHeader,
+  SCAN_HEADER_FIELDS,
+  type RawFetchedMessage,
+} from './headers'
+export { EMAIL_ADDRESS, hasControlChars } from './unsubscribe'
+export {
+  ADDRESS_MAX,
+  displayName,
+  formatAddress,
+  formatAddressList,
+  isEmailAddress,
+  parseAddress,
+  parseAddressList,
+  personLabel,
+  splitAddressList,
+  type ParsedAddressList,
+} from './address'
+export {
+  COMPOSE_LIMITS,
+  forwardBody,
+  forwardSubject,
+  ownAddresses,
+  parseMailtoLink,
+  referencesFor,
+  replyBody,
+  replyRecipients,
+  replySubject,
+  type MailtoDraft,
+} from './compose'
+export { checkLink, LINK_MAX, type CheckedLink } from './links'
+export { ROLE_NAMES, toMailboxList, type RawMailbox } from './mailboxes'
+export { planBodyParts, referencedCids, safeFilename, type BodyNode, type BodyPlan } from './mime'
+export { bodyText, decodeEntities, htmlToText, printable, tidy, type HtmlToTextOptions } from './text'

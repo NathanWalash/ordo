@@ -3,7 +3,7 @@ import { parseInvocation, type Command } from './args'
 import { runCli, type CliIo } from './cli'
 import { exitCodeFor, gate, runCommand } from './commands'
 import { clean, formatHuman, pounds } from './format'
-import { boardCard, fakeServices } from './fake-services'
+import { boardCard, fakeServices, summary } from './fake-services'
 
 function io() {
   const out: string[] = []
@@ -132,6 +132,56 @@ describe('commands', () => {
     })
     expect(await run({ name: 'scan' }, services)).toMatchObject({ ok: false, code: 'not_connected' })
     expect(services.scan).not.toHaveBeenCalled()
+  })
+
+  it('mail commands need an account too', async () => {
+    const services = fakeServices({ account: () => ({ connected: false }) })
+    for (const c of ['mailboxes', 'list', 'sync'] as const)
+      expect(await cli(services, 'mail', c, '--json')).toMatchObject({ code: 1 })
+    expect(services.mail.refresh).not.toHaveBeenCalled()
+  })
+
+  it('mail list and search print the uid to read, with control characters removed', async () => {
+    const services = fakeServices()
+    services.mail.messages = vi.fn(() => ({
+      total: 1,
+      messages: [summary(7, { subject: 'Hi\u001b[31m\u202eevil' })],
+    }))
+    const r = await cli(services, 'mail', 'list', '--mailbox', 'Archive', '--unread')
+    expect(services.mail.messages).toHaveBeenCalledWith({
+      mailbox: 'Archive',
+      limit: 25,
+      offset: 0,
+      unread: true,
+    })
+    expect(r.stdout).toMatch(/^UID +DATE/)
+    expect(r.stdout).toContain('Sam')
+    expect(r.stdout).not.toContain(String.fromCharCode(0x1b))
+    expect(r.stdout).not.toContain(String.fromCharCode(0x202e))
+    const s = await cli(fakeServices(), 'mail', 'search', 'lunch', '--json')
+    expect(JSON.parse(s.stdout)).toMatchObject({ where: 'cache', mailbox: null, messages: [{ uid: 7 }] })
+  })
+
+  it('mail read prints text, never HTML, and never escape sequences', async () => {
+    const r = await cli(fakeServices(), 'mail', 'read', '7')
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('From:    Sam <sam@friend.example>')
+    expect(r.stdout).toContain('Files:   menu.pdf')
+    expect(r.stdout).toContain('Fancy lunch?')
+    expect(r.stdout).toContain('The menu <https://cafe.example/menu>')
+    expect(r.stdout).not.toMatch(/<p>|<script>/)
+    expect(r.stdout).not.toContain(String.fromCharCode(0x1b))
+    const gone = await cli(fakeServices(), 'mail', 'read', '8', '--json')
+    expect(gone.code).toBe(1)
+    expect(JSON.parse(gone.stdout).error.code).toBe('not_found')
+  })
+
+  it('mail sync refreshes one folder and is not a change', async () => {
+    const services = fakeServices()
+    const r = await cli(services, 'mail', 'sync', '--mailbox', 'Projects', '--json')
+    expect(r.code).toBe(0)
+    expect(services.mail.refresh).toHaveBeenCalledWith({ mailbox: 'Projects' }, expect.anything())
+    expect(JSON.parse(r.stdout)).toEqual({ mailbox: 'Projects', added: 1, removed: 0, changed: 2 })
   })
 
   it('senders filters, limits and marks people as protected', async () => {
@@ -271,6 +321,18 @@ describe('commands', () => {
 })
 
 describe('output', () => {
+  it('--json escapes C1 controls and bidi characters, so it is safe to print, and still parses', async () => {
+    const tricky = `a\u009bb\u202ec\u2066d\u200fe\u2028f`
+    const services = fakeServices()
+    services.mail.messages = vi.fn(() => ({ total: 1, messages: [summary(7, { subject: tricky })] }))
+    const r = await cli(services, 'mail', 'list', '--json')
+    const unsafe = new RegExp('[\\u0080-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069\\u2028\\u2029]')
+    expect(r.stdout).not.toMatch(unsafe)
+    expect(r.stdout).toContain('\\u009b')
+    expect(r.stdout).toContain('\\u202e')
+    expect(JSON.parse(r.stdout).messages[0].subject).toBe(tricky)
+  })
+
   it('--json prints exactly one JSON document on stdout', async () => {
     const r = await cli(fakeServices(), 'senders', '--json')
     expect(r.stderr).toBe('')
@@ -323,6 +385,8 @@ describe('output', () => {
       'history',
       'undo',
       'calendar sync',
+      'mail read <uid>',
+      'mail search <words>',
       'boards list',
       'boards cards',
       'boards add-card',
@@ -334,7 +398,7 @@ describe('output', () => {
   })
 
   it('strips control characters and bidi tricks from third-party text', () => {
-    expect(clean('Evil\u001b[2J\r\nCorp‮')).toBe('Evil [2J  Corp ')
+    expect(clean('Evil\u001b[2J\r\nCorp\u202e')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
     // Zero-width, direction marks, line and paragraph separators and the BOM go too.
     for (const code of [0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2028, 0x2029, 0x061c, 0xfeff])

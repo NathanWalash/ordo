@@ -133,11 +133,33 @@ process through the typed `window.ordo` API exposed by the preload script
    Built: the review sheet, one-click / link / mailto unsubscribe, move to
    Trash with the UIDPLUS UID map, and a History view with Undo move (see
    "Clean-up" below).
-2. **Reading** — folders, message list, threading (`References` /
-   `In-Reply-To`), safe HTML reader (DOMPurify + sandboxed frame, remote
-   images blocked by default), archive/trash/flag, IMAP IDLE, FTS5 search.
-3. **Writing** — compose, reply, forward, drafts (IMAP `APPEND`), attachments,
-   SMTP via `smtp.mail.me.com:587`.
+2. **Reading** — built: folders, message list, safe HTML reader (DOMPurify +
+   sandboxed frame + CSP, remote images blocked by default and fetched by
+   the main process on request), archive/bin/junk with undo, flags, local
+   search over cached headers and opened bodies (SQLite `LIKE`) plus IMAP
+   SEARCH. Still to come: conversation threading, IMAP IDLE (Ordo polls
+   every five minutes), FTS5.
+3. **Writing** — built: compose, reply, reply all, forward, drafts (IMAP
+   `APPEND`, replacing the old version with UID EXPUNGE), attachments, SMTP
+   via `smtp.mail.me.com:587`. Plain text only for now. See
+   [mail.md](mail.md).
+
+### Mail client
+
+- Headers live in `messages` (one table for every folder; Unclutter reads
+  INBOX). The inbox is filled by the Unclutter scan so it stays complete;
+  other folders start with their newest 500 and grow. Each refresh also
+  forgets messages that have gone and updates flags for the newest 1000.
+- Bodies of opened messages go in `bodies` (with a text version for search)
+  and are dropped by a trigger when their message row is deleted.
+- Parts are decoded from BODYSTRUCTURE (transfer encoding, charset,
+  format=flowed) rather than from a second `BODY[n.MIME]` fetch, which some
+  servers answer wrongly for nested parts.
+- Reading opens the mailbox read-only and fetches with `BODY.PEEK`; the
+  window marks a message read separately.
+- One IMAP connection stays open while you read (closed after a minute
+  idle); syncs use their own connection, like the scan.
+- Moves keep the server's COPYUID map in memory for Undo.
 
 ### Classification
 

@@ -19,7 +19,11 @@ const BY_ROUTE: Record<Route, Suggestion[]> = {
     { text: 'Which bills are due next?', icon: 'bills' },
     { text: 'How much did I spend last month?', icon: 'money' },
   ],
-  'mail/inbox': MAIL,
+  'mail/inbox': [
+    { text: 'What’s unread in my inbox?', icon: 'mail' },
+    { text: 'Who sends me the most email?', icon: 'mail' },
+    { text: 'Which newsletters could I unsubscribe from?', icon: 'mail' },
+  ],
   'mail/unclutter': MAIL,
   'mail/history': [
     { text: 'What did my last clean-up do?', icon: 'mail' },

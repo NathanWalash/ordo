@@ -66,7 +66,7 @@ test.beforeAll(async () => {
 
   const app = await launchApp({ ORDO_USER_DATA: profile, ...env() })
   const page = await app.firstWindow()
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail', exact: true }).click()
   await page.getByRole('button', { name: 'Connect iCloud' }).click()
   await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
   await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)

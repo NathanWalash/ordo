@@ -13,7 +13,7 @@ export type Route = (typeof ROUTES)[number]
 
 export const TITLES: Record<Route, string> = {
   home: 'Home',
-  'mail/inbox': 'Inbox',
+  'mail/inbox': 'Mail',
   'mail/unclutter': 'Unclutter',
   'mail/history': 'Clean-up history',
   calendar: 'Calendar',

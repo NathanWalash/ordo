@@ -1,10 +1,20 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  safeStorage,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
+import { closeMailClient, registerMailIpc } from './mail-client'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { registerAssistantIpc, stop as stopAssistant } from './assistant'
@@ -80,6 +90,13 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+  // Email is shown in a sandboxed frame inside the window. It may show its own srcdoc and
+  // nothing else: link clicks are caught by the window (which asks, then opens the browser),
+  // this refuses the frame navigations Chromium reports here, and blockFrameLoads() cancels the
+  // request for any other way of loading a page into the frame.
+  win.webContents.on('will-frame-navigate', (e) => {
+    if (!e.isMainFrame && e.url !== 'about:srcdoc' && e.url !== 'about:blank') e.preventDefault()
+  })
 
   if (isWin) nativeTheme.on('updated', () => win.setTitleBarOverlay(winOverlay()))
 
@@ -89,6 +106,17 @@ function createWindow(): BrowserWindow {
   if (!app.isPackaged && devUrl) void win.loadURL(`${devUrl}#/${route}`)
   else void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/${route}` })
   return win
+}
+
+/**
+ * The only frame in the window is the message frame, which shows its own srcdoc and nothing
+ * else. Refuse every request to load a page into a frame (http, https or file), whoever starts
+ * it: a link the window missed, a script, a refresh. Images and styles aren't affected.
+ */
+function blockFrameLoads(): void {
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) =>
+    callback({ cancel: details.resourceType === 'subFrame' }),
+  )
 }
 
 /** Start-up overrides for tests, honoured identically by the app and headless mode. */
@@ -113,16 +141,21 @@ function startApp(): void {
   ipcMain.handle(IPC.accountStatus, () => mail.status())
   ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
   ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-  ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
+  ipcMain.handle(IPC.accountDisconnect, () => {
+    closeMailClient()
+    return mail.disconnect().then(clearCalendar)
+  })
   ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
   ipcMain.handle(IPC.scanStop, () => mail.stopScan())
   ipcMain.handle(IPC.sendersList, () => sendersWithAi())
   registerCalendarIpc()
   registerCleanupIpc()
+  registerMailIpc()
   registerMoneyIpc()
   registerBoardsIpc()
 
   app.on('before-quit', () => mail.closeMail())
+  app.on('before-quit', () => closeMailClient())
   app.on('before-quit', () => closeCalendar())
   app.on('before-quit', () => closeMoney())
   app.on('before-quit', () => closeBoards())
@@ -131,6 +164,7 @@ function startApp(): void {
     // Only the windowed app: headless mode hides the Dock icon instead.
     if (devIcon && isMac) app.dock?.setIcon(devIcon)
     setupAppearance()
+    blockFrameLoads()
     initAi()
     registerAiIpc()
     registerAssistantIpc()

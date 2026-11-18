@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountStatus, AppInfo } from '@ordo/shared'
 import { ConnectSheet } from './components/ConnectSheet'
 import { Sidebar } from './components/Sidebar'
-import { Toolbar } from './components/Toolbar'
+import { Toolbar, ToolbarSlot } from './components/Toolbar'
 import { HomePage } from './pages/HomePage'
-import { InboxPage } from './pages/InboxPage'
+import { MailPage } from './pages/MailPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancesPage } from './pages/FinancesPage'
 import { BillsPage } from './pages/BillsPage'
@@ -22,6 +22,9 @@ export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [account, setAccount] = useState<AccountStatus | null>(null)
   const [connecting, setConnecting] = useState(false)
+  // Mail shows the open mailbox's name in the toolbar.
+  const [titleOverride, setTitleOverride] = useState<string | null>(null)
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(false)
   /** Bumped when the assistant opens a page or finishes a change, so the page loads fresh data. */
   const [pageKey, setPageKey] = useState(0)
@@ -122,8 +125,9 @@ export function App() {
       <Sidebar route={route} onNavigate={setRoute} platform={info?.platform} />
       <main ref={main} className="relative min-w-0 flex-1 bg-content border-l border-sep">
         <Toolbar
-          title={TITLES[route]}
+          title={(route === 'mail/inbox' && titleOverride) || TITLES[route]}
           platform={info?.platform}
+          slotRef={setToolbarSlot}
           assistant={{
             open: assistantOpen,
             waiting: assistant.waiting,
@@ -132,38 +136,41 @@ export function App() {
           }}
         />
         {/* Content scrolls under the translucent toolbar, so pages start 52px down. */}
-        <div
-          key={pageKey}
-          className="absolute inset-0 flex flex-col overflow-auto pt-[52px]"
-          style={docked ? { right: 404 } : undefined}
-        >
-          {route === 'home' && <HomePage onNavigate={setRoute} />}
-          {route === 'mail/inbox' && (
-            <InboxPage
-              account={account}
-              onConnect={() => setConnecting(true)}
-              onDisconnect={() => void disconnect()}
-              onNavigate={setRoute}
-            />
-          )}
-          {route === 'mail/unclutter' && (
-            <UnclutterPage
-              key={account?.connected ? account.email : 'sample'}
-              account={account}
-              onConnect={() => setConnecting(true)}
-              onScanned={() => void refreshAccount()}
-              onOpenSettings={() => setRoute('settings')}
-            />
-          )}
-          {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
-          {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
-          {route === 'boards' && <BoardsPage onNavigate={setRoute} />}
-          {route === 'money/finances' && (
-            <FinancesPage onOpenSettings={() => setRoute('settings')} initialMonth={financeMonth} />
-          )}
-          {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
-          {route === 'settings' && <SettingsPage />}
-        </div>
+        <ToolbarSlot.Provider value={toolbarSlot}>
+          <div
+            key={pageKey}
+            className="absolute inset-0 flex flex-col overflow-auto pt-[52px]"
+            style={docked ? { right: 404 } : undefined}
+          >
+            {route === 'home' && <HomePage onNavigate={setRoute} />}
+            {route === 'mail/inbox' && (
+              <MailPage account={account} onConnect={() => setConnecting(true)} onTitle={setTitleOverride} />
+            )}
+            {route === 'mail/unclutter' && (
+              <UnclutterPage
+                key={account?.connected ? account.email : 'sample'}
+                account={account}
+                onConnect={() => setConnecting(true)}
+                onScanned={() => void refreshAccount()}
+                onOpenSettings={() => setRoute('settings')}
+              />
+            )}
+            {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
+            {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
+            {route === 'boards' && <BoardsPage onNavigate={setRoute} />}
+            {route === 'money/finances' && (
+              <FinancesPage onOpenSettings={() => setRoute('settings')} initialMonth={financeMonth} />
+            )}
+            {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
+            {route === 'settings' && (
+              <SettingsPage
+                account={account}
+                onConnect={() => setConnecting(true)}
+                onDisconnect={() => void disconnect()}
+              />
+            )}
+          </div>
+        </ToolbarSlot.Provider>
         {assistantOpen && (
           <AssistantPanel
             assistant={assistant}
@@ -180,8 +187,8 @@ export function App() {
             onConnected={() => {
               setConnecting(false)
               void refreshAccount()
-              // Stay on Calendar if that's where you connected from.
-              if (route !== 'calendar') setRoute('mail/unclutter')
+              // Stay on Calendar or Settings if that's where you connected from.
+              if (route !== 'calendar' && route !== 'settings') setRoute('mail/unclutter')
             }}
           />
         )}

@@ -229,7 +229,7 @@ test.describe('with a connected account (GreenMail)', () => {
     // Connecting stays in the window (no passwords on command lines): do it once, then go headless.
     const app = await launchApp({ ORDO_USER_DATA: profile, ...imapEnv() })
     const page = await app.firstWindow()
-    await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+    await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
     await page.getByRole('button', { name: 'Connect iCloud' }).click()
     await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
     await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)
@@ -346,6 +346,62 @@ test.describe('with a connected account (GreenMail)', () => {
       )
       expect(plan.rejected).toEqual([{ address: SAM, reason: expect.stringContaining('Never included') }])
       expect(plan.senders).toEqual([expect.objectContaining({ address: PROMO, emails: 2 })])
+    } finally {
+      await client.close()
+    }
+  })
+
+  test('mail sync, list, search and read work headless, and reading leaves mail unread', async () => {
+    const sync = await cli('mail', 'sync', '--json')
+    expect(sync.code).toBe(0)
+    expect(json(sync)).toMatchObject({ mailbox: 'INBOX' })
+    const boxes = json<{ mailboxes: { path: string; role: string | null }[] }>(
+      await cli('mail', 'mailboxes', '--json'),
+    )
+    expect(boxes.mailboxes[0]).toMatchObject({ path: 'INBOX', role: 'inbox' })
+
+    const found = json<{ messages: { uid: number; subject: string; unread: boolean }[] }>(
+      await cli('mail', 'search', 'off today only', '--json'),
+    )
+    const promo = found.messages.find((m) => m.subject === '10% off today only')
+    expect(promo?.unread).toBe(true)
+
+    const read = await cli('mail', 'read', String(promo!.uid))
+    expect(read.code).toBe(0)
+    expect(read.stdout).toContain(`From:    Shop ${run} <${PROMO}>`)
+    expect(read.stdout).toContain('Sale')
+
+    // Read with BODY.PEEK in a read-only mailbox: still unread on the server.
+    const c = imap()
+    await c.connect()
+    try {
+      const lock = await c.getMailboxLock('INBOX')
+      try {
+        const m = await c.fetchOne(String(promo!.uid), { flags: true }, { uid: true })
+        expect(m && m.flags?.has('\\Seen')).toBe(false)
+      } finally {
+        lock.release()
+      }
+    } finally {
+      await c.logout()
+    }
+
+    const server = await cli('mail', 'search', `u/${run}`, '--server', '--json')
+    expect(server.code).toBe(0)
+    expect(await cli('mail', 'send', '--json')).toMatchObject({ code: 2 })
+  })
+
+  test('the MCP server reads mail but has no tool to send it', async () => {
+    test.skip(process.platform === 'win32', 'MCP over stdio is not working on Windows yet')
+    const client = await mcpClient(profile, ['--allow-changes'], imapEnv())
+    try {
+      const names = (await client.listTools()).tools.map((t) => t.name)
+      expect(names).toEqual(
+        expect.arrayContaining(['ordo_messages', 'ordo_read_message', 'ordo_search_mail']),
+      )
+      expect(names.filter((n) => /_(send|draft|reply|forward|compose)(_|$)/.test(n))).toEqual([])
+      const list = toolText(await client.callTool({ name: 'ordo_messages', arguments: { limit: 5 } }))
+      expect(list.messages.length).toBeGreaterThan(0)
     } finally {
       await client.close()
     }

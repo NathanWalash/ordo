@@ -19,6 +19,8 @@
   --sheet: #f6f6f6;
   --field: #ffffff;
   --danger: #ff3b30;
+  /* Danger as text on the page: darker than --danger so it passes 4.5:1. */
+  --danger-text: #d70015;
   /* Fill for a button that deletes: white text on it is 5.4:1. --danger fails AA as a fill. */
   --danger-strong: #d70015;
   --success: #34c759;
@@ -71,6 +73,7 @@
     --sheet: #2a2a2a;
     --field: #323232;
     --danger: #ff453a;
+    --danger-text: #ff6961;
     --success: #30d158;
     --bar: rgb(30 30 30 / 0.7);
     --panel: rgb(44 44 46 / 0.72);
@@ -140,6 +143,7 @@
   --color-sheet: var(--sheet);
   --color-field: var(--field);
   --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
   --color-danger-strong: var(--danger-strong);
   --color-success: var(--success);
   --color-card: var(--card);

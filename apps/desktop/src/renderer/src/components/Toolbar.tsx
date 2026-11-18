@@ -1,10 +1,17 @@
+import { createContext, useContext, type ReactNode, type Ref } from 'react'
+import { createPortal } from 'react-dom'
 import { Sparkles } from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import { PANEL_ID } from './assistant/AssistantPanel'
 
+/** Where pages put their own toolbar buttons; App provides it once the toolbar is on screen. */
+export const ToolbarSlot = createContext<HTMLElement | null>(null)
+
 interface Props {
   title: string
   platform?: AppInfo['platform']
+  /** Receives the element pages' <ToolbarActions> render into. */
+  slotRef?: Ref<HTMLDivElement>
   assistant?: {
     open: boolean
     /** A confirmation card is waiting for an answer. */
@@ -14,15 +21,17 @@ interface Props {
   }
 }
 
-export function Toolbar({ title, platform, assistant }: Props) {
+export function Toolbar({ title, platform, slotRef, assistant }: Props) {
   // On Windows the min/max/close overlay sits top-right; keep content clear of it.
   const right = platform === 'win32' ? 'pr-[140px]' : 'pr-3'
   const waiting = assistant && assistant.waiting && !assistant.open
   return (
     <header
-      className={`glass-bar drag absolute inset-x-0 top-0 z-10 flex h-[52px] items-center border-b border-sep pl-5 ${right}`}
+      className={`glass-bar drag absolute inset-x-0 top-0 z-10 flex h-[52px] items-center gap-3 border-b border-sep pl-5 ${right}`}
     >
-      <h1 className="flex-1 truncate text-[15px] font-semibold">{title}</h1>
+      <h1 className="max-w-[35%] min-w-0 shrink truncate text-[15px] font-semibold">{title}</h1>
+      {/* Pages put their own buttons here with <ToolbarActions>. */}
+      <div ref={slotRef} className="flex min-w-0 flex-1 items-center justify-end gap-1" />
       {assistant && (
         <button
           type="button"
@@ -31,7 +40,7 @@ export function Toolbar({ title, platform, assistant }: Props) {
           aria-controls={assistant.open ? PANEL_ID : undefined}
           aria-keyshortcuts={assistant.shortcut === '⌘K' ? 'Meta+K' : 'Control+K'}
           title={`Assistant (${assistant.shortcut})`}
-          className={`no-drag relative flex h-7 items-center gap-1.5 rounded-md pr-1.5 pl-2 text-[13px] font-medium ${
+          className={`no-drag relative flex h-7 shrink-0 items-center gap-1.5 rounded-md pr-1.5 pl-2 text-[13px] font-medium ${
             assistant.open ? 'bg-selected text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'
           }`}
         >
@@ -56,4 +65,10 @@ export function Toolbar({ title, platform, assistant }: Props) {
       )}
     </header>
   )
+}
+
+/** Render buttons into the window's toolbar, to the right of the title. */
+export function ToolbarActions({ children }: { children: ReactNode }) {
+  const slot = useContext(ToolbarSlot)
+  return slot ? createPortal(children, slot) : null
 }

@@ -8,7 +8,7 @@ import type { AiProviderId } from './ai'
  */
 export const ASSISTANT_PAGES = {
   home: { title: 'Home', about: 'Home: an overview of every module' },
-  'mail/inbox': { title: 'Inbox', about: 'Mail → Inbox: the connected iCloud account' },
+  'mail/inbox': { title: 'Mail', about: 'Mail: the iCloud mail folders, message list and reader' },
   'mail/unclutter': {
     title: 'Unclutter',
     about: 'Mail → Unclutter: senders by category, to unsubscribe and clear',

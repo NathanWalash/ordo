@@ -34,7 +34,7 @@ export const CONFIRM_TIMEOUT_MS = 10 * 60_000
 /** What a cloud model sees through the assistant. Shown before the user agrees, and in docs/assistant.md. */
 export const CLOUD_SENDS =
   'Your questions, and the Ordo data the assistant looks up to answer them: transactions with amounts and dates, ' +
-  'balances, bills, calendar events, sender names, addresses and subject lines, your boards’ cards, and your iCloud email address.'
+  'balances, bills, calendar events, sender names, addresses and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address.'
 
 let history: Turn[] = []
 let running: AbortController | null = null

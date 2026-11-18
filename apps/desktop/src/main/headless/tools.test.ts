@@ -296,3 +296,37 @@ describe('board tools', () => {
     expect(t('ordo_board_move_card').intent!.test('move the gate card to Doing')).toBe(true)
   })
 })
+
+describe('mail tools', () => {
+  const read = { allowChanges: false, confirm: false }
+
+  it('only read and refresh, with what came from email marked untrusted', () => {
+    const mail = TOOLS.filter((x) => x.command?.startsWith('mail '))
+    expect(mail.map((x) => x.name).sort()).toEqual([
+      'ordo_mail_sync',
+      'ordo_mailboxes',
+      'ordo_messages',
+      'ordo_read_message',
+      'ordo_search_mail',
+    ])
+    for (const x of mail) expect(x.kind).not.toBe('change')
+    expect(t('ordo_mail_sync').kind).toBe('refresh')
+    for (const name of ['ordo_mailboxes', 'ordo_messages', 'ordo_search_mail', 'ordo_read_message']) {
+      expect(t(name).untrusted).toBe(true)
+      expect(t(name).reads).toBeTruthy()
+    }
+  })
+
+  it('reads a message as text without marking it read', async () => {
+    const services = fakeServices()
+    const r = await runTool(services, t('ordo_read_message'), { uid: 7 }, read)
+    expect(r.ok).toBe(true)
+    expect(services.mail.open).toHaveBeenCalledWith({ mailbox: 'INBOX', uid: 7 })
+    expect(JSON.stringify(r)).not.toMatch(/<html|<div/i)
+  })
+
+  it('turns a message that has gone into not_found', async () => {
+    const r = await runTool(fakeServices(), t('ordo_read_message'), { uid: 99 }, read)
+    expect(r).toMatchObject({ ok: false, code: 'not_found' })
+  })
+})

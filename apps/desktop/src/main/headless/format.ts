@@ -1,3 +1,4 @@
+import { printable } from '@ordo/mail-core'
 import type { CommandName } from './args'
 import type { CommandResult } from './commands'
 
@@ -71,6 +72,24 @@ function describe(e: {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- the data shapes come from commands.ts */
+const person = (a: any) => (a.name ? `${clean(a.name, 40)} <${clean(a.address, 60)}>` : clean(a.address, 60))
+
+/** A message's text for a terminal: line breaks kept, every control and bidi character gone. */
+const body = (text: string) => printable(text).replace(/[\t\v\f]/g, ' ')
+
+function messageTable(messages: any[], withMailbox = false): string {
+  return table([
+    ['UID', 'DATE', '', 'FROM', 'SUBJECT'],
+    ...messages.map((m: any) => [
+      String(m.uid),
+      when(m.date),
+      (m.unread ? '●' : ' ') + (m.flagged ? '⚑' : ' '),
+      clean(m.from.name ?? m.from.address, 30),
+      clean(m.subject || '(no subject)', 70) + (withMailbox ? `  [${clean(m.mailbox, 30)}]` : ''),
+    ]),
+  ])
+}
+
 const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   status: (d) =>
     [
@@ -165,6 +184,53 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       ? `Nothing restored (${d.reason}).`
       : `Moved ${plural(d.restored, 'email')} back to the inbox.` +
         (d.missing ? ` ${d.missing} couldn't be restored.` : ''),
+
+  'mail mailboxes': (d) =>
+    d.mailboxes.length === 0
+      ? 'No mailboxes yet. Run `mail sync` first.'
+      : table([
+          ['UNREAD', 'MESSAGES', 'MAILBOX'],
+          ...d.mailboxes.map((m: any) => [
+            String(m.unread),
+            String(m.messages),
+            clean(m.path, 80) + (m.role && m.role !== 'inbox' ? `  (${m.role})` : ''),
+          ]),
+        ]),
+
+  'mail sync': (d) =>
+    `Checked ${clean(d.mailbox, 60)}: ${plural(d.added, 'new message')}` +
+    (d.removed ? `, ${d.removed} gone` : '') +
+    (d.changed ? `, ${d.changed} changed` : '') +
+    '.',
+
+  'mail list': (d) =>
+    d.total === 0
+      ? `No messages in ${clean(d.mailbox, 60)}. Run \`mail sync --mailbox ${clean(d.mailbox, 60)}\` to check.`
+      : messageTable(d.messages) + more(d, 'messages'),
+
+  'mail search': (d) =>
+    d.messages.length === 0
+      ? d.where === 'cache'
+        ? 'Nothing found in downloaded mail. Add --server to search the server.'
+        : 'Nothing found.'
+      : messageTable(d.messages, d.where === 'cache' && !d.mailbox),
+
+  'mail read': (d) =>
+    [
+      `From:    ${d.from ? person(d.from) : ''}`,
+      `To:      ${d.to.map(person).join(', ')}`,
+      d.cc.length ? `Cc:      ${d.cc.map(person).join(', ')}` : '',
+      `Date:    ${when(d.date)}`,
+      `Subject: ${clean(d.subject, 200)}`,
+      d.attachments.length
+        ? `Files:   ${d.attachments.map((a: any) => clean(a.filename, 60)).join(', ')}`
+        : '',
+      '',
+      body(d.text),
+      d.truncated ? '\n[The message is longer than this.]' : '',
+    ]
+      .filter((l, i) => l !== '' || i === 6)
+      .join('\n'),
 
   'calendar sync': (d) =>
     `Synced ${plural(d.calendars, 'calendar')} (${d.fetched} fetched, ${d.skipped} unchanged): ${plural(d.events, 'event')}.` +
@@ -327,11 +393,24 @@ export function formatHuman(name: CommandName, result: CommandResult): string {
 
 /** The JSON document to print: the data, or `{ "error": { "code", "message" } }`. */
 export function formatJson(result: CommandResult): string {
-  return JSON.stringify(
-    result.ok ? result.data : { error: { code: result.code, message: result.message } },
-    null,
-    2,
+  return escapeForTerminal(
+    JSON.stringify(
+      result.ok ? result.data : { error: { code: result.code, message: result.message } },
+      null,
+      2,
+    ),
   )
+}
+
+/** C1 controls, bidi marks, overrides and isolates, and the line and paragraph separators. */
+const TERMINAL_UNSAFE = /[\u0080-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g
+
+/**
+ * JSON.stringify already escapes C0 controls; this escapes the rest of what a terminal would act
+ * on (C1 controls like CSI, and bidi tricks) as \u sequences. Still the same JSON.
+ */
+export function escapeForTerminal(json: string): string {
+  return json.replace(TERMINAL_UNSAFE, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 export const HELP = `Ordo, headless. Runs without a window, for scripts and AI agents.
@@ -350,6 +429,14 @@ Mail:
   cleanup run --sender <address>... --confirm   Unsubscribe and move emails to Trash *
   history [--limit <n>]                         Past clean-ups
   undo <id> --confirm                           Move a clean-up's emails back from Trash *
+  mail mailboxes                                Folders with message and unread counts
+  mail sync [--mailbox <path>]                  Fetch new mail in a folder (default INBOX)
+  mail list [--mailbox <path>] [--unread] [--limit <n>]
+                                                Messages, newest first, with their uid
+  mail search <words> [--mailbox <path>] [--server] [--limit <n>]
+                                                Search downloaded mail, or the server
+  mail read <uid> [--mailbox <path>]            A message as plain text. Doesn't mark it read
+                                                Headless mode never sends or changes mail.
 
 Calendar:
   calendar sync                                 Fetch changed calendars

@@ -64,6 +64,11 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `cleanup run --sender <address>... [--no-unsubscribe] [--no-trash] --confirm` | Unsubscribe and move the senders' emails to Trash \*             |
 | `history [--limit <n>]`                                                       | Past clean-ups, newest first                                     |
 | `undo <id> --confirm`                                                         | Move a clean-up's emails back from Trash \*                      |
+| `mail mailboxes`                                                              | Folders with message and unread counts                           |
+| `mail sync [--mailbox <path>]`                                                | Fetch new mail in one folder into the cache (default INBOX)      |
+| `mail list [--mailbox <path>] [--unread] [--limit <n>]`                       | Cached messages, newest first, with the uid to read              |
+| `mail search <words> [--mailbox <path>] [--server] [--limit <n>]`             | Search the cache (every folder), or the server (one folder)      |
+| `mail read <uid> [--mailbox <path>]`                                          | A message as plain text, headers and attachment names            |
 | `calendar sync`                                                               | Fetch changed iCloud calendars and calendar links into the cache |
 | `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
 | `calendar list`                                                               | Calendars, where each comes from, and which can be changed       |
@@ -92,6 +97,13 @@ the starred commands. Unknown commands and flags are errors.
 plain-http unsubscribe link or an unsubscribe email to a different domain has to be confirmed in
 the review sheet, so headless refuses those senders unless you add `--no-unsubscribe` (move to
 Trash only). A sender whose unsubscribe is a web page is opened in your browser, as in the app.
+
+The `mail` commands are read-only, like the mail client's reading side: there is no way to send,
+save a draft, flag or move mail from headless mode or MCP, even with `--allow-changes`. `mail read`
+fetches the message with `BODY.PEEK` from a mailbox opened read-only, so it stays unread; HTML is
+turned into text, with link addresses after their text (`Read more <https://…>`), and printed with
+control characters and bidi overrides removed. `mail sync` refreshes the cache like `scan` (it takes
+the write lock but changes nothing on the server); for the inbox it is the same scan.
 
 `money import` accepts a regular `.csv` file under 5 MB (symlinks are resolved first), then reads
 it with the same statement parser and limits as an import in the app.
@@ -171,7 +183,10 @@ and nothing changes.
 
 Human-readable text by default. Text that came from emails, statements or calendars has control
 characters and bidi overrides removed before it reaches your terminal. With `--json`, stdout
-carries exactly one JSON document and nothing else (progress and logs go to stderr). Errors look
+carries exactly one JSON document and nothing else (progress and logs go to stderr). Control
+characters, C1 controls and bidi characters in it are written as `\u` escapes, so the JSON is safe
+to print in a terminal and still parses to the same text; MCP results are escaped the same way.
+Errors look
 like this, with a non-zero exit code:
 
 ```json
@@ -214,6 +229,19 @@ Shapes, trimmed:
   "rejected": [ { "address": "sam@friend.example", "reason": "Someone you’ve written to. Never included in bulk actions." } ],
   "summary": { "senders": 1, "emailsToTrash": 41, "unsubscribes": 1 } }
 
+// mail list --json (mail search adds "query" and "where": "cache" or "server")
+{ "mailbox": "INBOX", "total": 4120, "offset": 0, "shown": 25, "messages": [
+  { "mailbox": "INBOX", "uid": 9071, "date": "2026-11-16T10:00:00.000Z",
+    "from": { "address": "sam@friend.example", "name": "Sam" }, "to": [{ "address": "you@icloud.com", "name": null }],
+    "subject": "Lunch?", "unread": true, "flagged": false, "answered": false, "attachments": false }
+] }
+
+// mail read 9071 --json
+{ "mailbox": "INBOX", "uid": 9071, "date": "2026-11-16T10:00:00.000Z", "from": { "address": "sam@friend.example", "name": "Sam" },
+  "to": [...], "cc": [], "replyTo": [], "subject": "Lunch?", "messageId": "<abc@friend.example>",
+  "unread": true, "flagged": false, "text": "Are you free on Friday?", "truncated": false,
+  "attachments": [{ "filename": "menu.pdf", "contentType": "application/pdf", "size": 51234 }] }
+
 // calendar events --json, and the ordo_calendar_events MCP tool. Timed events give instants (UTC);
 // all-day events give dates, YYYY-MM-DD, with an exclusive end as in iCalendar (a one-day event
 // on 10 July ends on 11 July). The human output shows times on this computer's clock.
@@ -244,10 +272,13 @@ running (waiting at most five minutes), so a clean-up a client cancels or abando
 and can be undone.
 
 **Read tools** (always there): `ordo_status`, `ordo_senders`, `ordo_cleanup_plan`, `ordo_history`,
-`ordo_calendar_events`, `ordo_calendar_list`, `ordo_bills`, `ordo_transactions`, `ordo_balances`,
-`ordo_boards`, `ordo_board_cards`, `ordo_scan`, `ordo_calendar_sync`. List tools take `limit` and
-`offset` with small defaults, so an agent isn't flooded. `ordo_scan` and `ordo_calendar_sync`
-refresh Ordo's local cache; they change nothing on the server.
+`ordo_mailboxes`, `ordo_messages`, `ordo_search_mail`, `ordo_read_message`, `ordo_calendar_events`,
+`ordo_calendar_list`, `ordo_bills`, `ordo_transactions`, `ordo_balances`, `ordo_boards`,
+`ordo_board_cards`, `ordo_scan`, `ordo_mail_sync`, `ordo_calendar_sync`. List tools take `limit` and
+`offset` with small defaults, so an agent isn't flooded. `ordo_scan`, `ordo_mail_sync` and
+`ordo_calendar_sync` refresh Ordo's local cache; they change nothing on the server.
+`ordo_read_message` returns a message as plain text and never marks it read. There is no tool to
+send, draft, flag or move mail, with or without `--allow-changes`.
 
 **Change tools** (only with `--allow-changes`): `ordo_cleanup_run`, `ordo_undo`,
 `ordo_import_statement`, `ordo_ai_sort`, `ordo_money_sort`, `ordo_calendar_add`,
@@ -342,6 +373,8 @@ exists) and taken over; so is one older than six hours, in case the process ID h
 - **No secrets out.** `status` shows the account email only; the password and tokens are never
   printed or returned. Connecting an account is only possible in the window.
 - **No network listener.** The MCP server is stdio only.
+- **No sending.** Headless mode and MCP can read mail but never send it, save drafts, flag it or
+  move it. Sending only happens from a click on Send in the window.
 - **Untrusted text is data.** Email-, statement- and calendar-derived text is never put into
   shell commands, file paths or prompts beyond what the app already does (AI sorting sends sender
   names and subjects to the model you chose, as documented in [ai.md](ai.md)).

@@ -98,7 +98,7 @@ test.afterAll(async () => {
 const row = () => page.getByRole('row', { name: new RegExp(QUIET) })
 
 test('Sort with AI moves unsure senders out of Other and never sends people', async () => {
-  await page.getByRole('navigation').getByRole('button', { name: 'Inbox' }).click()
+  await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await page.getByRole('button', { name: 'Connect iCloud' }).click()
   await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
   await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)

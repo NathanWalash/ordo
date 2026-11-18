@@ -19,7 +19,7 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** You can connect iCloud, scan your inbox, see who's filling it, and
+> **Early days.** You can connect iCloud, read, search and write mail, see who’s filling your inbox, and
 > unsubscribe and clear senders with a review step and undo. See the [roadmap](#roadmap).
 
 ## Why Ordo
@@ -34,34 +34,35 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 
 ## Features
 
-|                                                                                 | Status  |
-| ------------------------------------------------------------------------------- | ------- |
-| Home screen and module sidebar                                                  | Done    |
-| Unclutter preview with sample data                                              | Done    |
-| Light, dark or system theme, with frosted glass surfaces                        | Done    |
-| Connect iCloud (app-specific password in the Keychain)                          | Done    |
-| Scan inbox headers and group by sender                                          | Done    |
-| Sort senders with rules                                                         | Done    |
-| AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test           | Done    |
-| Sort with AI in Unclutter: a model sorts the senders in Other                   | Done    |
-| One-click unsubscribe (RFC 8058) and move to Trash, with a review step          | Done    |
-| Unclutter clean-up history with undo                                            | Done    |
-| Assistant (⌘K): ask about mail, calendar and money; changes need a confirm card | Done    |
-| Full mail client: read, search, compose                                         | Planned |
-| Calendar: iCloud calendars in month, week and agenda views                      | Done    |
-| Calendar: subscribe by link (Google, Outlook, webcal) or import .ics            | Done    |
-| Create and edit calendar events                                                 | Done    |
-| Money: import bank statement CSVs, spending by category and month               | Done    |
-| Money: find bills and subscriptions in statements and email receipts            | Done    |
-| Money: split bills with flatmates, balances and settling up                     | Done    |
-| Money: bill due dates, renewals and trial ends on the Calendar                  | Done    |
-| Money: Sort with AI for categories and matching bills to email                  | Done    |
-| Money: change a transaction's category yourself                                 | Done    |
-| Money: HSBC and Monzo app exports; transfers between your accounts              | Done    |
-| Headless mode: a CLI and an MCP server for scripts and AI agents                | Done    |
-| Boards: local kanban with drag and drop, custom fields and templates            | Done    |
-| Boards: link cards to events, emails, bills and cards; due on Calendar          | Done    |
-| Boards: Suggest with AI (due date, checklist, labels and links)                 | Done    |
+|                                                                                 | Status |
+| ------------------------------------------------------------------------------- | ------ |
+| Home screen and module sidebar                                                  | Done   |
+| Unclutter preview with sample data                                              | Done   |
+| Light, dark or system theme, with frosted glass surfaces                        | Done   |
+| Connect iCloud (app-specific password in the Keychain)                          | Done   |
+| Scan inbox headers and group by sender                                          | Done   |
+| Sort senders with rules                                                         | Done   |
+| AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test           | Done   |
+| Sort with AI in Unclutter: a model sorts the senders in Other                   | Done   |
+| One-click unsubscribe (RFC 8058) and move to Trash, with a review step          | Done   |
+| Unclutter clean-up history with undo                                            | Done   |
+| Assistant (⌘K): ask about mail, calendar and money; changes need a confirm card | Done   |
+| Mail client: folders, reading with a safe HTML view, search, flags              | Done   |
+| Mail client: write, reply, forward and drafts through iCloud SMTP               | Done   |
+| Calendar: iCloud calendars in month, week and agenda views                      | Done   |
+| Calendar: subscribe by link (Google, Outlook, webcal) or import .ics            | Done   |
+| Create and edit calendar events                                                 | Done   |
+| Money: import bank statement CSVs, spending by category and month               | Done   |
+| Money: find bills and subscriptions in statements and email receipts            | Done   |
+| Money: split bills with flatmates, balances and settling up                     | Done   |
+| Money: bill due dates, renewals and trial ends on the Calendar                  | Done   |
+| Money: Sort with AI for categories and matching bills to email                  | Done   |
+| Money: change a transaction's category yourself                                 | Done   |
+| Money: HSBC and Monzo app exports; transfers between your accounts              | Done   |
+| Headless mode: a CLI and an MCP server for scripts and AI agents                | Done   |
+| Boards: local kanban with drag and drop, custom fields and templates            | Done   |
+| Boards: link cards to events, emails, bills and cards; due on Calendar          | Done   |
+| Boards: Suggest with AI (due date, checklist, labels and links)                 | Done   |
 
 ## Headless mode and MCP
 
@@ -136,11 +137,11 @@ Playwright, electron-builder, pnpm workspaces.
 ## Roadmap
 
 1. **Unclutter for real:** iCloud connection, header scan into SQLite, rule and model-based sorting, review, unsubscribe, move to Trash, history.
-2. **Reading mail:** folders, threads, a safe HTML reader with remote images blocked, search.
-3. **Writing mail:** compose, reply, drafts, attachments.
+2. **Reading mail (done):** folders, a safe HTML reader with remote images blocked, search. Conversation threads are next.
+3. **Writing mail (done):** compose, reply, reply all, forward, drafts, attachments.
 4. **Finance** and other modules. Money and Boards are in; see [docs/boards.md](docs/boards.md).
 
-More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
+How the mail client keeps you safe, and its keyboard shortcuts, are in [docs/mail.md](docs/mail.md). More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
 Boards are described in [docs/boards.md](docs/boards.md).
 
 ## Contributing

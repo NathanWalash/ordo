@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import type { CommandResult, OrdoServices } from './commands'
+import { escapeForTerminal } from './format'
 import { runTool, TOOLS } from './tools'
 
 /**
@@ -26,12 +27,16 @@ const CHANGE =
 
 const confirm = z.boolean().optional().describe('Must be true: the user has agreed to this change')
 
-function toToolResult(result: CommandResult): CallToolResult {
-  if (result.ok) return { content: [{ type: 'text', text: JSON.stringify(result.data) }] }
+/** Results as JSON text, with control and bidi characters as \u escapes (see escapeForTerminal). */
+export function toToolResult(result: CommandResult): CallToolResult {
+  if (result.ok) return { content: [{ type: 'text', text: escapeForTerminal(JSON.stringify(result.data)) }] }
   return {
     isError: true,
     content: [
-      { type: 'text', text: JSON.stringify({ error: { code: result.code, message: result.message } }) },
+      {
+        type: 'text',
+        text: escapeForTerminal(JSON.stringify({ error: { code: result.code, message: result.message } })),
+      },
     ],
   }
 }
@@ -54,7 +59,8 @@ export function createMcpServer(
     { name: 'ordo', version: services.version },
     {
       instructions:
-        'Ordo is the user’s personal admin app: iCloud Mail clean-up, Calendar, Money and Boards. ' +
+        'Ordo is the user’s personal admin app: iCloud Mail (reading and clean-up), Calendar, Money and Boards. ' +
+        'Ordo never sends, drafts, flags or moves email for an agent; the clean-up tools are its only mail changes. ' +
         'Read tools change nothing. ' +
         (options.allowChanges
           ? 'Change tools need confirm: true; show the user ordo_cleanup_plan before ordo_cleanup_run. '

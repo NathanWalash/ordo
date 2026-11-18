@@ -61,6 +61,13 @@ const ref = (flag: string, required = `${flag} needs a value`) =>
 
 const address = z.string().trim().min(3, 'Give a sender address').max(320, 'That address is too long')
 
+const mailboxPath = z
+  .string()
+  .min(1, '--mailbox needs a mailbox path, as `mail mailboxes` lists it')
+  .max(1000, '--mailbox is too long')
+  // eslint-disable-next-line no-control-regex -- control characters are what's refused
+  .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), '--mailbox is not a mailbox path')
+const mailbox = mailboxPath.default('INBOX')
 /** A day (`2026-11-20`, an all-day event) or a time (`2026-11-20T09:30`). */
 const when = (flag: string) =>
   z
@@ -146,6 +153,35 @@ const COMMANDS = {
     flags: z.object({
       id: digits(z.number({ error: 'undo needs a clean-up id from `history`' }).int().positive()),
       confirm: z.boolean().default(false),
+    }),
+  },
+  'mail mailboxes': { args: [], flags: z.object({}) },
+  'mail sync': { args: [], flags: z.object({ mailbox }) },
+  'mail list': {
+    args: [],
+    flags: z.object({ mailbox, unread: z.boolean().default(false), limit: limit(25, 500) }),
+  },
+  'mail search': {
+    args: ['query'],
+    flags: z.object({
+      query: z
+        .string({ error: 'mail search needs something to look for' })
+        .trim()
+        .min(1, 'mail search needs something to look for')
+        .max(200, 'Search for at most 200 characters'),
+      mailbox: mailboxPath.optional(),
+      server: z.boolean().default(false),
+      limit: limit(25, 200),
+    }),
+  },
+  'mail read': {
+    args: ['uid'],
+    flags: z.object({
+      uid: z.coerce
+        .number({ error: 'mail read needs a message uid from `mail list`' })
+        .int('The uid is a whole number')
+        .positive('The uid is a whole number'),
+      mailbox,
     }),
   },
   'calendar sync': { args: [], flags: z.object({}) },
@@ -281,7 +317,7 @@ export const CHANGE_COMMANDS: ReadonlySet<CommandName> = new Set([
   'calendar delete',
 ])
 
-const GROUPS = new Set(['cleanup', 'calendar', 'money', 'ai', 'boards'])
+const GROUPS = new Set(['cleanup', 'mail', 'calendar', 'money', 'ai', 'boards'])
 
 /** How each flag is written: a switch, a value, or a value that may repeat. */
 const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
@@ -313,6 +349,9 @@ const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
   month: 'value',
   account: 'value',
   sender: 'list',
+  mailbox: 'value',
+  unread: 'switch',
+  server: 'switch',
   board: 'value',
   column: 'value',
   due: 'value',
