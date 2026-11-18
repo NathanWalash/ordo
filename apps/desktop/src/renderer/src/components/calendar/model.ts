@@ -1,5 +1,6 @@
 import {
   addDays,
+  sameDay,
   startOfDay,
   type CalendarEvent,
   type CalendarView,
@@ -60,7 +61,8 @@ export function toItems(
       key: `overlay|${o.id}`,
       title: o.title,
       start: startOfDay(o.date),
-      end: addDays(startOfDay(o.date), 1),
+      // A card's date range runs to the day after its last day, like an all-day event.
+      end: addDays(startOfDay(o.until && o.until > o.date ? o.until : o.date), 1),
       allDay: true,
       overlay: o,
     })),
@@ -73,6 +75,18 @@ export const ink = (color: string) => `color-mix(in srgb, ${color} 62%, var(--in
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 export const formatTime = (d: Date) => timeFormat.format(d)
+
+/**
+ * What the agenda shows for an item under `day`: its start time on its first day, "Until" its
+ * end on its last, and "All day" for an all-day item or the days in between.
+ */
+export function agendaTime(item: { start: Date; end: Date; allDay: boolean }, day: Date): string {
+  if (item.allDay) return 'All day'
+  if (sameDay(item.start, day)) return formatTime(item.start)
+  // The end is exclusive: an event that ends at midnight ends on the day before.
+  if (sameDay(new Date(item.end.getTime() - 1), day)) return `Until ${formatTime(item.end)}`
+  return 'All day'
+}
 
 /** Short time for dense cells: "9:30" or "18:00", without the AM/PM where the locale allows. */
 export function formatTimeShort(d: Date): string {
@@ -96,21 +110,23 @@ export function viewTitle(
   view: CalendarView,
   cursor: Date,
   range: DateRange,
+  { short = false } = {},
 ): { month: string; year: string } {
   const year = (d: Date) => String(d.getFullYear())
+  const month = (d: Date) => d.toLocaleDateString(undefined, { month: short ? 'short' : 'long' })
   if (view === 'week') {
     const first = range.start
     const last = addDays(range.end, -1)
     if (first.getMonth() !== last.getMonth()) {
-      const short = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' })
+      const abbr = (d: Date) => d.toLocaleDateString(undefined, { month: 'short' })
       return {
-        month: `${short(first)} – ${short(last)}`,
+        month: `${abbr(first)} – ${abbr(last)}`,
         year: first.getFullYear() === last.getFullYear() ? year(last) : `${year(first)} – ${year(last)}`,
       }
     }
-    return { month: first.toLocaleDateString(undefined, { month: 'long' }), year: year(first) }
+    return { month: month(first), year: year(first) }
   }
-  return { month: cursor.toLocaleDateString(undefined, { month: 'long' }), year: year(cursor) }
+  return { month: month(cursor), year: year(cursor) }
 }
 
 /** The locale's first day of the week (0 = Sunday), Monday if the runtime can't say. */

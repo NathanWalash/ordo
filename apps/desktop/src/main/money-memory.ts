@@ -29,13 +29,13 @@ import {
 } from '@ordo/money-core'
 import {
   AnswerSchema,
-  AskInputSchema,
+  MoneyAskInputSchema,
   CompareSchema,
   MEMORY_IPC,
   SaveFactSchema,
   isCloudProvider,
   moneyDetailsAllowed,
-  type AskOutcome,
+  type MoneyAskOutcome,
   type AskStep,
   type MemoryResult,
   type MemoryView,
@@ -269,8 +269,8 @@ let asking: AbortController | null = null
  * Ask Ordo. Needs a model, and for a cloud one both the usual consent and the separate consent to
  * send exact amounts, dates and names. Changes nothing: suggested facts come back to be saved by you.
  */
-export async function ask(raw: unknown, onStep?: (s: AskStep) => void): Promise<AskOutcome> {
-  const parsed = AskInputSchema.safeParse(raw)
+export async function ask(raw: unknown, onStep?: (s: AskStep) => void): Promise<MoneyAskOutcome> {
+  const parsed = MoneyAskInputSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
   const ai = aiSettings()
   if (ai.provider === 'none')

@@ -1,3 +1,4 @@
+import { printable } from '@ordo/mail-core'
 import type { CommandName } from './args'
 import type { CommandResult } from './commands'
 
@@ -7,9 +8,15 @@ import type { CommandResult } from './commands'
  * control characters before it reaches a terminal (no escape sequences, no fake lines).
  */
 
-// C0 and C1 control characters, DEL, and bidi overrides/isolates.
+// C0 and C1 control characters, DEL, bidi overrides/isolates and marks, zero-width characters,
+// line and paragraph separators, and the byte order mark.
 // eslint-disable-next-line no-control-regex
-const UNSAFE = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
+
+/** Like `UNSAFE`, but keeping tabs and line breaks: for multi-line text such as an answer. */
+export const UNSAFE_KEEP_LINES =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g
 
 export function clean(value: unknown, max = 80): string {
   const s = String(value ?? '').replace(UNSAFE, ' ')
@@ -22,8 +29,18 @@ export function pounds(pence: number | null | undefined): string {
   return `${sign}£${(Math.abs(pence) / 100).toFixed(2)}`
 }
 
+/** The first eight characters of an id: enough to name a card in `boards move-card`. */
+const shortId = (id: unknown) => clean(id, 40).slice(0, 8)
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 const when = (iso: unknown) => (typeof iso === 'string' ? iso.replace('T', ' ').slice(0, 16) : 'never')
+const pad = (n: number) => String(n).padStart(2, '0')
+/** An instant as this computer's clock shows it, `YYYY-MM-DD HH:MM`, for event times. */
+function localTime(iso: unknown): string {
+  const d = typeof iso === 'string' ? new Date(iso) : null
+  if (!d || Number.isNaN(d.getTime())) return when(iso)
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function table(rows: string[][]): string {
   if (!rows.length) return ''
@@ -38,7 +55,41 @@ const more = (d: { total: number; offset: number; shown: number }, what: string)
     ? `\n…and ${d.total - d.offset - d.shown} more ${what}. Use --limit to see more.`
     : ''
 
+/** "2026-11-20 09:00 – 10:00 Europe/London, weekly" for a changed event. */
+function describe(e: {
+  allDay: boolean
+  start: string
+  end: string
+  timeZone: string | null
+  repeat: { frequency: string } | null
+}): string {
+  const span = e.allDay
+    ? e.start === e.end
+      ? `${e.start}, all day`
+      : `${e.start} to ${e.end}, all day`
+    : `${e.start.replace('T', ' ')} – ${e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11) : e.end.replace('T', ' ')}${e.timeZone ? ` ${clean(e.timeZone, 40)}` : ''}`
+  return e.repeat ? `${span}, ${e.repeat.frequency}` : span
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- the data shapes come from commands.ts */
+const person = (a: any) => (a.name ? `${clean(a.name, 40)} <${clean(a.address, 60)}>` : clean(a.address, 60))
+
+/** A message's text for a terminal: line breaks kept, every control and bidi character gone. */
+const body = (text: string) => printable(text).replace(/[\t\v\f]/g, ' ')
+
+function messageTable(messages: any[], withMailbox = false): string {
+  return table([
+    ['UID', 'DATE', '', 'FROM', 'SUBJECT'],
+    ...messages.map((m: any) => [
+      String(m.uid),
+      when(m.date),
+      (m.unread ? '●' : ' ') + (m.flagged ? '⚑' : ' '),
+      clean(m.from.name ?? m.from.address, 30),
+      clean(m.subject || '(no subject)', 70) + (withMailbox ? `  [${clean(m.mailbox, 30)}]` : ''),
+    ]),
+  ])
+}
+
 const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   status: (d) =>
     [
@@ -66,7 +117,9 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
 
   senders: (d) =>
     d.total === 0
-      ? 'No senders. Run `scan` first.'
+      ? d.category
+        ? `No senders in ${d.category === 'uncategorised' ? 'Other' : d.category}.`
+        : 'No senders. Run `scan` first.'
       : table([
           ['EMAILS', 'CATEGORY', 'UNSUBSCRIBE', 'SENDER'],
           ...d.senders.map((s: any) => [
@@ -132,6 +185,53 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       : `Moved ${plural(d.restored, 'email')} back to the inbox.` +
         (d.missing ? ` ${d.missing} couldn't be restored.` : ''),
 
+  'mail mailboxes': (d) =>
+    d.mailboxes.length === 0
+      ? 'No mailboxes yet. Run `mail sync` first.'
+      : table([
+          ['UNREAD', 'MESSAGES', 'MAILBOX'],
+          ...d.mailboxes.map((m: any) => [
+            String(m.unread),
+            String(m.messages),
+            clean(m.path, 80) + (m.role && m.role !== 'inbox' ? `  (${m.role})` : ''),
+          ]),
+        ]),
+
+  'mail sync': (d) =>
+    `Checked ${clean(d.mailbox, 60)}: ${plural(d.added, 'new message')}` +
+    (d.removed ? `, ${d.removed} gone` : '') +
+    (d.changed ? `, ${d.changed} changed` : '') +
+    '.',
+
+  'mail list': (d) =>
+    d.total === 0
+      ? `No messages in ${clean(d.mailbox, 60)}. Run \`mail sync --mailbox ${clean(d.mailbox, 60)}\` to check.`
+      : messageTable(d.messages) + more(d, 'messages'),
+
+  'mail search': (d) =>
+    d.messages.length === 0
+      ? d.where === 'cache'
+        ? 'Nothing found in downloaded mail. Add --server to search the server.'
+        : 'Nothing found.'
+      : messageTable(d.messages, d.where === 'cache' && !d.mailbox),
+
+  'mail read': (d) =>
+    [
+      `From:    ${d.from ? person(d.from) : ''}`,
+      `To:      ${d.to.map(person).join(', ')}`,
+      d.cc.length ? `Cc:      ${d.cc.map(person).join(', ')}` : '',
+      `Date:    ${when(d.date)}`,
+      `Subject: ${clean(d.subject, 200)}`,
+      d.attachments.length
+        ? `Files:   ${d.attachments.map((a: any) => clean(a.filename, 60)).join(', ')}`
+        : '',
+      '',
+      body(d.text),
+      d.truncated ? '\n[The message is longer than this.]' : '',
+    ]
+      .filter((l, i) => l !== '' || i === 6)
+      .join('\n'),
+
   'calendar sync': (d) =>
     `Synced ${plural(d.calendars, 'calendar')} (${d.fetched} fetched, ${d.skipped} unchanged): ${plural(d.events, 'event')}.` +
     (d.failed?.length
@@ -143,11 +243,34 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       ? `No events from ${d.from} to ${d.to}.`
       : table(
           d.events.map((e: any) => [
-            e.allDay ? `${String(e.start).slice(0, 10)} all day` : when(e.start),
+            e.allDay ? `${String(e.start).slice(0, 10)} all day` : localTime(e.start),
             clean(e.title, 60),
             e.calendar ? `(${clean(e.calendar, 30)})` : '',
           ]),
         ) + more(d, 'events'),
+
+  'calendar list': (d) =>
+    d.calendars.length === 0
+      ? 'No calendars yet. Run `calendar sync` first.'
+      : table(
+          d.calendars.map((c: any) => [
+            clean(c.name, 40),
+            c.source === 'icloud' ? 'iCloud' : c.source === 'link' ? 'link' : 'file',
+            c.readOnly ? 'read-only' : 'writable',
+            c.visible ? '' : 'hidden',
+          ]),
+        ),
+
+  'calendar add': (d) =>
+    `Added “${clean(d.event.title, 60)}” to ${clean(d.calendar, 40)} (${describe(d.event)}).`,
+
+  'calendar edit': (d) =>
+    `Changed “${clean(d.event.title, 60)}”${d.scope === 'this' ? ' (this event only)' : ''}: ${describe(d.event)}.`,
+
+  'calendar delete': (d) =>
+    d.scope === 'this'
+      ? `Deleted one occurrence of “${clean(d.title, 60)}”.`
+      : `Deleted “${clean(d.title, 60)}”.`,
 
   'money bills': (d) =>
     d.bills.length === 0 && d.toReview.length === 0
@@ -292,6 +415,35 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   'ai sort': (d) =>
     `Checked ${plural(d.checked, 'sender')}: ${d.changed} sorted, ${d.cached} from earlier answers, ${d.failed} failed.` +
     (d.errors.length ? `\n${d.errors.map((e: string) => clean(e, 200)).join('\n')}` : ''),
+
+  'boards list': (d) =>
+    d.boards.length === 0
+      ? 'No boards yet. Make one in the app, under Boards.'
+      : table([
+          ['CARDS', 'OVERDUE', 'ID', 'BOARD'],
+          ...d.boards.map((b: any) => [String(b.cards), String(b.overdue), shortId(b.id), clean(b.name, 60)]),
+        ]),
+
+  'boards cards': (d) =>
+    d.total === 0
+      ? 'No cards.'
+      : table([
+          ['ID', 'COLUMN', 'DUE', 'CARD'],
+          ...d.cards.map((c: any) => [
+            shortId(c.id),
+            clean(d.board ? c.column : `${c.board} › ${c.column}`, 40),
+            c.due ? (c.start ? `${c.start}…${c.due}` : c.due) : '',
+            clean(c.title, 60) +
+              (c.labels.length ? `  [${c.labels.map((l: string) => clean(l, 20)).join(', ')}]` : '') +
+              (c.checklist.total ? `  ${c.checklist.done}/${c.checklist.total}` : ''),
+          ]),
+        ]) + more(d, 'cards'),
+
+  'boards add-card': (d) =>
+    `Added “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)} (${shortId(d.card.id)}).`,
+
+  'boards move-card': (d) =>
+    `Moved “${clean(d.card.title, 60)}” to ${clean(d.card.board, 40)} › ${clean(d.card.column, 40)}.`,
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -303,11 +455,24 @@ export function formatHuman(name: CommandName, result: CommandResult): string {
 
 /** The JSON document to print: the data, or `{ "error": { "code", "message" } }`. */
 export function formatJson(result: CommandResult): string {
-  return JSON.stringify(
-    result.ok ? result.data : { error: { code: result.code, message: result.message } },
-    null,
-    2,
+  return escapeForTerminal(
+    JSON.stringify(
+      result.ok ? result.data : { error: { code: result.code, message: result.message } },
+      null,
+      2,
+    ),
   )
+}
+
+/** C1 controls, bidi marks, overrides and isolates, and the line and paragraph separators. */
+const TERMINAL_UNSAFE = /[\u0080-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g
+
+/**
+ * JSON.stringify already escapes C0 controls; this escapes the rest of what a terminal would act
+ * on (C1 controls like CSI, and bidi tricks) as \u sequences. Still the same JSON.
+ */
+export function escapeForTerminal(json: string): string {
+  return json.replace(TERMINAL_UNSAFE, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 export const HELP = `Ordo, headless. Runs without a window, for scripts and AI agents.
@@ -326,10 +491,27 @@ Mail:
   cleanup run --sender <address>... --confirm   Unsubscribe and move emails to Trash *
   history [--limit <n>]                         Past clean-ups
   undo <id> --confirm                           Move a clean-up's emails back from Trash *
+  mail mailboxes                                Folders with message and unread counts
+  mail sync [--mailbox <path>]                  Fetch new mail in a folder (default INBOX)
+  mail list [--mailbox <path>] [--unread] [--limit <n>]
+                                                Messages, newest first, with their uid
+  mail search <words> [--mailbox <path>] [--server] [--limit <n>]
+                                                Search downloaded mail, or the server
+  mail read <uid> [--mailbox <path>]            A message as plain text. Doesn't mark it read
+                                                Headless mode never sends or changes mail.
 
 Calendar:
   calendar sync                                 Fetch changed calendars
   calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]
+  calendar list                                 Calendars, and which can be changed
+  calendar add --calendar <name> --title <t> --start <when> [--end <when>] --confirm *
+          [--time-zone <zone>] [--location <l>] [--notes <n>] [--alert <minutes>]
+          [--repeat daily|weekly|monthly|yearly [--until YYYY-MM-DD | --count <n>]]
+  calendar edit --uid <uid> [--occurrence <id> | --all] <fields to change> --confirm *
+  calendar delete --uid <uid> [--occurrence <id> | --all] --confirm *
+                                                <when> is a day (2026-11-20, all day) or a
+                                                time (2026-11-20T09:30). Uids and occurrence
+                                                ids are in calendar events --json.
 
 Money:
   money bills                                   Bills and subscriptions
@@ -345,6 +527,14 @@ Money:
   money compare [--category <c>] [--account <name>]   This month so far against last month
   money answer <question-id> --answer <id> --confirm  Answer a question; saves its facts *
   money forget <fact-id> --confirm              Forget a fact *
+
+Boards:
+  boards list                                   Boards, with card and overdue counts
+  boards cards [--board <name>] [--column <name>] [--label <name>]... [--archived] [--limit <n>]
+  boards add-card --board <name> --title <text> [--column <name>] [--due YYYY-MM-DD]
+          [--start YYYY-MM-DD] [--notes <text>] [--label <name>]... --confirm   Add a card *
+  boards move-card <card> [--column <name>] [--position <n>] [--board <name>] --confirm
+                                                Move a card (id, first 8 of its id, or title) *
 
 AI:
   ai status                                     Providers and the saved choice

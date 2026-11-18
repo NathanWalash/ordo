@@ -1,29 +1,46 @@
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { createMcpServer } from './mcp'
+import { createMcpServer, serveMcp, stdinFor } from './mcp'
 import { fakeServices } from './fake-services'
 
 const READ_TOOLS = [
   'ordo_balances',
   'ordo_bills',
+  'ordo_board_cards',
+  'ordo_boards',
   'ordo_calendar_events',
+  'ordo_calendar_list',
   'ordo_calendar_sync',
   'ordo_cleanup_plan',
   'ordo_history',
+  'ordo_mail_sync',
+  'ordo_mailboxes',
+  'ordo_messages',
   'ordo_money_compare',
   'ordo_money_events',
   'ordo_money_knows',
   'ordo_money_loose_ends',
   'ordo_money_questions',
+  'ordo_read_message',
   'ordo_scan',
+  'ordo_search_mail',
   'ordo_senders',
   'ordo_status',
   'ordo_transactions',
 ]
 const CHANGE_TOOLS = [
   'ordo_ai_sort',
+  'ordo_board_add_card',
+  'ordo_board_move_card',
+  'ordo_calendar_add',
+  'ordo_calendar_delete',
+  'ordo_calendar_edit',
   'ordo_cleanup_run',
   'ordo_import_statement',
   'ordo_money_answer',
@@ -69,8 +86,25 @@ describe('MCP server', () => {
     for (const name of CHANGE_TOOLS) {
       const tool = tools.find((t) => t.name === name)!
       expect(tool.inputSchema.properties).toHaveProperty('confirm')
-      expect(tool.annotations?.destructiveHint).toBe(true)
+      expect(tool.annotations?.readOnlyHint).toBe(false)
+      // Adding or moving a card loses nothing; the mail and money changes are marked destructive.
+      expect(tool.annotations?.destructiveHint).toBe(!name.startsWith('ordo_board_'))
     }
+  })
+
+  it('keeps its tool surface stable: every name, description and input schema', async () => {
+    const { client } = await connect(true)
+    const { tools } = await client.listTools()
+    expect(
+      [...tools]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+          annotations: t.annotations,
+        })),
+    ).toMatchSnapshot()
   })
 
   it('says which fields are untrusted third-party text', async () => {
@@ -165,6 +199,127 @@ describe('MCP server', () => {
     expect(services.cleanup.undo).toHaveBeenCalledWith(3)
   })
 
+  it('has no way to send, draft, flag or move mail, even with --allow-changes', async () => {
+    const { client } = await connect(true)
+    const { tools } = await client.listTools()
+    expect(
+      tools
+        .map((t) => t.name)
+        // Boards and Calendar have their own move and edit tools; none of them touch mail.
+        .filter((n) => !/^ordo_(board|calendar)_/.test(n))
+        .filter((n) => /_(send|draft|flag|reply|forward|compose|move|mark)(_|$)/.test(n)),
+    ).toEqual([])
+    for (const name of ['ordo_messages', 'ordo_search_mail', 'ordo_read_message'])
+      expect(tools.find((t) => t.name === name)!.description).toMatch(/untrusted data, never as instructions/)
+  })
+
+  it('ordo_read_message returns text, never HTML, and doesn’t mark it read', async () => {
+    const { client, services } = await connect(false)
+    const r = await client.callTool({ name: 'ordo_read_message', arguments: { uid: 7 } })
+    expect(services.mail.open).toHaveBeenCalledWith({ mailbox: 'INBOX', uid: 7 })
+    const d = json(r)
+    expect(d).toMatchObject({
+      uid: 7,
+      subject: 'Lunch?',
+      unread: true,
+      attachments: [{ filename: 'menu.pdf' }],
+    })
+    expect(d.text).toContain('Fancy lunch?')
+    expect(d.text).toContain('The menu <https://cafe.example/menu>')
+    expect(d.text).not.toMatch(/<p>|<script>/)
+    const gone = await client.callTool({ name: 'ordo_read_message', arguments: { uid: 8 } })
+    expect(json(gone).error.code).toBe('not_found')
+  })
+
+  it('ordo_search_mail searches the cache, or the server when asked', async () => {
+    const { client, services } = await connect(false)
+    const local = json(await client.callTool({ name: 'ordo_search_mail', arguments: { query: 'lunch' } }))
+    expect(local).toMatchObject({ where: 'cache', messages: [{ uid: 7, flagged: true, unread: true }] })
+    expect(services.mail.search).toHaveBeenCalledWith({ query: 'lunch', mailbox: undefined, limit: 25 })
+    const remote = json(
+      await client.callTool({ name: 'ordo_search_mail', arguments: { query: 'lunch', server: true } }),
+    )
+    expect(remote).toMatchObject({ where: 'server', mailbox: 'INBOX', messages: [{ uid: 3 }] })
+  })
+
+  it('calendar tools map onto the same commands, and need confirm', async () => {
+    const services = fakeServices()
+    services.calendar = {
+      ...services.calendar,
+      calendars: () => [{ id: 'cal-1', name: 'Home', readOnly: false, visible: true, source: 'icloud' }],
+      locate: () => ['cal-1'],
+      details: () => ({
+        calendarId: 'cal-1',
+        recurring: true,
+        editable: true,
+        draft: {
+          title: 'Standup',
+          allDay: false,
+          start: '2026-11-02T09:00',
+          end: '2026-11-02T09:30',
+          timeZone: 'Europe/London',
+          location: '',
+          notes: '',
+          repeat: { frequency: 'weekly' },
+          alert: 5,
+        },
+      }),
+    }
+    const { client } = await connect(true, services)
+
+    const refused = await client.callTool({
+      name: 'ordo_calendar_add',
+      arguments: { calendar: 'Home', title: 'Gym', start: '2026-11-20T18:00' },
+    })
+    expect(json(refused).error.code).toBe('confirm_required')
+    expect(services.calendar.createEvent).not.toHaveBeenCalled()
+
+    const added = await client.callTool({
+      name: 'ordo_calendar_add',
+      arguments: {
+        calendar: 'Home',
+        title: 'Gym',
+        start: '2026-11-20T18:00',
+        timeZone: 'UTC',
+        alert: null,
+        confirm: true,
+      },
+    })
+    expect(json(added)).toMatchObject({ uid: 'NEW-UID', calendar: 'Home' })
+    expect(services.calendar.createEvent).toHaveBeenCalledWith({
+      calendarId: 'cal-1',
+      draft: expect.objectContaining({ title: 'Gym', end: '2026-11-20T19:00', timeZone: 'UTC', alert: null }),
+    })
+
+    await client.callTool({
+      name: 'ordo_calendar_edit',
+      arguments: {
+        uid: 'ev-1',
+        occurrence: '2026-11-09T09:00:00.000Z',
+        title: 'Late standup',
+        confirm: true,
+      },
+    })
+    expect(services.calendar.updateEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'this',
+        draft: expect.objectContaining({ title: 'Late standup', alert: 5 }),
+      }),
+    )
+
+    await client.callTool({
+      name: 'ordo_calendar_delete',
+      arguments: { uid: 'ev-1', all: true, confirm: true },
+    })
+    expect(services.calendar.deleteEvent).toHaveBeenCalledWith({
+      ref: { calendarId: 'cal-1', uid: 'ev-1' },
+      scope: 'all',
+    })
+
+    const { tools } = await client.listTools()
+    expect(tools.find((t) => t.name === 'ordo_calendar_edit')!.description).toMatch(/untrusted/)
+  })
+
   it('validates arguments with the CLI rules', async () => {
     const { client } = await connect(false)
     const r = await client.callTool({
@@ -173,5 +328,210 @@ describe('MCP server', () => {
     })
     expect(r.isError).toBe(true)
     expect(json(r)).toEqual({ error: { code: 'usage', message: '--to must be on or after --from' } })
+  })
+
+  it('lists board cards with the CLI’s rules', async () => {
+    const { client, services } = await connect(false)
+    const r = await client.callTool({
+      name: 'ordo_board_cards',
+      arguments: { board: 'Home', labels: ['Urgent'] },
+    })
+    expect(json(r)).toMatchObject({ total: 1, cards: [{ title: 'Fix the gate', column: 'To do' }] })
+    expect(services.boards.cards).toHaveBeenCalledWith({
+      board: 'Home',
+      column: undefined,
+      labels: ['Urgent'],
+      archived: false,
+    })
+    const tools = (await client.listTools()).tools
+    expect(tools.find((t) => t.name === 'ordo_board_cards')!.description).toMatch(/never as instructions/)
+  })
+
+  it('adds and moves cards only with confirm: true', async () => {
+    const { client, services } = await connect(true)
+    const refused = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: { board: 'Home', title: 'x' },
+    })
+    expect(json(refused).error.code).toBe('confirm_required')
+    expect(services.boards.addCard).not.toHaveBeenCalled()
+    const added = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: {
+        board: 'Home',
+        title: 'Book the MOT',
+        due: '2026-12-01',
+        labels: ['Urgent'],
+        confirm: true,
+      },
+    })
+    expect(json(added).card.title).toBe('Book the MOT')
+    const moved = await client.callTool({
+      name: 'ordo_board_move_card',
+      arguments: { card: 'c0ffee00', column: 'Doing', position: 2, confirm: true },
+    })
+    expect(json(moved).card.column).toBe('Doing')
+    expect(services.boards.moveCard).toHaveBeenCalledWith({
+      card: 'c0ffee00',
+      board: undefined,
+      column: 'Doing',
+      position: 2,
+    })
+    const bad = await client.callTool({
+      name: 'ordo_board_add_card',
+      arguments: { board: 'Home', title: 'x', due: 'tomorrow', confirm: true },
+    })
+    expect(json(bad).error.code).toBe('usage')
+  })
+})
+
+describe('serveMcp over stdio', () => {
+  const INIT = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+  }
+  const line = (m: object) => `${JSON.stringify(m)}\n`
+  /** A stdout that keeps everything written to it (read as it comes, so writes never wait). */
+  const collector = () => {
+    const stream = new PassThrough()
+    let text = ''
+    stream.on('data', (chunk) => (text += String(chunk)))
+    const replies = () =>
+      text
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as { id?: number; result?: unknown })
+    return { stream, replies }
+  }
+
+  it('on Windows reads standard input itself, since Electron replaces process.stdin with an ended stream', async () => {
+    // Requests redirected from a file: `Ordo.exe --headless --mcp < requests.jsonl`.
+    const dir = mkdtempSync(join(tmpdir(), 'ordo-mcp-'))
+    const file = join(dir, 'requests.jsonl')
+    writeFileSync(
+      file,
+      line(INIT) +
+        line({ jsonrpc: '2.0', method: 'notifications/initialized' }) +
+        line({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    )
+    const fd = openSync(file, 'r')
+    try {
+      const stdin = stdinFor('win32', fd)
+      expect(stdin).not.toBe(process.stdin)
+      const stdout = collector()
+      await serveMcp(fakeServices(), { allowChanges: false, stdin, stdout: stdout.stream })
+      const out = stdout.replies()
+      expect(out.map((r) => r.id)).toEqual([1, 2])
+      expect(JSON.stringify(out[1]!.result)).toContain('ordo_status')
+    } finally {
+      closeSync(fd)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('elsewhere uses process.stdin', () => {
+    expect(stdinFor('darwin')).toBe(process.stdin)
+    expect(stdinFor('linux')).toBe(process.stdin)
+  })
+
+  it('lets a running change finish when the client hangs up, so it can still be undone', async () => {
+    let finish!: () => void
+    const run = vi.fn(
+      () =>
+        new Promise<{ ok: false; error: 'invalid'; message: string }>((resolve) => {
+          finish = () => resolve({ ok: false, error: 'invalid', message: 'done' })
+        }),
+    )
+    const base = fakeServices()
+    const services = fakeServices({ cleanup: { ...base.cleanup, run } })
+    const stdin = new PassThrough()
+    const stdout = collector()
+    let served = false
+    const serving = serveMcp(services, { allowChanges: true, stdin, stdout: stdout.stream }).then(
+      () => (served = true),
+    )
+    stdin.write(line(INIT) + line({ jsonrpc: '2.0', method: 'notifications/initialized' }))
+    stdin.write(
+      line({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'ordo_cleanup_run', arguments: { senders: ['digest@news.example'], confirm: true } },
+      }),
+    )
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    stdin.end()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(served).toBe(false)
+    finish()
+    await serving
+    expect(stdout.replies().map((r) => r.id)).toEqual([1, 2])
+  })
+
+  /** Serve with a clean-up run that only finishes when the test says, already started. */
+  async function cleanupRunning(extra: { drainMs?: number } = {}) {
+    let finish!: () => void
+    const run = vi.fn(
+      () =>
+        new Promise<{ ok: false; error: 'invalid'; message: string }>((resolve) => {
+          finish = () => resolve({ ok: false, error: 'invalid', message: 'done' })
+        }),
+    )
+    const base = fakeServices()
+    const stdin = new PassThrough()
+    const stdout = collector()
+    const state = { served: false }
+    const serving = serveMcp(fakeServices({ cleanup: { ...base.cleanup, run } }), {
+      allowChanges: true,
+      stdin,
+      stdout: stdout.stream,
+      ...extra,
+    }).then(() => (state.served = true))
+    stdin.write(line(INIT) + line({ jsonrpc: '2.0', method: 'notifications/initialized' }))
+    stdin.write(
+      line({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'ordo_cleanup_run', arguments: { senders: ['digest@news.example'], confirm: true } },
+      }),
+    )
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    return { stdin, state, serving, finish: () => finish() }
+  }
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('still lets a change finish when the client cancels it and hangs up', async () => {
+    const t = await cleanupRunning()
+    t.stdin.write(line({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } }))
+    t.stdin.end()
+    await pause(150)
+    expect(t.state.served).toBe(false)
+    t.finish()
+    await t.serving
+  })
+
+  it('doesn’t hang when the connection closes itself (a line too long) with a call running', async () => {
+    const t = await cleanupRunning()
+    // Over the 10 MB a message may be: the transport gives up and closes.
+    t.stdin.write('x'.repeat(11 * 1024 * 1024))
+    await pause(150)
+    expect(t.state.served).toBe(false) // the clean-up is still running
+    t.finish()
+    await t.serving
+  })
+
+  it('stops waiting for a running call after the drain time', async () => {
+    const t = await cleanupRunning({ drainMs: 100 })
+    t.stdin.end()
+    await t.serving
+    expect(t.state.served).toBe(true)
+  })
+
+  it('on Windows, no usable standard input is the end of input, not a hang', async () => {
+    const stdin = stdinFor('win32', 987_654) // not an open file descriptor
+    await serveMcp(fakeServices(), { allowChanges: false, stdin, stdout: collector().stream })
   })
 })

@@ -3,13 +3,19 @@ import { app } from 'electron'
 import { analyseSenders } from '@ordo/mail-core'
 import {
   ICLOUD_IMAP,
+  ICLOUD_SMTP,
   ImapMailProvider,
   MailAuthError,
   MailConnectionError,
+  MailUnavailableError,
   MailStore,
+  classifyImapError,
+  serverWords,
+  type MailConnectionReason,
   scanMailbox,
   testImapLogin,
   type ImapConfig,
+  type SmtpConfig,
 } from '@ordo/mail-core/node'
 import {
   ConnectInputSchema,
@@ -62,18 +68,68 @@ export function imapConfig(user: string, pass: string): ImapConfig {
   return { ...ICLOUD_IMAP, user, pass }
 }
 
-export function explain(err: unknown): { error: ConnectError; message: string } {
-  if (err instanceof MailAuthError)
+/** iCloud SMTP by default. Tests can point an unpackaged build at a local server, like ORDO_IMAP_*. */
+export function smtpConfig(user: string, pass: string): SmtpConfig {
+  const host = !app.isPackaged ? process.env['ORDO_SMTP_HOST'] : undefined
+  if (host)
+    return {
+      host,
+      port: Number(process.env['ORDO_SMTP_PORT'] ?? 3025),
+      secure: process.env['ORDO_SMTP_SECURE'] === '1',
+      requireTLS: process.env['ORDO_SMTP_REQUIRE_TLS'] === '1',
+      user,
+      pass,
+    }
+  return { ...ICLOUD_SMTP, user, pass }
+}
+
+const ICLOUD_DOMAINS = /@(icloud|me|mac)\.com$/i
+
+/**
+ * A clear message, with a next step, for each way talking to iCloud Mail can fail. `email` is
+ * the address being connected, to spot an Apple ID that isn't an iCloud Mail address.
+ */
+export function explain(err: unknown, email?: string): { error: ConnectError; message: string } {
+  const e = classifyImapError(err)
+  if (e instanceof MailAuthError)
     return {
       error: 'auth',
-      message: "iCloud didn't accept that email and app-specific password. Check both and try again.",
+      message:
+        "iCloud didn't accept that email and app-specific password. Make sure it's an app-specific password " +
+        'from account.apple.com (your Apple ID password won’t work here) and that iCloud Mail is turned on ' +
+        'for this Apple ID.' +
+        (email && !ICLOUD_DOMAINS.test(email.trim())
+          ? ' If your Apple ID isn’t an iCloud address, sign in with your @icloud.com address instead.'
+          : ''),
     }
-  if (err instanceof MailConnectionError)
+  if (e instanceof MailUnavailableError)
     return {
-      error: 'network',
-      message: "Couldn't reach iCloud. Check your internet connection and try again.",
+      error: 'unavailable',
+      message:
+        'iCloud Mail is turning connections away right now' +
+        (e.serverText ? ` (it said “${e.serverText}”)` : '') +
+        '. This usually passes: wait a few minutes and try again, and check Apple’s System Status page if it keeps happening.',
     }
-  return { error: 'unknown', message: 'Something went wrong talking to iCloud. Try again in a moment.' }
+  if (e instanceof MailConnectionError) {
+    const messages: Record<MailConnectionReason, string> = {
+      offline:
+        "Couldn't reach iCloud. Check you're online, and that a VPN or firewall isn't blocking iCloud Mail.",
+      timeout:
+        "iCloud didn't answer in time. Your connection may be slow, or a VPN or firewall may be blocking iCloud Mail. Try again in a minute.",
+      tls: "Couldn't make a secure connection to iCloud. If you're on public Wi-Fi, sign in to it in your browser first; a VPN or antivirus that inspects traffic can also cause this.",
+      dropped: 'The connection to iCloud closed part way. Check your connection and try again.',
+    }
+    return { error: 'network', message: messages[e.reason] }
+  }
+  // The error's code or message can carry the server's own text: cleaned like everything it says.
+  const detail = serverWords((e as { code?: unknown }).code ?? e.message)
+  return {
+    error: 'unknown',
+    message:
+      'Something unexpected went wrong talking to iCloud' +
+      (detail ? ` (${detail.slice(0, 120)})` : '') +
+      '. Try again in a moment.',
+  }
 }
 
 async function check(input: ConnectInput): Promise<ConnectResult & { password?: string }> {
@@ -85,7 +141,7 @@ async function check(input: ConnectInput): Promise<ConnectResult & { password?: 
     await testImapLogin(imapConfig(email, password))
     return { ok: true, email, password }
   } catch (err) {
-    return { ok: false, ...explain(err) }
+    return { ok: false, ...explain(err, email) }
   }
 }
 
@@ -115,21 +171,59 @@ export async function connect(input: ConnectInput): Promise<ConnectResult> {
   return { ok: true, email: result.email }
 }
 
+/** Scans and syncs still running, so disconnecting can wait for them before clearing the cache. */
+const inflight = new Set<Promise<unknown>>()
+const stoppers = new Set<() => void>()
+
+/**
+ * Track a piece of mail work that writes to the cache: `stop` is called when the account is
+ * disconnected, and disconnecting waits for the work to settle before clearing the cache.
+ */
+export function trackMailWork<T>(work: Promise<T>, stop?: () => void): Promise<T> {
+  inflight.add(work)
+  if (stop) stoppers.add(stop)
+  const done = () => {
+    inflight.delete(work)
+    if (stop) stoppers.delete(stop)
+  }
+  work.then(done, done)
+  return work
+}
+
+/** The longest disconnecting waits for running work before clearing anyway. */
+const DISCONNECT_WAIT_MS = 10_000
+
 export async function disconnect(): Promise<void> {
   running?.abort()
+  for (const stop of stoppers) stop()
   deleteAccount()
+  // A sync that was running would otherwise write old mail into the cache after it's cleared.
+  const pending = [...inflight].map((p) => p.catch(() => {}))
+  await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, DISCONNECT_WAIT_MS))])
   mailStore().clear()
 }
 
-/** Fetch new inbox headers into the cache. `onProgress` streams how far it has got. */
-export async function scan(onProgress?: (p: ScanProgress) => void): Promise<ScanOutcome> {
+/** A scan of the inbox is running in this process. */
+export const isScanning = () => running !== null
+
+/**
+ * Fetch new inbox headers into the cache. `onProgress` streams how far it has got. `then` runs
+ * afterwards on the same connection and under the same lock (the mail client uses it to refresh
+ * flags and the folder list).
+ */
+export async function scan(
+  onProgress?: (p: ScanProgress) => void,
+  then?: (provider: ImapMailProvider) => Promise<void>,
+): Promise<ScanOutcome> {
   const a = loadAccount()
   if (!a) return { ok: false, error: 'auth', message: 'Connect your iCloud account first.' }
-  if (running) return { ok: false, error: 'unknown', message: 'A scan is already running.' }
-  if (changing) return { ok: false, error: 'unknown', message: 'Wait for the clean-up to finish.' }
+  if (running) return { ok: false, error: 'busy', message: 'A scan is already running.' }
+  if (changing) return { ok: false, error: 'busy', message: 'Wait for the clean-up to finish.' }
   const ctrl = (running = new AbortController())
   try {
-    const result = await withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress))
+    const result = await trackMailWork(
+      withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress, then)),
+    )
     return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
   } finally {
     running = null
@@ -140,12 +234,14 @@ async function fetchHeaders(
   a: { email: string; password: string },
   signal: AbortSignal,
   onProgress?: (p: ScanProgress) => void,
+  then?: (provider: ImapMailProvider) => Promise<void>,
 ): Promise<ScanOutcome> {
   const provider = new ImapMailProvider(imapConfig(a.email, a.password))
   try {
     await provider.connect()
     const result = await scanMailbox(provider, mailStore(), { mailbox: INBOX, signal, onProgress })
     if (!result.stopped) recordScan(new Date())
+    if (!result.stopped) await then?.(provider)
     return { ok: true, ...result }
   } catch (err) {
     return { ok: false, ...explain(err) }

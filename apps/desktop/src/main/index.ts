@@ -1,14 +1,26 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell, systemPreferences } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  safeStorage,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
+import { closeMailClient, registerMailIpc } from './mail-client'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
+import { registerAssistantIpc, stop as stopAssistant } from './assistant'
 import { closeMoney, registerMoneyIpc } from './money'
 import { registerMemoryIpc, stopAsk } from './money-memory'
+import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
 import { headlessArgs } from './headless/args'
 import { runHeadless } from './headless/run'
@@ -21,6 +33,20 @@ if (userData) app.setPath('userData', userData)
 
 const isMac = process.platform === 'darwin'
 const isWin = process.platform === 'win32'
+
+/**
+ * Tests (unpackaged builds only): run without pulling the person away from what they're doing.
+ * On macOS Ordo is a background app (no Dock icon, never active) whose window is never shown; it
+ * still loads and paints, so Playwright can drive and screenshot it. Windows and Linux crash when
+ * Playwright drags over a hidden window, so there it's shown without taking focus instead.
+ * `ORDO_E2E_SHOW=1` in the test runner turns this off to watch a run.
+ */
+const quietTest = !app.isPackaged && process.env['ORDO_TEST_BACKGROUND'] === '1'
+const hiddenWindow = quietTest && isMac
+/** No Dock icon and never the active app. Set before `ready`, so Ordo never takes focus at launch. */
+const keepInBackground = () => {
+  if (isMac) app.setActivationPolicy('accessory')
+}
 
 function winOverlay() {
   return {
@@ -49,6 +75,8 @@ function createWindow(): BrowserWindow {
     minWidth: 920,
     minHeight: 600,
     show: false,
+    // A quiet test run keeps the window hidden for good, so it must paint and run timers anyway.
+    ...(hiddenWindow && { paintWhenInitiallyHidden: true }),
     title: 'Ordo',
     // Transparent so the native material (macOS vibrancy / Windows Mica) shows through the sidebar.
     backgroundColor: '#00000000',
@@ -68,10 +96,11 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      ...(hiddenWindow && { backgroundThrottling: false }),
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  if (!hiddenWindow) win.once('ready-to-show', () => (quietTest ? win.showInactive() : win.show()))
 
   // Never let web content open windows or navigate the app away; send https links to the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -79,6 +108,13 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+  // Email is shown in a sandboxed frame inside the window. It may show its own srcdoc and
+  // nothing else: link clicks are caught by the window (which asks, then opens the browser),
+  // this refuses the frame navigations Chromium reports here, and blockFrameLoads() cancels the
+  // request for any other way of loading a page into the frame.
+  win.webContents.on('will-frame-navigate', (e) => {
+    if (!e.isMainFrame && e.url !== 'about:srcdoc' && e.url !== 'about:blank') e.preventDefault()
+  })
 
   if (isWin) nativeTheme.on('updated', () => win.setTitleBarOverlay(winOverlay()))
 
@@ -88,6 +124,17 @@ function createWindow(): BrowserWindow {
   if (!app.isPackaged && devUrl) void win.loadURL(`${devUrl}#/${route}`)
   else void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: `/${route}` })
   return win
+}
+
+/**
+ * The only frame in the window is the message frame, which shows its own srcdoc and nothing
+ * else. Refuse every request to load a page into a frame (http, https or file), whoever starts
+ * it: a link the window missed, a script, a refresh. Images and styles aren't affected.
+ */
+function blockFrameLoads(): void {
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) =>
+    callback({ cancel: details.resourceType === 'subFrame' }),
+  )
 }
 
 /** Start-up overrides for tests, honoured identically by the app and headless mode. */
@@ -112,31 +159,42 @@ function startApp(): void {
   ipcMain.handle(IPC.accountStatus, () => mail.status())
   ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
   ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-  ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
+  ipcMain.handle(IPC.accountDisconnect, () => {
+    closeMailClient()
+    return mail.disconnect().then(clearCalendar)
+  })
   ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
   ipcMain.handle(IPC.scanStop, () => mail.stopScan())
   ipcMain.handle(IPC.sendersList, () => sendersWithAi())
   registerCalendarIpc()
   registerCleanupIpc()
+  registerMailIpc()
   registerMoneyIpc()
   registerMemoryIpc()
+  registerBoardsIpc()
 
   app.on('before-quit', () => mail.closeMail())
+  app.on('before-quit', () => closeMailClient())
   app.on('before-quit', () => closeCalendar())
   app.on('before-quit', () => {
     stopAsk()
     closeMoney()
   })
+  app.on('before-quit', () => closeBoards())
   app.whenReady().then(() => {
     applyTestOverrides()
     // Only the windowed app: headless mode hides the Dock icon instead.
-    if (devIcon && isMac) app.dock?.setIcon(devIcon)
+    if (devIcon && isMac && !quietTest) app.dock?.setIcon(devIcon)
     setupAppearance()
+    blockFrameLoads()
     initAi()
     registerAiIpc()
+    registerAssistantIpc()
+    app.on('before-quit', stopAssistant)
     createWindow()
+    void tidyBoards()
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (!quietTest && BrowserWindow.getAllWindows().length === 0) createWindow()
     })
   })
 
@@ -150,5 +208,7 @@ process.on('exit', releaseWriteLock)
 
 // `--headless <command>` or `--headless --mcp`: no window, see headless/run.ts and docs/headless.md.
 const headless = headlessArgs(process.argv)
+// Headless runs (scripts, agents, MCP) and quiet test runs stay in the background from the start.
+if (headless || quietTest) keepInBackground()
 if (headless) void runHeadless(headless, applyTestOverrides)
 else startApp()

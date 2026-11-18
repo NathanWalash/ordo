@@ -8,7 +8,11 @@ const CURRENCY = /[£$€]|\b(?:GBP|EUR|USD)\b/gi
  * or isn't a number.
  */
 export function parseAmount(raw: string): number | null {
-  let s = raw.trim().replace(CURRENCY, '').replace(/[\s,]/g, '')
+  let s = raw.trim().replace(CURRENCY, '').replace(/\s/g, '')
+  // A decimal comma (`-3,41`, `1.234,56`): one comma with one or two digits after it. Thousands
+  // separators always group three digits, so this can't be one. Otherwise commas are thousands.
+  if (/^[^,]*,\d{1,2}\D*$/.test(s)) s = s.replace(/\./g, '').replace(',', '.')
+  else s = s.replace(/,/g, '')
   if (!s) return null
   let negative = false
   const suffix = /(DR|CR)$/i.exec(s)

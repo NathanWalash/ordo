@@ -49,13 +49,47 @@ export interface DateRange {
   end: Date
 }
 
+/** One CalDAV object: an event (with its overrides) as the server stores it. */
+export interface CalendarResource {
+  /** The object's URL. */
+  href: string
+  /** The server's version tag, sent back as If-Match so a change made elsewhere isn't overwritten. */
+  etag?: string
+  uid: string
+  ics: string
+}
+
 /** Anything that can serve calendars: iCloud CalDAV first, Google or Outlook later. */
 export interface CalendarProvider {
   connect(): Promise<void>
   listCalendars(): Promise<RemoteCalendar[]>
   /** Every occurrence overlapping `range`, with recurring events expanded. */
   fetchEvents(calendarId: string, range: DateRange): Promise<CalendarEvent[]>
+  /**
+   * Providers whose calendars can be changed also give the resources the events came from,
+   * so they're cached for editing.
+   */
+  fetchResources?(
+    calendarId: string,
+    range: DateRange,
+  ): Promise<{ events: CalendarEvent[]; resources: CalendarResource[] }>
   close(): Promise<void>
+}
+
+/** A provider Ordo can write events to (CalDAV). Every method throws CalendarWriteError on refusal. */
+export interface WritableCalendarProvider {
+  fetchResources(
+    calendarId: string,
+    range: DateRange,
+  ): Promise<{ events: CalendarEvent[]; resources: CalendarResource[] }>
+  /** One resource as the server has it now, or null if it's gone. */
+  fetchResource(calendarId: string, href: string): Promise<CalendarResource | null>
+  /** Add a new resource. Fails with `conflict` if one already exists at that name. */
+  createResource(calendarId: string, uid: string, ics: string): Promise<{ href: string; etag?: string }>
+  /** Replace a resource, only if it still has `etag`. */
+  updateResource(calendarId: string, href: string, ics: string, etag?: string): Promise<{ etag?: string }>
+  /** Delete a resource, only if it still has `etag`. */
+  deleteResource(calendarId: string, href: string, etag?: string): Promise<void>
 }
 
 export interface CalendarSyncProgress {

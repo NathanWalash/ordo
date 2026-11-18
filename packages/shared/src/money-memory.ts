@@ -75,14 +75,14 @@ export const CompareSchema = z.strictObject({
 })
 export type CompareInput = z.input<typeof CompareSchema>
 
-export const AskInputSchema = z.strictObject({
+export const MoneyAskInputSchema = z.strictObject({
   question: z.string().trim().min(1, 'Ask a question.').max(500, 'That question is too long.'),
   history: z
     .array(z.strictObject({ question: z.string().max(500), answer: z.string().max(2000) }))
     .max(10)
     .default([]),
 })
-export type AskInput = z.input<typeof AskInputSchema>
+export type MoneyAskInput = z.input<typeof MoneyAskInputSchema>
 
 /** A saved fact with Ordo's sentence for it. */
 export type FactView = MoneyFact & { summary: string }
@@ -130,7 +130,7 @@ export interface AskProposalView {
   summary: string
 }
 
-export type AskOutcome =
+export type MoneyAskOutcome =
   | {
       ok: true
       /** The answer as plain text, each figure as `[label: value]`. */
@@ -152,7 +152,7 @@ export interface MoneyMemoryApi {
   answer(input: AnswerInput): Promise<MemoryResult>
   compare(input: CompareInput): Promise<MonthComparison>
   /** Ask the chosen model; it answers by calling Ordo's query functions. Changes nothing. */
-  ask(input: AskInput): Promise<AskOutcome>
+  ask(input: MoneyAskInput): Promise<MoneyAskOutcome>
   askStop(): Promise<void>
   /** Each tool the model calls while answering; returns an unsubscribe function. */
   onAskStep(listener: (s: AskStep) => void): () => void

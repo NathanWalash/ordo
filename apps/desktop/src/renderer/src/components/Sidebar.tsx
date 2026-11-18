@@ -7,6 +7,7 @@ import {
   MessageCircleQuestion,
   Receipt,
   Sparkles,
+  SquareKanban,
   Wallet,
   Settings,
 } from 'lucide-react'
@@ -37,12 +38,18 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           active={route === 'calendar'}
           onClick={() => onNavigate('calendar')}
         />
+        <Item
+          icon={<SquareKanban size={15} />}
+          label="Boards"
+          active={route === 'boards'}
+          onClick={() => onNavigate('boards')}
+        />
       </div>
 
       <Section label="Mail">
         <Item
           icon={<Inbox size={15} />}
-          label="Inbox"
+          label="Mail"
           active={route === 'mail/inbox'}
           onClick={() => onNavigate('mail/inbox')}
         />

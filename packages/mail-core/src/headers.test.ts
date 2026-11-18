@@ -38,6 +38,39 @@ describe('toMessageHeader', () => {
       listUnsubscribePost: 'List-Unsubscribe=One-Click',
       precedence: undefined,
       autoSubmitted: undefined,
+      flagged: false,
+      answered: false,
+      to: [],
+      cc: [],
+      messageId: undefined,
+      hasAttachments: undefined,
+    })
+  })
+
+  it('keeps flags, recipients, the Message-ID and an attachments hint for the mail client', () => {
+    const h = toMessageHeader(
+      {
+        uid: 9,
+        flags: new Set(['\\Flagged', '\\Answered']),
+        envelope: {
+          subject: 'Plans',
+          messageId: ' <abc@x.example> ',
+          from: [{ name: 'Sam', address: 'sam@friend.example' }],
+          to: [{ name: ' Me ', address: 'me@icloud.example' }, { name: 'Group' }],
+          cc: [{ address: 'pat@friend.example' }],
+        },
+        headers: 'Content-Type: multipart/mixed; boundary="x"\r\n',
+      },
+      'INBOX',
+    )
+    expect(h).toMatchObject({
+      seen: false,
+      flagged: true,
+      answered: true,
+      to: [{ address: 'me@icloud.example', name: 'Me' }],
+      cc: [{ address: 'pat@friend.example' }],
+      messageId: '<abc@x.example>',
+      hasAttachments: true,
     })
   })
 

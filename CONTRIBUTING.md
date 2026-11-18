@@ -20,6 +20,14 @@ pnpm check      # format check, lint, typecheck, unit tests
 pnpm test:e2e   # builds the app and runs the Playwright tests
 ```
 
+The e2e tests don't pull you away from what you're doing. On macOS Ordo runs as a hidden background
+app: the window is never shown, there's no Dock icon and Ordo never becomes the active app. On
+Windows and Linux the window is shown without taking focus. To watch a run instead, set `ORDO_E2E_SHOW=1`:
+
+```bash
+ORDO_E2E_SHOW=1 pnpm test:e2e
+```
+
 To run the IMAP tests (and the full connect-and-scan e2e test) you need Docker:
 
 ```bash
@@ -50,6 +58,13 @@ pnpm caldav:stop
 ```
 
 Both servers can run at once; `pnpm test:integration` runs whichever tests have a port set.
+
+Vitest can't reach the real network. `test/network-guard.ts` runs before every test file and
+makes `net`, `tls` and `dns` throw for anything but loopback (127.0.0.0/8, `::1`, `localhost`), so
+`fetch`, `http` and IMAP and SMTP clients fail too. It also points `ORDO_IMAP_HOST`,
+`ORDO_SMTP_HOST` and `ORDO_CALDAV_URL` at a closed port on 127.0.0.1 unless you set them. A test
+that needs a server starts one on 127.0.0.1, or gives a made-up name its own `lookup` that answers
+with a loopback address.
 
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_AI_SETTINGS, moneyDetailsAllowed, type AiSettings } from './ai'
-import { AnswerSchema, AskInputSchema, CompareSchema, SaveFactSchema } from './money-memory'
+import { AnswerSchema, MoneyAskInputSchema, CompareSchema, SaveFactSchema } from './money-memory'
 
 const ai = (o: Partial<AiSettings>): AiSettings => ({ ...DEFAULT_AI_SETTINGS, ...o })
 
@@ -42,13 +42,13 @@ describe('memory IPC schemas', () => {
     ).toBe(false)
   })
 
-  it('AnswerSchema, CompareSchema and AskInputSchema bound their inputs', () => {
+  it('AnswerSchema, CompareSchema and MoneyAskInputSchema bound their inputs', () => {
     expect(AnswerSchema.parse({ questionId: 'person:gabe', answerId: 'flatmate' }).via).toBe('question')
     expect(AnswerSchema.safeParse({ questionId: 'x', answerId: 'y'.repeat(41) }).success).toBe(false)
     expect(CompareSchema.parse({ category: ' Home ' })).toEqual({ category: 'Home' })
-    expect(AskInputSchema.safeParse({ question: '   ' }).success).toBe(false)
-    expect(AskInputSchema.safeParse({ question: 'x'.repeat(501) }).success).toBe(false)
-    expect(AskInputSchema.parse({ question: 'How much was Italy?' })).toEqual({
+    expect(MoneyAskInputSchema.safeParse({ question: '   ' }).success).toBe(false)
+    expect(MoneyAskInputSchema.safeParse({ question: 'x'.repeat(501) }).success).toBe(false)
+    expect(MoneyAskInputSchema.parse({ question: 'How much was Italy?' })).toEqual({
       question: 'How much was Italy?',
       history: [],
     })

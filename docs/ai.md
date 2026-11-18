@@ -202,6 +202,51 @@ exact amounts and dates. "About half" means within 50p, and is only **likely** w
 (Splitwise, half, owe…) or someone you've told Ordo about; otherwise it's one **to check**. Names
 match as whole words, initials included: "Patrick O" is not any Patrick.
 
+## Boards
+
+**Suggest** on a card (Boards) asks the same provider and model for a due date, a checklist, labels
+and links. It needs a model chosen in Settings → AI and **Use AI for Boards** turned on there (off by
+default); a cloud provider needs the same consent as everything else. The Suggest button's tooltip
+says what goes where, and the first time with a cloud provider Ordo asks before anything is sent.
+Bills are only offered with **AI for Money** on, and emails only with **sorting senders** on, the
+switches that already cover them. Exactly this is sent, as JSON lines in `<card>`, `<labels>` and
+`<candidates>` blocks:
+
+```json
+{"title":"Fix the gate","notes":"Latch is loose. - check hinges","due":null,"checklist":["Buy hinges"],"labels":["Blocked"]}
+{"id":"l1","name":"Blocked"}
+{"id":"e1","kind":"event","title":"Locksmith for the gate","detail":"Family · 09:00","date":"2026-11-21"}
+{"id":"b1","kind":"bill","title":"Home insurance","date":"2026-12-01"}
+{"id":"m1","kind":"email","title":"Your locksmith booking","detail":"Lock & Key Ltd","date":"2026-11-15"}
+{"id":"c1","kind":"card","title":"Paint the shed","detail":"Home · Up next","date":null}
+```
+
+- The card: its title, notes as plain text (cut to 1,500 characters), dates, checklist steps and
+  label names.
+- The board's labels, by name.
+- At most 12 upcoming events and 8 bills in the next 60 days, related ones first, then the soonest:
+  an event's title, calendar, time and day; a bill's name and due day (never its amount).
+- At most 8 emails from the last 30 days and 6 other cards, **only** ones that share a distinctive
+  word with the card: subject, the sender's display name (left out when there's only an address)
+  and day; card title, board and column.
+
+Never email bodies, addresses, attachments, account details, transactions or balances, and never
+Ordo's own ids: candidates and labels get short ids for this one request. The reply must be
+`{"due": {"date", "basedOn"} | null, "checklist": [...], "labels": [...], "links": [...]}`; ids not
+sent, past or impossible dates and repeats are dropped, steps are cleaned of control characters
+and cut to 120 characters. Suggestions are only shown: nothing is changed until you add one.
+Suggestions aren't cached.
+
+## Assistant
+
+The [assistant](assistant.md) uses the same provider and model, but it looks up much more than
+sorting does: transactions with amounts and dates, balances, bills, calendar events, sender names,
+addresses and subject lines, and your iCloud email address, as well as your questions. So agreeing
+to a cloud CLI here covers sorting only. The assistant asks for its own OK the first time you open
+it with Claude Code or Codex, says exactly what goes to Anthropic or OpenAI, and sends nothing until
+you allow it. **Stop sharing** in the assistant takes the OK back; switching provider asks again.
+With LM Studio or Ollama nothing leaves your computer and there's nothing to agree to.
+
 ## Safety
 
 Subject lines, sender names and statement descriptions come from strangers, so Ordo treats them as
@@ -253,6 +298,7 @@ while Ordo is open, press **Check again**.
 - `packages/ai` has the `ModelProvider` interface (`.`) and the adapters (`./node`).
 - `aiCategorise` in `packages/mail-core` does the sorting; `window.ordo.ai` exposes status, test and
   sorting to the renderer.
+- `suggestForCard` in `packages/boards-core` does Boards' Suggest; `window.ordo.boards.suggest()` runs it.
 - `aiCategoriseTransactions` and `aiMatchBills` in `packages/money-core` do Money's;
   `window.ordo.money.aiSort()` runs both, and `money sort` / `ordo_money_sort` in headless mode.
 - `askMoney` and `moneyTools` in `packages/money-core` are Ask Ordo; the engines it calls (ledger,

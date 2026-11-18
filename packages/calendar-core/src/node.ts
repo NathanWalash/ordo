@@ -4,11 +4,26 @@ export {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarWriteError,
+  CalendarUnavailableError,
   ICLOUD_CALDAV_URL,
+  inside,
   isReadOnly,
   normaliseColor,
   type CalDavConfig,
 } from './caldav'
+export {
+  createEvent,
+  deleteEvent,
+  EventChangeError,
+  eventDetails,
+  refreshCalendar,
+  updateEvent,
+  type CalendarEventRef,
+  type ChangeOptions,
+  type EventChangeErrorKind,
+  type EventDetails,
+} from './edit'
 export {
   CalendarStore,
   FEEDS,
@@ -20,6 +35,7 @@ export {
 export {
   checkFeedUrl,
   describeIcs,
+  readIcs,
   FEED_MAX_BYTES,
   LOCAL_ADDRESS_MESSAGE,
   FeedError,

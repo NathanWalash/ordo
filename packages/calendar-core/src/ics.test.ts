@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseIcs } from './ics'
+import { FALLBACK_LIMITS, parseCalendars, parseIcs } from './ics'
 
 const cal = (...events: string[]) =>
   ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Ordo//Test//EN', ...events, 'END:VCALENDAR'].join('\r\n')
@@ -214,4 +214,236 @@ describe('parseIcs', () => {
     expect(e!.title).toBe('One-off')
     expect(e!.recurrenceId).toBe('2026-11-18T10:00:00.000Z')
   })
+})
+
+describe('parseIcs edge cases', () => {
+  const event = (...lines: string[]) => cal('BEGIN:VEVENT', ...lines, 'END:VEVENT')
+  const starts = (ics: string, r?: ReturnType<typeof range>) => parse(ics, r).map((e) => iso(e.start))
+
+  it('keeps the DTSTART occurrence of an event with RDATEs and no RRULE', () => {
+    expect(
+      starts(
+        event(
+          'UID:rdate',
+          'DTSTART;TZID=Europe/London:20261102T090000',
+          'DTEND;TZID=Europe/London:20261102T100000',
+          'RDATE;TZID=Europe/London:20261105T150000',
+          'SUMMARY:Twice',
+        ),
+      ),
+    ).toEqual(['2026-11-02T09:00:00.000Z', '2026-11-05T15:00:00.000Z'])
+  })
+
+  it('reads RDATE periods instead of failing the whole calendar', () => {
+    const events = parse(
+      event(
+        'UID:period',
+        'DTSTART:20261102T090000Z',
+        'DTEND:20261102T100000Z',
+        'RRULE:FREQ=WEEKLY;COUNT=2',
+        'RDATE;VALUE=PERIOD:20261105T150000Z/PT2H',
+        'SUMMARY:Periods',
+      ),
+    )
+    expect(events.map((e) => [iso(e.start), iso(e.end)])).toEqual([
+      ['2026-11-02T09:00:00.000Z', '2026-11-02T10:00:00.000Z'],
+      ['2026-11-05T15:00:00.000Z', '2026-11-05T17:00:00.000Z'],
+      ['2026-11-09T09:00:00.000Z', '2026-11-09T10:00:00.000Z'],
+    ])
+  })
+
+  it('excludes an EXDATE written in UTC from an event in a named zone without a VTIMEZONE', () => {
+    expect(
+      starts(
+        event(
+          'UID:ex',
+          'DTSTART;TZID=America/New_York:20261102T090000',
+          'DTEND;TZID=America/New_York:20261102T100000',
+          'RRULE:FREQ=WEEKLY;COUNT=3',
+          'EXDATE:20261109T140000Z',
+          'SUMMARY:Sync',
+        ),
+      ),
+    ).toEqual(['2026-11-02T14:00:00.000Z', '2026-11-16T14:00:00.000Z'])
+  })
+
+  it('ends a recurring overnight event at the same clock time after the clocks change', () => {
+    const events = parse(
+      event(
+        'UID:night',
+        'DTSTART;TZID=Europe/London:20260327T220000',
+        'DTEND;TZID=Europe/London:20260328T080000',
+        'RRULE:FREQ=DAILY;COUNT=3',
+        'SUMMARY:Night shift',
+      ),
+      range('2026-03-27T00:00:00Z', '2026-04-01T00:00:00Z'),
+    )
+    // 28 March 22:00 GMT to 29 March 08:00 BST, which is 07:00 UTC.
+    expect(iso(events[1]!.end)).toBe('2026-03-29T07:00:00.000Z')
+  })
+
+  it('includes the UNTIL day when UNTIL is a date on a timed event', () => {
+    expect(
+      starts(
+        event(
+          'UID:until',
+          'DTSTART:20261102T090000Z',
+          'RRULE:FREQ=DAILY;UNTIL=20261104',
+          'SUMMARY:Three days',
+        ),
+      ),
+    ).toHaveLength(3)
+  })
+
+  it('skips one broken event and keeps the rest', () => {
+    const ics = cal(
+      'BEGIN:VEVENT',
+      'UID:broken',
+      'DTSTART:20261102T090000Z',
+      'RRULE:FREQ=DAILY;COUNT=2',
+      'RDATE;VALUE=PERIOD:not-a-period',
+      'SUMMARY:Broken',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:fine',
+      'DTSTART:20261103T090000Z',
+      'SUMMARY:Fine',
+      'END:VEVENT',
+    )
+    expect(parse(ics).map((e) => e.title)).toContain('Fine')
+  })
+
+  it('parses a big file quickly', () => {
+    const events = Array.from({ length: 15_000 }, (_, i) =>
+      [
+        'BEGIN:VEVENT',
+        `UID:e${i}`,
+        `DTSTART:2026${String((i % 12) + 1).padStart(2, '0')}10T090000Z`,
+        `DTEND:2026${String((i % 12) + 1).padStart(2, '0')}10T100000Z`,
+        `SUMMARY:Event ${i}`,
+        'END:VEVENT',
+      ].join('\r\n'),
+    )
+    const start = performance.now()
+    expect(parse(cal(...events))).toHaveLength(15_000)
+    expect(performance.now() - start).toBeLessThan(3_000)
+  })
+})
+
+describe('hostile calendars', () => {
+  const timed = (body: () => void) => {
+    const start = performance.now()
+    body()
+    return performance.now() - start
+  }
+
+  it('many time zones and events in a broken file cost one copy of each, not zones × events', () => {
+    const zone = `BEGIN:VTIMEZONE\r\nTZID:Z\r\nX-PAD:${'a'.repeat(900)}\r\nEND:VTIMEZONE\r\n`
+    const event = 'BEGIN:VEVENT\r\nUID:x\r\nDTSTART:20261102T090000Z\r\nEND:VEVENT\r\n'
+    const doc =
+      'BEGIN:VCALENDAR\r\nVERSION:2.0\r\n' +
+      zone.repeat(110) +
+      event.repeat(4_000) +
+      'BEGIN:VEVENT\r\nbroken line\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n'
+    const ms = timed(() => expect(parse(doc).length).toBeGreaterThan(0))
+    expect(ms).toBeLessThan(2_000)
+    // Every event shares the one copy of each zone (it used to get its own copy of all 110).
+    const calendars = parseCalendars(doc)
+    expect(calendars.reduce((n, c) => n + c.getAllSubcomponents('vtimezone').length, 0)).toBe(110)
+    expect(calendars.reduce((n, c) => n + c.getAllSubcomponents('vevent').length, 0)).toBe(4_000)
+  })
+
+  it('keeps at most a set number of events from a broken file', () => {
+    const event = 'BEGIN:VEVENT\r\nUID:x\r\nDTSTART:20261102T090000Z\r\nEND:VEVENT\r\n'
+    const doc = `BEGIN:VCALENDAR\r\nbroken line\r\n${event.repeat(FALLBACK_LIMITS.events + 10)}END:VCALENDAR\r\n`
+    const [calendar] = parseCalendars(doc)
+    expect(calendar!.getAllSubcomponents('vevent')).toHaveLength(FALLBACK_LIMITS.events)
+  })
+
+  it('a broken file full of events that never end is read in linear time', () => {
+    const doc = `BEGIN:VCALENDAR\r\nbroken line\r\n${'BEGIN:VEVENT\r\n'.repeat(30_000)}`
+    const ms = timed(() => expect(() => parse(doc)).toThrow())
+    expect(ms).toBeLessThan(1_000)
+  })
+
+  it('keeps the calendar name and good events when the header itself has a broken line', () => {
+    const doc = cal(
+      'X-WR-CALNAME:Work',
+      'broken line',
+      'BEGIN:VEVENT',
+      'UID:ok',
+      'DTSTART:20261102T090000Z',
+      'SUMMARY:Fine',
+      'END:VEVENT',
+    )
+    expect(parse(doc).map((e) => e.title)).toEqual(['Fine'])
+    expect(parseCalendars(doc)[0]!.getFirstPropertyValue('x-wr-calname')).toBe('Work')
+  })
+
+  it('stops expanding rules after a step budget for the whole document, keeping what it has', () => {
+    const minutely = (uid: string) => [
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      'DTSTART:20261102T090000Z',
+      'RRULE:FREQ=MINUTELY;COUNT=100',
+      'SUMMARY:Every minute',
+      'END:VEVENT',
+    ]
+    const events = parseIcs(cal(...minutely('a'), ...minutely('b')), {
+      calendarId: 'cal-1',
+      range: range('2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z'),
+      maxSteps: 150,
+    })
+    expect(events).toHaveLength(150)
+  })
+})
+
+describe('EXDATE, wherever you are', () => {
+  const event = (...lines: string[]) =>
+    cal('BEGIN:VEVENT', 'UID:x', 'SUMMARY:T', ...lines, 'RRULE:FREQ=WEEKLY;COUNT=3', 'END:VEVENT')
+  const january = range('2026-01-01T00:00:00Z', '2026-03-01T00:00:00Z')
+  const inZone = <T>(zone: string, body: () => T): T => {
+    const tz = process.env['TZ']
+    process.env['TZ'] = zone
+    try {
+      return body()
+    } finally {
+      if (tz === undefined) delete process.env['TZ']
+      else process.env['TZ'] = tz
+    }
+  }
+
+  it.each(['Europe/London', 'Asia/Tokyo', 'America/New_York'])(
+    'a date EXDATE on a timed event uses the event’s own date (viewed in %s)',
+    (zone) => {
+      const ics = event(
+        'DTSTART;TZID=America/Los_Angeles:20260105T200000',
+        'DTEND;TZID=America/Los_Angeles:20260105T210000',
+        'EXDATE;VALUE=DATE:20260112',
+      )
+      expect(inZone(zone, () => parse(ics, january).map((e) => iso(e.start)))).toEqual([
+        '2026-01-06T04:00:00.000Z',
+        '2026-01-20T04:00:00.000Z',
+      ])
+    },
+  )
+
+  it.each(['Europe/London', 'Asia/Tokyo', 'America/New_York'])(
+    'a date-time EXDATE on an all-day event excludes that date (viewed in %s)',
+    (zone) => {
+      const ics = event('DTSTART;VALUE=DATE:20260105', 'EXDATE:20260112T000000')
+      expect(inZone(zone, () => parse(ics, january).map((e) => e.start.getDate()))).toEqual([5, 19])
+    },
+  )
+
+  it.each(['Europe/London', 'Asia/Tokyo', 'America/New_York'])(
+    'a floating EXDATE on a UTC event is read in UTC (viewed in %s)',
+    (zone) => {
+      const ics = event('DTSTART:20260105T100000Z', 'DTEND:20260105T110000Z', 'EXDATE:20260112T100000')
+      expect(inZone(zone, () => parse(ics, january).map((e) => iso(e.start)))).toEqual([
+        '2026-01-05T10:00:00.000Z',
+        '2026-01-19T10:00:00.000Z',
+      ])
+    },
+  )
 })

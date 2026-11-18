@@ -5,6 +5,9 @@ import {
   CalDavProvider,
   CalendarAuthError,
   CalendarConnectionError,
+  CalendarWriteError,
+  inside,
+  CalendarUnavailableError,
   isReadOnly,
   normaliseColor,
 } from './caldav'
@@ -25,6 +28,141 @@ describe('isReadOnly', () => {
     expect(isReadOnly({ privilege: [{ read: {} }, { readFreeBusy: {} }] })).toBe(true)
     expect(isReadOnly({ privilege: [{ read: {} }, { write: {} }] })).toBe(false)
     expect(isReadOnly({ privilege: { all: {} } })).toBe(false)
+  })
+})
+
+describe('inside', () => {
+  const cal = 'https://p01-caldav.icloud.com/123/calendars/home/'
+  it('only allows objects directly inside the calendar, on the same server', () => {
+    expect(inside(cal, `${cal}event.ics`)).toBe(true)
+    expect(inside(cal.slice(0, -1), `${cal}event.ics`)).toBe(true)
+    expect(inside(cal, '/123/calendars/home/event.ics')).toBe(true)
+    expect(inside(cal, 'https://evil.example/123/calendars/home/event.ics')).toBe(false)
+    expect(inside(cal, 'http://p01-caldav.icloud.com/123/calendars/home/event.ics')).toBe(false)
+    expect(inside(cal, `${cal}../work/event.ics`)).toBe(false)
+    expect(inside(cal, `${cal}%2e%2e/work/event.ics`)).toBe(false)
+    expect(inside(cal, `${cal}sub/event.ics`)).toBe(false)
+    expect(inside(cal, 'https://p01-caldav.icloud.com/123/calendars/homework/event.ics')).toBe(false)
+    expect(inside(cal, cal)).toBe(false)
+  })
+})
+
+describe('CalDavProvider writes', () => {
+  let server: Server
+  let base: string
+  const seen: { method: string; url: string; ifMatch?: string; ifNoneMatch?: string }[] = []
+  let status = 201
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      seen.push({
+        method: req.method!,
+        url: req.url!,
+        ifMatch: req.headers['if-match'] as string | undefined,
+        ifNoneMatch: req.headers['if-none-match'] as string | undefined,
+      })
+      req.resume()
+      req.on('end', () => res.writeHead(status, status < 300 ? { ETag: '"e2"' } : {}).end())
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/cal/home/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  const provider = () => new CalDavProvider({ serverUrl: base, username: 'u', password: 'p' })
+
+  it('creates with If-None-Match and changes with If-Match', async () => {
+    status = 201
+    const created = await provider().createResource(base, 'ABC-1', 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n')
+    expect(created).toEqual({ href: `${base}ABC-1.ics`, etag: '"e2"' })
+    status = 204
+    await provider().updateResource(base, `${base}ABC-1.ics`, 'x', '"e1"')
+    await provider().deleteResource(base, `${base}ABC-1.ics`, '"e2"')
+    expect(seen.slice(-3)).toEqual([
+      { method: 'PUT', url: '/cal/home/ABC-1.ics', ifNoneMatch: '*', ifMatch: undefined },
+      { method: 'PUT', url: '/cal/home/ABC-1.ics', ifMatch: '"e1"', ifNoneMatch: undefined },
+      { method: 'DELETE', url: '/cal/home/ABC-1.ics', ifMatch: '"e2"', ifNoneMatch: undefined },
+    ])
+  })
+
+  it('turns 412, 404, 403 and other errors into CalendarWriteError kinds', async () => {
+    const kinds: [number, string][] = [
+      [412, 'conflict'],
+      [404, 'gone'],
+      [410, 'gone'],
+      [403, 'forbidden'],
+      [400, 'failed'],
+    ]
+    for (const [code, kind] of kinds) {
+      status = code
+      const attempt = provider().updateResource(base, `${base}a.ics`, 'x', '"e1"')
+      await expect(attempt).rejects.toBeInstanceOf(CalendarWriteError)
+      await expect(attempt).rejects.toMatchObject({ kind, status: code })
+    }
+    // Busy or down: nothing was changed, and it's worth trying again.
+    for (const code of [429, 500, 503]) {
+      status = code
+      await expect(provider().updateResource(base, `${base}a.ics`, 'x', '"e1"')).rejects.toBeInstanceOf(
+        CalendarUnavailableError,
+      )
+    }
+    status = 401
+    await expect(provider().deleteResource(base, `${base}a.ics`, '"e1"')).rejects.toBeInstanceOf(
+      CalendarAuthError,
+    )
+  })
+
+  it('never sends a change outside the calendar', async () => {
+    const before = seen.length
+    await expect(
+      provider().updateResource(base, 'http://127.0.0.1:9/elsewhere.ics', 'x', '"1"'),
+    ).rejects.toMatchObject({
+      kind: 'failed',
+    })
+    await expect(provider().deleteResource(base, `${base}../other/x.ics`, '"1"')).rejects.toBeInstanceOf(
+      CalendarWriteError,
+    )
+    expect(seen.length).toBe(before)
+  })
+
+  it('makes a safe file name from any UID', async () => {
+    status = 201
+    const r = await provider().createResource(base, '../../evil/<uid>', 'x')
+    expect(r.href).toBe(`${base}.._.._evil__uid_.ics`)
+    expect(inside(base, r.href)).toBe(true)
+  })
+})
+
+describe('CalDavProvider.fetchResource', () => {
+  let server: Server
+  let base: string
+  let answer: 'missing' | 'unauthorised' = 'missing'
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        if (answer === 'unauthorised') return res.writeHead(401).end()
+        // The multistatus a server sends for an object that's gone.
+        res
+          .writeHead(207, { 'content-type': 'application/xml' })
+          .end(
+            '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>' +
+              `<d:href>${new URL(req.url!, 'http://x').pathname}gone.ics</d:href>` +
+              '<d:status>HTTP/1.1 404 Not Found</d:status></d:response></d:multistatus>',
+          )
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/cal/home/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('says an object deleted elsewhere is gone, and still reports a wrong password', async () => {
+    const p = new CalDavProvider({ serverUrl: base, username: 'u', password: 'p' })
+    answer = 'missing'
+    await expect(p.fetchResource(base, `${base}gone.ics`)).resolves.toBeNull()
+    answer = 'unauthorised'
+    await expect(p.fetchResource(base, `${base}gone.ics`)).rejects.toBeInstanceOf(CalendarAuthError)
   })
 })
 
@@ -55,5 +193,55 @@ describe('CalDavProvider errors', () => {
       timeoutMs: 2000,
     })
     await expect(p.connect()).rejects.toBeInstanceOf(CalendarConnectionError)
+  })
+})
+
+describe('CalDavProvider when the server is busy', () => {
+  let server: Server
+  let url: string
+  beforeAll(async () => {
+    // Like iCloud throttling or down for maintenance.
+    server = createServer((_req, res) => {
+      res.writeHead(503, { 'Retry-After': '120' })
+      res.end('Service Unavailable')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('reports it as CalendarUnavailableError, not a wrong password', async () => {
+    const p = new CalDavProvider({
+      serverUrl: url,
+      username: 'you@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+    })
+    const err = await p.connect().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(CalendarUnavailableError)
+    expect(err).not.toBeInstanceOf(CalendarAuthError)
+  })
+})
+
+describe('CalDavProvider when discovery is refused and then the server is busy', () => {
+  let server: Server
+  let url: string
+  beforeAll(async () => {
+    // .well-known isn't supported (405, which discovery tolerates); the account itself is busy.
+    server = createServer((req, res) => {
+      res.writeHead(req.url?.includes('.well-known') ? 405 : 503)
+      res.end()
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('reports the 503, not the tolerated 405', async () => {
+    const p = new CalDavProvider({
+      serverUrl: url,
+      username: 'you@icloud.com',
+      password: 'abcd-efgh-ijkl-mnop',
+    })
+    await expect(p.connect()).rejects.toBeInstanceOf(CalendarUnavailableError)
   })
 })

@@ -54,6 +54,14 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = []
   let cell = ''
   let quoted = false
+  // Nothing but spaces in this field so far: only then does a quote open a quoted field.
+  // (A flag, not cell.trim() for every quote, which was quadratic on a field full of quotes.)
+  let blank = true
+  const endField = () => {
+    row.push(cell)
+    cell = ''
+    blank = true
+  }
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!
     if (quoted) {
@@ -62,17 +70,22 @@ export function parseCsv(text: string): string[][] {
         i++
       } else if (c === '"') quoted = false
       else cell += c
-    } else if (c === '"') quoted = true
-    else if (c === delimiter) {
-      row.push(cell)
+    } else if (c === '"' && blank) {
+      // A quote only opens a quoted field at its start (RFC 4180). One inside a field, like
+      // `ARGOS 32" TV`, is just a character; treating it as a quote swallowed the rows after it.
+      quoted = true
+      blank = false
       cell = ''
-    } else if (c === '\n' || c === '\r') {
+    } else if (c === delimiter) endField()
+    else if (c === '\n' || c === '\r') {
       if (c === '\r' && src[i + 1] === '\n') i++
-      row.push(cell)
+      endField()
       rows.push(row)
       row = []
-      cell = ''
-    } else cell += c
+    } else {
+      cell += c
+      if (c !== ' ' && c !== '\t') blank = false
+    }
   }
   if (cell || row.length) {
     row.push(cell)
@@ -82,7 +95,12 @@ export function parseCsv(text: string): string[][] {
 }
 
 function guessDelimiter(src: string): string {
-  const head = src.split(/\r?\n/).slice(0, 10).join('\n')
+  // Commas inside quoted descriptions ("REWE, BERLIN, DE") don't count.
+  const head = src
+    .split(/\r?\n/)
+    .slice(0, 10)
+    .join('\n')
+    .replace(/"[^"]*"/g, '')
   const count = (d: string) => head.split(d).length - 1
   return [',', ';', '\t'].reduce((best, d) => (count(d) > count(best) ? d : best), ',')
 }

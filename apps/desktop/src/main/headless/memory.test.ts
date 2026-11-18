@@ -7,6 +7,7 @@ import { runCli, type CliIo } from './cli'
 import { runCommand } from './commands'
 import { fakeServices } from './fake-services'
 import { createMcpServer } from './mcp'
+import { previewTool, runTool, toolByName, TOOLS } from './tools'
 
 async function cli(services: ReturnType<typeof fakeServices>, ...args: string[]) {
   const inv = parseInvocation(args)
@@ -162,5 +163,103 @@ describe('money memory over MCP', () => {
     const { client } = await connect(false)
     const r = json(await client.callTool({ name: 'ordo_money_loose_ends', arguments: {} }))
     expect(r.held[0].holdingPence).toBe(29850)
+  })
+})
+
+describe('money memory in the shared tool registry', () => {
+  const t = (name: string) => toolByName(name)!
+  const NAMES = [
+    'ordo_money_knows',
+    'ordo_money_questions',
+    'ordo_money_loose_ends',
+    'ordo_money_events',
+    'ordo_money_compare',
+    'ordo_money_answer',
+    'ordo_money_forget',
+  ]
+
+  it('registers the read tools as untrusted and the changes with previews and intent', () => {
+    for (const name of NAMES) {
+      const x = t(name)
+      expect(x.moneyDetails).toBe(true)
+      if (x.kind === 'read') expect(x.untrusted).toBe(true)
+      else {
+        expect(x.kind).toBe('change')
+        expect(x.preview).toBeTypeOf('function')
+        expect(x.intent).toBeInstanceOf(RegExp)
+      }
+    }
+    expect(
+      TOOLS.filter((x) => x.moneyDetails)
+        .map((x) => x.name)
+        .sort(),
+    ).toEqual([...NAMES].sort())
+  })
+
+  it('the answer card shows Ordo’s own question and the chosen answer', async () => {
+    const p = await previewTool(fakeServices(), t('ordo_money_answer'), {
+      question: 'pass-through:m1>m2',
+      answer: 'yes',
+    })
+    expect(p).toEqual({
+      title: 'Answer one of Ordo’s questions',
+      details: [
+        "H Bennie's £50.00 on 5 Oct went out again the same day to Sam. Was it just passing through?",
+        'Answer: Yes, passing through',
+      ],
+      notes: ['Ordo saves what this answer means. You can forget it on Money → Ask Ordo.'],
+    })
+    const no = await previewTool(fakeServices(), t('ordo_money_answer'), {
+      question: 'pass-through:m1>m2',
+      answer: 'no',
+    })
+    expect(no.notes).toEqual(['Ordo won’t ask this again. Nothing else changes.'])
+    expect(
+      (await previewTool(fakeServices(), t('ordo_money_answer'), { question: 'gone', answer: 'yes' }))
+        .blocked,
+    ).toBe('That question has already been answered.')
+    expect(
+      (
+        await previewTool(fakeServices(), t('ordo_money_answer'), {
+          question: 'pass-through:m1>m2',
+          answer: 'maybe',
+        })
+      ).blocked,
+    ).toBe('That isn’t one of the question’s answers.')
+  })
+
+  it('the forget card shows the fact in Ordo’s words', async () => {
+    expect(await previewTool(fakeServices(), t('ordo_money_forget'), { fact: 'f1' })).toEqual({
+      title: 'Forget something Ordo learned',
+      details: ['Money from Gabe is rent you hold for Patrick, not your income.'],
+      notes: ['Ordo will work things out without it, and may ask about it again.'],
+    })
+    expect((await previewTool(fakeServices(), t('ordo_money_forget'), { fact: 'nope' })).blocked).toBe(
+      'Ordo doesn’t know that fact any more.',
+    )
+  })
+
+  it('changes only run when allowed and confirmed', async () => {
+    const services = fakeServices()
+    const args = { question: 'q', answer: 'yes' }
+    expect(
+      await runTool(services, t('ordo_money_answer'), args, { allowChanges: true, confirm: false }),
+    ).toMatchObject({
+      ok: false,
+      code: 'confirm_required',
+    })
+    expect(services.money.answer).not.toHaveBeenCalled()
+    expect(
+      await runTool(services, t('ordo_money_answer'), args, { allowChanges: true, confirm: true }),
+    ).toMatchObject({
+      ok: true,
+    })
+    expect(services.money.answer).toHaveBeenCalledWith({ questionId: 'q', answerId: 'yes' })
+  })
+
+  it('intent words match plain requests', () => {
+    expect(t('ordo_money_answer').intent!.test('yes, Gabe is my flatmate')).toBe(true)
+    expect(t('ordo_money_forget').intent!.test('forget the Italy trip')).toBe(true)
+    expect(t('ordo_money_forget').intent!.test('what do you know?')).toBe(false)
   })
 })

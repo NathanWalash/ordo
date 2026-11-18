@@ -25,12 +25,13 @@ describe('settings contract', () => {
 })
 
 describe('AI settings contract', () => {
-  it('defaults to no provider, sorting off and Money off', () => {
+  it('defaults to no provider, sorting off, Money off and Boards off', () => {
     expect(DEFAULT_SETTINGS.ai).toEqual({
       provider: 'none',
       model: null,
       sortSenders: false,
       money: false,
+      boards: false,
       cloudConsent: null,
       moneyDetailsConsent: null,
       askStyle: 'brief',
@@ -38,10 +39,24 @@ describe('AI settings contract', () => {
     })
   })
 
+  it('treats AI for Boards as off when a saved file predates it, and only accepts a boolean', () => {
+    const old = { provider: 'lmstudio', model: 'm', sortSenders: true, money: true, cloudConsent: null }
+    expect(SettingsPatchSchema.parse({ ai: old }).ai?.boards).toBe(false)
+    expect(SettingsPatchSchema.parse({ ai: { ...old, boards: true } }).ai?.boards).toBe(true)
+    expect(SettingsPatchSchema.safeParse({ ai: { ...old, boards: 'yes' } }).success).toBe(false)
+  })
+
   it('treats AI for Money as off when a saved file predates it, and only accepts a boolean', () => {
     const old = { provider: 'lmstudio', model: 'm', sortSenders: true, cloudConsent: null }
     expect(SettingsPatchSchema.parse({ ai: old })).toEqual({
-      ai: { ...old, money: false, moneyDetailsConsent: null, askStyle: 'brief', askClarify: true },
+      ai: {
+        ...old,
+        money: false,
+        boards: false,
+        moneyDetailsConsent: null,
+        askStyle: 'brief',
+        askClarify: true,
+      },
     })
     expect(SettingsPatchSchema.parse({ ai: { ...old, money: true } }).ai?.money).toBe(true)
     expect(SettingsPatchSchema.safeParse({ ai: { ...old, money: 'yes' } }).success).toBe(false)

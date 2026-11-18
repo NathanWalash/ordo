@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowUp, Check, Laptop, Cloud, MessageCircleQuestion, Square } from 'lucide-react'
-import type { AskOutcome, AskProposalView, AskStep, MemoryView } from '@ordo/shared'
+import type { MoneyAskOutcome, AskProposalView, AskStep, MemoryView } from '@ordo/shared'
 import { Button } from '../../Button'
 import { Notice } from '../ui'
 
 interface Turn {
   question: string
-  outcome: AskOutcome
+  outcome: MoneyAskOutcome
   /** Proposals being saved, saved or skipped, by index. */
   done: Record<number, 'saving' | 'saved' | 'skipped'>
 }
@@ -206,7 +206,7 @@ function Answer({
   onSkip,
   onOption,
 }: {
-  outcome: Extract<AskOutcome, { ok: true }>
+  outcome: Extract<MoneyAskOutcome, { ok: true }>
   done: Turn['done']
   disabled: boolean
   onSave: (p: AskProposalView, i: number) => void

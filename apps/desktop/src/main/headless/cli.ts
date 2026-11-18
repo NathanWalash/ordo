@@ -39,6 +39,7 @@ function progressPrinter(io: CliIo) {
         p.done,
         p.total,
       ),
+    mail: (p) => show(`Checking ${p.mailbox}`, p.checked, p.total),
     calendar: (p) => show('Syncing calendars', p.done, p.total),
     ai: (p) => show('Sorting senders', p.done, p.total),
     money: (p) => show(p.phase === 'bills' ? 'Matching bills' : 'Sorting merchants', p.done, p.total),

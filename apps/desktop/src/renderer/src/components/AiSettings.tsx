@@ -224,6 +224,17 @@ export function AiSettings({ ai, onSave }: Props) {
             }
           />
           <Row
+            label="Use AI for Boards (Suggest on a card)"
+            detail={BOARDS_DETAIL}
+            control={
+              <Switch
+                label="Use AI for Boards (Suggest on a card)"
+                checked={ai.boards}
+                onChange={(on) => void save({ ...ai, boards: on })}
+              />
+            }
+          />
+          <Row
             label="Ask Ordo answers"
             detail="Ask Ordo on Money answers questions about your money using Ordo’s own sums."
             control={
@@ -271,7 +282,7 @@ export function AiSettings({ ai, onSave }: Props) {
               <Cpu size={14} className="mt-px shrink-0" />
             )}
             {cloud
-              ? `Sender names, addresses and subject lines${ai.money ? ', and merchant names with rough amounts,' : ''}${detailsOn ? ' and, for Ask Ordo, exact amounts, dates and names' : ''} are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
+              ? `Sender names, addresses and subject lines${ai.money ? ', merchant names with rough amounts' : ''}${ai.boards ? ', when you press Suggest, the card with the titles of related cards, events, bills and emails' : ''}${detailsOn ? ', and for Ask Ordo, exact amounts, dates and names' : ''} are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
               : 'Stays on this computer.'}
           </div>
         </>
@@ -298,6 +309,10 @@ export function AiSettings({ ai, onSave }: Props) {
     </Section>
   )
 }
+
+/** What Suggest sends, named exactly, next to the switch that allows it. */
+const BOARDS_DETAIL =
+  'Suggest sends the card you’re on (title, notes, checklist and labels) with the titles and days of related upcoming events and other cards, bill names and due days when AI for Money is on, and email subjects and sender names when sorting senders is on. Never email addresses, bodies or amounts. Nothing is sent until you press Suggest.'
 
 function ProviderOption(props: {
   id: Choice
@@ -396,6 +411,12 @@ function CloudConfirm({
           <p>
             If you also turn on AI for Money, merchant names, short descriptions and rough amounts go too,
             never balances, account details or dates.
+          </p>
+          <p>
+            If you turn on AI for Boards, pressing Suggest on a card sends its title, notes, checklist and
+            labels, with the titles and days of related cards and upcoming events, bill names (with AI for
+            Money) and email subjects and sender names (with sorting senders). Never email addresses, bodies
+            or amounts.
           </p>
           <p>Local models through LM Studio or Ollama keep everything on this computer.</p>
         </div>

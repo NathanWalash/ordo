@@ -1,4 +1,4 @@
-import { app, ipcMain, shell } from 'electron'
+import { ipcMain, shell } from 'electron'
 import {
   analyseSenders,
   buildCleanupPlan,
@@ -9,12 +9,10 @@ import {
 import {
   createGuardedFetch,
   createMailtoSender,
-  ICLOUD_SMTP,
   ImapMailProvider,
   runCleanup,
   scanMailbox,
   undoCleanup,
-  type SmtpConfig,
 } from '@ordo/mail-core/node'
 import {
   CLEANUP_IPC,
@@ -27,23 +25,8 @@ import {
   type UndoOutcome,
 } from '@ordo/shared'
 import { loadAccount } from './account'
-import { allowLoopbackHttp, exclusively, explain, imapConfig, INBOX, mailStore } from './mail'
+import { allowLoopbackHttp, exclusively, explain, imapConfig, INBOX, mailStore, smtpConfig } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
-
-/** iCloud SMTP by default. Tests can point an unpackaged build at a local server, like ORDO_IMAP_*. */
-function smtpConfig(user: string, pass: string): SmtpConfig {
-  const host = !app.isPackaged ? process.env['ORDO_SMTP_HOST'] : undefined
-  if (host)
-    return {
-      host,
-      port: Number(process.env['ORDO_SMTP_PORT'] ?? 3025),
-      secure: process.env['ORDO_SMTP_SECURE'] === '1',
-      requireTLS: process.env['ORDO_SMTP_REQUIRE_TLS'] === '1',
-      user,
-      pass,
-    }
-  return { ...ICLOUD_SMTP, user, pass }
-}
 
 /** What the renderer may see: no UID map. */
 function summary({ uidMap: _uidMap, trashUidValidity: _v, ...rest }: CleanupRecord): CleanupSummary {

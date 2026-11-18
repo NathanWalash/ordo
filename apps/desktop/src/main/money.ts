@@ -15,6 +15,7 @@ import {
   applyCategoryOverrides,
   applySuggestions,
   cachedMatchAdvisor,
+  decodeStatement,
   merchantsNeedingCategory,
   balances,
   billsToCalendarItems,
@@ -63,6 +64,7 @@ import {
 } from '@ordo/shared'
 import { aiSettings, message as aiMessage, resolveModel, usableProvider } from './ai'
 import { cachedInboxHeaders } from './mail'
+import { pathProblem } from './paths'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
@@ -130,17 +132,29 @@ async function pickStatement(win: BrowserWindow | null): Promise<StatementFile |
   const fileName = basename(path)
   if ((await stat(path)).size > MAX_STATEMENT_BYTES)
     return { fileName, text: '', error: 'That file is too big to be a bank statement export.' }
-  return { fileName, text: await readFile(path, 'utf8') }
+  try {
+    return { fileName, text: decodeStatement(await readFile(path)) }
+  } catch {
+    return { fileName, text: '', error: UNREADABLE }
+  }
 }
+
+const UNREADABLE =
+  'Ordo couldn’t read that file. Check you have permission to open it and that no other program is using it.'
 
 /** Headless imports read a file named on the command line: a CSV export, never anything big. */
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 
+type StatementRead = { ok: true; fileName: string; text: string } | { ok: false; message: string }
+
 /**
- * Import a statement from a path (headless mode). The path must resolve to a regular `.csv`
- * file under 5 MB; it is then parsed and saved exactly like a file picked in the app.
+ * Read a statement named by a path (headless mode and the assistant). The path must be local and
+ * resolve to a regular `.csv` file under 5 MB.
  */
-export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+async function readStatementFile(path: string): Promise<StatementRead> {
+  // Before any file-system call: a UNC or device path could reach the network or a device.
+  const problem = pathProblem(path, { requireAbsolute: false })
+  if (problem) return { ok: false, message: problem }
   let real: string
   try {
     real = await realpath(resolve(path))
@@ -155,18 +169,38 @@ export async function importStatementFile(path: string, accountName?: string): P
     ok: false,
     message: 'That file is too big to be a bank statement export (over 5 MB).',
   } as const
-  const file = await open(real, 'r')
   let bytes: Buffer
   try {
-    const info = await file.stat()
-    if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
-    if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
-    bytes = await file.readFile()
-  } finally {
-    await file.close()
+    const file = await open(real, 'r')
+    try {
+      const info = await file.stat()
+      if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+      if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
+      bytes = await file.readFile()
+    } finally {
+      await file.close()
+    }
+  } catch {
+    // No permission, or another program has it locked (EACCES, EPERM, EBUSY on Windows).
+    return { ok: false, message: UNREADABLE }
   }
   if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
-  return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
+  return { ok: true, fileName: basename(real), text: decodeStatement(bytes) }
+}
+
+/**
+ * Import a statement from a path (headless mode and the assistant). It is then parsed and saved
+ * exactly like a file picked in the app.
+ */
+export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+  const read = await readStatementFile(path)
+  if (!read.ok) return read
+  return importStatement({ fileName: read.fileName, text: read.text, accountName })
+}
+
+/** Every imported transaction as stored, newest first: no categorising, for linking from Boards. */
+export function storedTransactions(): Transaction[] {
+  return moneyStore().transactions()
 }
 
 /** How much is stored, for `status`. */

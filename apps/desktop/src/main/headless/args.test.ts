@@ -92,6 +92,36 @@ describe('parseInvocation', () => {
     })
   })
 
+  it('parses the read-only mail commands', () => {
+    expect(command('mail', 'list').command).toEqual({
+      name: 'mail list',
+      mailbox: 'INBOX',
+      unread: false,
+      limit: 25,
+    })
+    expect(command('mail', 'list', '--mailbox', 'Sent Messages', '--unread').command).toMatchObject({
+      mailbox: 'Sent Messages',
+      unread: true,
+    })
+    expect(command('mail', 'search', 'gas bill', '--server').command).toEqual({
+      name: 'mail search',
+      query: 'gas bill',
+      server: true,
+      limit: 25,
+    })
+    expect(command('mail', 'read', '42', '--mailbox', 'Archive').command).toEqual({
+      name: 'mail read',
+      uid: 42,
+      mailbox: 'Archive',
+    })
+    expect(command('mail', 'sync').command).toEqual({ name: 'mail sync', mailbox: 'INBOX' })
+    expect(() => parseInvocation(['mail', 'read'])).toThrow(/needs a message uid/)
+    expect(() => parseInvocation(['mail', 'read', 'x'])).toThrow(UsageError)
+    expect(() => parseInvocation(['mail', 'search'])).toThrow(/something to look for/)
+    expect(() => parseInvocation(['mail', 'send'])).toThrow(/Unknown command: mail send/)
+    expect(() => parseInvocation(['mail', 'list', '--mailbox', 'a\u0007b'])).toThrow(/not a mailbox path/)
+  })
+
   it('checks dates and ranges for calendar events', () => {
     expect(command('calendar', 'events', '--from', '2026-11-01', '--to', '2026-11-30').command).toEqual({
       name: 'calendar events',
@@ -132,6 +162,29 @@ describe('parseInvocation', () => {
   })
 })
 
+describe('stricter parsing', () => {
+  it('reads numbers only as plain digits, so a mistyped undo id reaches nothing', () => {
+    expect(usage('undo', '1e3', '--confirm')).toMatch(/clean-up id/)
+    expect(usage('senders', '--limit', '0x10')).toBe('--limit must be a number')
+    expect(usage('senders', '--limit', '2.5')).toBe('--limit must be a number')
+    expect(command('undo', '12', '--confirm')).toMatchObject({ command: { id: 12 } })
+    expect(command('senders', '--limit', '5')).toMatchObject({ command: { limit: 5 } })
+  })
+
+  it('help for an unknown command is still an unknown command', () => {
+    expect(usage('frobnicate', '--help')).toBe('Unknown command: frobnicate. See `help`.')
+    expect(usage('help', 'frobnicate')).toBe('Unknown command: frobnicate. See `help`.')
+    expect(parseInvocation(['money', '--help'])).toMatchObject({ kind: 'help' })
+    expect(parseInvocation(['help', 'senders'])).toMatchObject({ kind: 'help' })
+  })
+
+  it('takes everything after -- as arguments, for a file whose name starts with a dash', () => {
+    expect(command('money', 'import', '--confirm', '--', '-statement.csv')).toMatchObject({
+      command: { name: 'money import', file: '-statement.csv' },
+    })
+  })
+})
+
 describe('commandFrom', () => {
   it('validates programmatic input with the CLI rules (used by the MCP server)', () => {
     expect(commandFrom('senders', { limit: 3 })).toEqual({ name: 'senders', limit: 3 })
@@ -142,6 +195,11 @@ describe('commandFrom', () => {
 it('marks exactly the commands that change data', () => {
   expect([...CHANGE_COMMANDS].sort()).toEqual([
     'ai sort',
+    'boards add-card',
+    'boards move-card',
+    'calendar add',
+    'calendar delete',
+    'calendar edit',
     'cleanup run',
     'money answer',
     'money forget',

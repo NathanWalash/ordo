@@ -4,8 +4,11 @@ import type { CalendarSyncProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
+import { mailApi } from './mail'
+import { ASSISTANT_IPC, type AssistantEvent } from '@ordo/shared'
 import { moneyApi } from './money'
 import { moneyMemoryApi } from './money-memory'
+import { boardsApi } from './boards'
 
 const api: OrdoApi = {
   app: {
@@ -64,6 +67,10 @@ const api: OrdoApi = {
     addLink: (input) => ipcRenderer.invoke(IPC.calendarAddLink, input),
     importFile: () => ipcRenderer.invoke(IPC.calendarImportFile),
     remove: (calendarId) => ipcRenderer.invoke(IPC.calendarRemove, calendarId),
+    details: (ref) => ipcRenderer.invoke(IPC.calendarDetails, ref),
+    createEvent: (input) => ipcRenderer.invoke(IPC.calendarCreateEvent, input),
+    updateEvent: (input) => ipcRenderer.invoke(IPC.calendarUpdateEvent, input),
+    deleteEvent: (input) => ipcRenderer.invoke(IPC.calendarDeleteEvent, input),
   },
   cleanup: {
     run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),
@@ -77,6 +84,21 @@ const api: OrdoApi = {
   },
   money: moneyApi,
   moneyMemory: moneyMemoryApi,
+  mail: mailApi,
+  boards: boardsApi,
+  assistant: {
+    info: () => ipcRenderer.invoke(ASSISTANT_IPC.info),
+    ask: (input) => ipcRenderer.invoke(ASSISTANT_IPC.ask, input),
+    confirm: (input) => ipcRenderer.invoke(ASSISTANT_IPC.confirm, input),
+    setCloudConsent: (input) => ipcRenderer.invoke(ASSISTANT_IPC.consent, input),
+    stop: () => ipcRenderer.invoke(ASSISTANT_IPC.stop),
+    clear: () => ipcRenderer.invoke(ASSISTANT_IPC.clear),
+    onEvent: (listener) => {
+      const handler = (_e: IpcRendererEvent, ev: AssistantEvent) => listener(ev)
+      ipcRenderer.on(ASSISTANT_IPC.event, handler)
+      return () => ipcRenderer.removeListener(ASSISTANT_IPC.event, handler)
+    },
+  },
 }
 
 contextBridge.exposeInMainWorld('ordo', api)

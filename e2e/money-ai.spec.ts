@@ -212,7 +212,7 @@ test.describe('with Mail connected (GreenMail)', () => {
     )
     await c.logout()
 
-    await nav('Inbox').click()
+    await nav('Mail').click()
     await page.getByRole('button', { name: 'Connect iCloud' }).click()
     await page.getByLabel('Apple ID email').fill(TEST_ACCOUNT.email)
     await page.getByLabel('App-specific password').fill(TEST_ACCOUNT.password)

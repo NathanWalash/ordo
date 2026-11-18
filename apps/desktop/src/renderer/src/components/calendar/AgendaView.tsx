@@ -3,7 +3,7 @@ import { CalendarDays } from 'lucide-react'
 import { daysIn, onDay, sameDay, type DateRange } from '@ordo/calendar-core'
 import { EmptyState } from '../EmptyState'
 import { OverlayIcon } from './ItemChips'
-import { formatTime, type CalendarItem, type OpenItem } from './model'
+import { agendaTime, formatTime, type CalendarItem, type OpenItem } from './model'
 import { formatAmount, OVERLAY_LABELS } from './overlays'
 
 interface Props {
@@ -70,15 +70,13 @@ export function AgendaView({ range, today, items, onOpen }: Props) {
 function AgendaRow({ item, day, onOpen }: { item: CalendarItem; day: Date; onOpen: OpenItem }) {
   const color = item.type === 'event' ? item.color : 'var(--ink-3)'
   const startsToday = sameDay(item.start, day)
-  const when = item.allDay
-    ? 'All day'
-    : startsToday
-      ? formatTime(item.start)
-      : `Until ${formatTime(item.end)}`
+  const when = agendaTime(item, day)
   const detail =
     item.type === 'event'
       ? [item.event.location, item.calendar?.name].filter(Boolean).join(' · ')
-      : [OVERLAY_LABELS[item.overlay.kind], formatAmount(item.overlay.amount)].filter(Boolean).join(' · ')
+      : [OVERLAY_LABELS[item.overlay.kind], item.overlay.detail, formatAmount(item.overlay.amount)]
+          .filter(Boolean)
+          .join(' · ')
   return (
     <button
       type="button"
