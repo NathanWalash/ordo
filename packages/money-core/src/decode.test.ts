@@ -17,7 +17,8 @@ const amounts = (text: string) => {
 describe('decodeStatement', () => {
   it('reads UTF-8, with or without a byte order mark', () => {
     expect(decodeStatement(new Uint8Array(Buffer.from(CSV)))).toBe(CSV)
-    expect(decodeStatement(new Uint8Array(Buffer.from(`﻿${CSV}`)))).toBe(CSV)
+    const bom = Buffer.from([0xef, 0xbb, 0xbf])
+    expect(decodeStatement(new Uint8Array(Buffer.concat([bom, Buffer.from(CSV)])))).toBe(CSV)
   })
 
   it('reads UTF-16 from Excel’s Unicode text export, little- and big-endian', () => {

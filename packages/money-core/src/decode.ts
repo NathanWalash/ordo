@@ -12,7 +12,11 @@ export function decodeStatement(bytes: Uint8Array): string {
   if (sample.length >= 4) {
     let evenZeros = 0
     let oddZeros = 0
-    for (let i = 0; i < sample.length; i++) if (sample[i] === 0) i % 2 ? oddZeros++ : evenZeros++
+    for (let i = 0; i < sample.length; i++) {
+      if (sample[i] !== 0) continue
+      if (i % 2) oddZeros++
+      else evenZeros++
+    }
     const half = sample.length / 2
     if (oddZeros > half * 0.6 && evenZeros < half * 0.1) return new TextDecoder('utf-16le').decode(bytes)
     if (evenZeros > half * 0.6 && oddZeros < half * 0.1) return new TextDecoder('utf-16be').decode(bytes)
