@@ -567,6 +567,18 @@ describe('mail change tools', () => {
     })
     expect(p.email!.subject).toBe('Hello   there')
     expect(p.email!.body).toBe('Line one\nLine two')
+    // The quoted original too, in what's sent as well as what's shown.
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ text: `Pay ${rlo}evil${esc}[2J now`, html: null }),
+    }))
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const args = { mode: 'reply', uid: 7, body: 'No.' }
+    const quoted = await previewTool(services, t('ordo_mail_send'), args)
+    expect(quoted.email!.body).toContain('> Pay evil[2J now')
+    await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    const sent = vi.mocked(services.mail.send).mock.calls[0]![0]
+    expect(sent.body).toBe(quoted.email!.body)
   })
 })
 

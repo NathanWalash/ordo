@@ -824,6 +824,8 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
   if (everyone.length > MAIL_RECIPIENTS_MAX)
     return { ok: false, message: `The assistant writes to at most ${MAIL_RECIPIENTS_MAX} people at once.` }
 
+  // The quoted original is third-party text too: what's sent is exactly what the card shows.
+  body = body.replace(UNSAFE_KEEP_LINES, '')
   const files = a.mode === 'forward' ? original!.attachments.filter((x) => !x.inline) : []
   const compose: ComposeInput = {
     to: recipients.to.join(', '),
