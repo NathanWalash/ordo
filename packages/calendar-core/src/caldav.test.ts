@@ -125,6 +125,39 @@ describe('CalDavProvider writes', () => {
   })
 })
 
+describe('CalDavProvider.fetchResource', () => {
+  let server: Server
+  let base: string
+  let answer: 'missing' | 'unauthorised' = 'missing'
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        if (answer === 'unauthorised') return res.writeHead(401).end()
+        // The multistatus a server sends for an object that's gone.
+        res
+          .writeHead(207, { 'content-type': 'application/xml' })
+          .end(
+            '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>' +
+              `<d:href>${new URL(req.url!, 'http://x').pathname}gone.ics</d:href>` +
+              '<d:status>HTTP/1.1 404 Not Found</d:status></d:response></d:multistatus>',
+          )
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/cal/home/`
+  })
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())))
+
+  it('says an object deleted elsewhere is gone, and still reports a wrong password', async () => {
+    const p = new CalDavProvider({ serverUrl: base, username: 'u', password: 'p' })
+    answer = 'missing'
+    await expect(p.fetchResource(base, `${base}gone.ics`)).resolves.toBeNull()
+    answer = 'unauthorised'
+    await expect(p.fetchResource(base, `${base}gone.ics`)).rejects.toBeInstanceOf(CalendarAuthError)
+  })
+})
+
 describe('CalDavProvider errors', () => {
   let server: Server
   let url: string

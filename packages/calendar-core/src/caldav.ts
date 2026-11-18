@@ -136,9 +136,21 @@ export class CalDavProvider implements CalendarProvider, WritableCalendarProvide
 
   async fetchResource(calendarId: string, href: string): Promise<CalendarResource | null> {
     if (!inside(calendarId, href)) throw outside()
-    const [o] = await this.call(() =>
-      this.client.fetchCalendarObjects({ calendar: { url: calendarId } as DAVCalendar, objectUrls: [href] }),
-    )
+    let objects
+    try {
+      objects = await this.call(() =>
+        this.client.fetchCalendarObjects({
+          calendar: { url: calendarId } as DAVCalendar,
+          objectUrls: [href],
+        }),
+      )
+    } catch (err) {
+      // tsdav throws when the server says the object isn't there (a 404 in the multistatus, or
+      // an incomplete answer): that's "gone". A wrong password or no connection still fails.
+      if (err instanceof CalendarAuthError || err instanceof CalendarConnectionError) throw err
+      return null
+    }
+    const o = objects[0]
     const uid = typeof o?.data === 'string' ? firstUid(o.data) : null
     return o && uid ? { href, etag: o.etag || undefined, uid, ics: o.data as string } : null
   }
