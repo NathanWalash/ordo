@@ -143,8 +143,10 @@ export class CalendarStore {
     if (!cols.some((c) => c.name === 'provider'))
       this.db.exec(`ALTER TABLE calendars ADD COLUMN provider TEXT NOT NULL DEFAULT '${ICLOUD}'`)
     if (this.meta('schema') !== SCHEMA_VERSION) {
-      // Calendars cached before resources were kept: make the next sync fetch them again.
+      // Calendars cached before resources were kept: make the next sync fetch them again, and
+      // forget when the last sync was so the app syncs as soon as it opens.
       this.db.exec('UPDATE calendars SET version = NULL')
+      this.setMeta('lastSync', null)
       this.setMeta('schema', SCHEMA_VERSION)
     }
   }
