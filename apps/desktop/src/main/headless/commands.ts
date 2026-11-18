@@ -493,6 +493,7 @@ export async function runCommand(
       const r = await services.mail.open({ mailbox: command.mailbox, uid: command.uid })
       if (!r.ok) return fromService(r)
       const m = r.message
+      const text = bodyText(m, { links: true })
       return {
         ok: true,
         data: {
@@ -508,8 +509,8 @@ export async function runCommand(
           unread: !m.seen,
           flagged: m.flagged,
           // The plain-text body, or the HTML as text with link addresses: never HTML.
-          text: bodyText(m, { links: true }).slice(0, MAIL_TEXT_MAX),
-          truncated: m.truncated || bodyText(m, { links: true }).length > MAIL_TEXT_MAX,
+          text: text.slice(0, MAIL_TEXT_MAX),
+          truncated: m.truncated || text.length > MAIL_TEXT_MAX,
           attachments: m.attachments
             .filter((a) => !a.inline)
             .map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.size })),

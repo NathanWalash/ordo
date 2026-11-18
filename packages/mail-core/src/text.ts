@@ -60,42 +60,105 @@ export interface HtmlToTextOptions {
 const OPEN = String.fromCharCode(1)
 const CLOSE = String.fromCharCode(2)
 
-/** Plain text from an email's HTML: paragraphs and line breaks kept, everything else dropped. */
+/** At most this much HTML is turned into text; the rest of a huge email is left out. */
+export const HTML_TEXT_MAX = 256 * 1024
+
+/** Elements whose content is never text: skipped up to their closing tag. */
+const RAW = new Set(['head', 'script', 'style', 'title', 'template', 'noscript', 'textarea', 'xmp'])
+/** Elements that start or end a line. */
+const BLOCK = new Set([
+  'p',
+  'div',
+  'tr',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'ul',
+  'ol',
+  'blockquote',
+  'table',
+  'section',
+  'article',
+  'header',
+  'footer',
+  'pre',
+  'hr',
+])
+
+const HREF = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i
+
+/**
+ * Plain text from an email's HTML: paragraphs and line breaks kept, everything else dropped.
+ *
+ * A single pass that finds each closing marker with indexOf from where it is, so its time grows
+ * with the length of the input whatever the input is (no regex backtracking over unclosed
+ * comments or tags). An unclosed comment, tag or raw-text element drops the rest of the input.
+ */
 export function htmlToText(html: string, opts: HtmlToTextOptions = {}): string {
-  // Link addresses are marked with OPEN…CLOSE so stripping tags leaves them alone.
-  let s = html
+  // Link addresses are marked with OPEN…CLOSE so they survive as text, then become <…>.
+  const src = (html.length > HTML_TEXT_MAX ? html.slice(0, HTML_TEXT_MAX) : html)
     .split(OPEN)
     .join('')
     .split(CLOSE)
     .join('')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<(head|script|style|title|template|noscript)\b[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<(head|script|style|title)\b[^>]*\/?>/gi, '')
-  if (opts.links)
-    s = s.replace(
-      /<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi,
-      (...m) => {
-        const href = decodeEntities(String(m[2] ?? m[3] ?? m[4] ?? '')).trim()
-        const inner = String(m[5] ?? '')
-        const text = decodeEntities(inner.replace(/<[^>]*>/g, '')).trim()
-        if (
-          !/^https?:\/\//i.test(href) ||
-          !text ||
-          text === href ||
-          text.replace(/\/$/, '') === href.replace(/\/$/, '')
-        )
-          return inner
-        return `${inner} ${OPEN}${href}${CLOSE}`
-      },
-    )
-  s = s
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '\n• ')
-    .replace(/<\/(p|div|tr|h[1-6]|ul|ol|blockquote|table|section|article|header|footer|pre)\s*>/gi, '\n')
-    .replace(/<(p|div|tr|h[1-6]|ul|ol|blockquote|table|section|article|header|footer|pre|hr)\b[^>]*>/gi, '\n')
-    .replace(/<\/(td|th)\s*>/gi, ' ')
-    .replace(/<[^>]*>/g, '')
-  return tidy(decodeEntities(s)).split(OPEN).join('<').split(CLOSE).join('>')
+  const lower = src.toLowerCase()
+  const out: string[] = []
+  let link: { href: string; from: number } | null = null
+  let i = 0
+  while (i < src.length) {
+    const lt = src.indexOf('<', i)
+    if (lt === -1) {
+      out.push(src.slice(i))
+      break
+    }
+    if (lt > i) out.push(src.slice(i, lt))
+    if (src.startsWith('<!--', lt)) {
+      const end = src.indexOf('-->', lt + 4)
+      if (end === -1) break
+      i = end + 3
+      continue
+    }
+    const m = /^<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/.exec(src.slice(lt, lt + 40))
+    if (!m && src[lt + 1] !== '!' && src[lt + 1] !== '?') {
+      // Not a tag ("1 < 2"): a literal "<".
+      out.push('<')
+      i = lt + 1
+      continue
+    }
+    const gt = src.indexOf('>', lt + 1)
+    if (gt === -1) break
+    i = gt + 1
+    if (!m) continue // <!doctype>, <?xml?>
+    const closing = m[1] === '/'
+    const name = m[2]!.toLowerCase()
+    if (!closing && RAW.has(name)) {
+      const end = lower.indexOf(`</${name}`, gt + 1)
+      if (end === -1) break
+      const endGt = src.indexOf('>', end)
+      i = endGt === -1 ? src.length : endGt + 1
+      continue
+    }
+    if (name === 'br') out.push('\n')
+    else if (name === 'li' && !closing) out.push('\n• ')
+    else if (BLOCK.has(name)) out.push('\n')
+    else if ((name === 'td' || name === 'th') && closing) out.push(' ')
+    else if (name === 'a' && opts.links) {
+      if (!closing) {
+        const h = HREF.exec(src.slice(lt, gt))
+        const href = h ? decodeEntities(h[1] ?? h[2] ?? h[3] ?? '').trim() : ''
+        link = /^https?:\/\//i.test(href) ? { href, from: out.length } : null
+      } else if (link) {
+        const text = decodeEntities(out.slice(link.from).join('')).trim()
+        const href = link.href
+        if (text && text.replace(/\/$/, '') !== href.replace(/\/$/, '')) out.push(` ${OPEN}${href}${CLOSE}`)
+        link = null
+      }
+    }
+  }
+  return tidy(decodeEntities(out.join(''))).split(OPEN).join('<').split(CLOSE).join('>')
 }
 
 /** Collapse runs of spaces, trim each line and allow at most one blank line in a row. */

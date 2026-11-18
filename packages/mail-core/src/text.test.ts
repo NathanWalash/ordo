@@ -32,6 +32,24 @@ describe('htmlToText', () => {
     expect(htmlToText('<a href="javascript:alert(1)">Click</a>', { links: true })).toBe('Click')
   })
 
+  it('takes linear time on unclosed comments, raw-text tags and links', () => {
+    for (const opener of ['<!--', '<script>', '<style x>', '<a href="https://x.example">', '<head>']) {
+      const html = opener.repeat(Math.ceil(200_000 / opener.length))
+      const t = performance.now()
+      htmlToText(html, { links: true })
+      expect(performance.now() - t, opener).toBeLessThan(500)
+    }
+  })
+
+  it('drops what follows an unclosed comment, script or tag, and reads at most 256 KB', () => {
+    expect(htmlToText('<p>Hi</p><!-- never closed <p>secret</p>')).toBe('Hi')
+    expect(htmlToText('<p>Hi</p><script>no end <p>secret</p>')).toBe('Hi')
+    expect(htmlToText('<p>Hi</p><img src="x" alt="secret')).toBe('Hi')
+    expect(htmlToText('1 < 2 and 3 > 2')).toBe('1 < 2 and 3 > 2')
+    const big = `<p>start</p>${'x'.repeat(300 * 1024)}<p>END</p>`
+    expect(htmlToText(big)).not.toContain('END')
+  })
+
   it('never returns markup', () => {
     expect(htmlToText('<img src=x onerror=alert(1)><b>bold</b>')).toBe('bold')
   })
