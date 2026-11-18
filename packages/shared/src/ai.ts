@@ -26,6 +26,16 @@ export const AiSettingsSchema = z
     money: z.boolean().default(false),
     /** The cloud provider the user agreed may receive sender names and subject lines (and, with `money`, merchant names). */
     cloudConsent: z.enum(PROVIDER_IDS).nullable(),
+    /**
+     * The cloud provider the user separately agreed may see exact amounts, dates and people's names,
+     * for Ask Ordo. Only counts while it is also the chosen provider with `cloudConsent`. Local
+     * models never need it.
+     */
+    moneyDetailsConsent: z.enum(PROVIDER_IDS).nullable().default(null),
+    /** How Ask Ordo answers: a couple of sentences, or with a short breakdown. */
+    askStyle: z.enum(['brief', 'detailed']).default('brief'),
+    /** Let Ask Ordo ask a short question back when something doesn't add up. */
+    askClarify: z.boolean().default(true),
   })
   .strict()
   .refine((s) => !isCloudProvider(s.provider) || s.cloudConsent === s.provider, {
@@ -40,6 +50,19 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   sortSenders: false,
   money: false,
   cloudConsent: null,
+  moneyDetailsConsent: null,
+  askStyle: 'brief',
+  askClarify: true,
+}
+
+/**
+ * May Ask Ordo send exact amounts, dates and names to the chosen provider? Always for a local
+ * model; for a cloud one only with both the general consent and the separate Money details consent.
+ */
+export function moneyDetailsAllowed(ai: AiSettings): boolean {
+  if (ai.provider === 'none') return false
+  if (!isCloudProvider(ai.provider)) return true
+  return ai.cloudConsent === ai.provider && ai.moneyDetailsConsent === ai.provider
 }
 
 export interface AiProviderStatus extends ProviderInfo, Omit<DetectResult, 'detail'> {

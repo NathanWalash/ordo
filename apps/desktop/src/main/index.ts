@@ -8,6 +8,7 @@ import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
+import { registerMemoryIpc, stopAsk } from './money-memory'
 import { releaseWriteLock, toRenderer } from './writes'
 import { headlessArgs } from './headless/args'
 import { runHeadless } from './headless/run'
@@ -118,10 +119,14 @@ function startApp(): void {
   registerCalendarIpc()
   registerCleanupIpc()
   registerMoneyIpc()
+  registerMemoryIpc()
 
   app.on('before-quit', () => mail.closeMail())
   app.on('before-quit', () => closeCalendar())
-  app.on('before-quit', () => closeMoney())
+  app.on('before-quit', () => {
+    stopAsk()
+    closeMoney()
+  })
   app.whenReady().then(() => {
     applyTestOverrides()
     // Only the windowed app: headless mode hides the Dock icon instead.

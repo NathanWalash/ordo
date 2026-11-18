@@ -32,12 +32,17 @@ describe('AI settings contract', () => {
       sortSenders: false,
       money: false,
       cloudConsent: null,
+      moneyDetailsConsent: null,
+      askStyle: 'brief',
+      askClarify: true,
     })
   })
 
   it('treats AI for Money as off when a saved file predates it, and only accepts a boolean', () => {
     const old = { provider: 'lmstudio', model: 'm', sortSenders: true, cloudConsent: null }
-    expect(SettingsPatchSchema.parse({ ai: old })).toEqual({ ai: { ...old, money: false } })
+    expect(SettingsPatchSchema.parse({ ai: old })).toEqual({
+      ai: { ...old, money: false, moneyDetailsConsent: null, askStyle: 'brief', askClarify: true },
+    })
     expect(SettingsPatchSchema.parse({ ai: { ...old, money: true } }).ai?.money).toBe(true)
     expect(SettingsPatchSchema.safeParse({ ai: { ...old, money: 'yes' } }).success).toBe(false)
     // Money doesn't loosen the cloud rule: consent for that provider is still required.

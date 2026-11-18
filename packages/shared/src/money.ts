@@ -202,6 +202,8 @@ export const ConfirmBillSchema = z.object({
   /** Needed when only email found the bill, so the amount and due date are unknown. */
   amount: pence.optional(),
   nextDue: isoDate.optional(),
+  /** False to save the bill without the split Ordo suggested from what you taught it. */
+  withSplit: z.boolean().optional(),
 })
 export type ConfirmBillInput = z.input<typeof ConfirmBillSchema>
 

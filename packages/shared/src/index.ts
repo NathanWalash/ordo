@@ -7,8 +7,10 @@ import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
 export * from './calendar'
 import type { MoneyApi } from './money'
+import type { MoneyMemoryApi } from './money-memory'
 
 export * from './money'
+export * from './money-memory'
 
 /** A top-level area of the app shown in the sidebar (Mail, Finance, ...). */
 export interface ModuleInfo {
@@ -86,6 +88,7 @@ export interface OrdoApi {
     list(): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
   }
   money: MoneyApi
+  moneyMemory: MoneyMemoryApi
   calendar: CalendarApi
   cleanup: CleanupApi
 }
