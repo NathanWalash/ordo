@@ -29,14 +29,41 @@ const close = (a: number, b: number) => Math.abs(a - b) <= Math.max(AMOUNT_TOLER
 
 /** Split one merchant's payments into groups of similar amounts (two Apple subscriptions, say). */
 function clusterByAmount(txs: Transaction[]): Transaction[][] {
-  const clusters: Transaction[][] = []
+  // Payments go in smallest first, so each cluster's amounts stay sorted and its median is a
+  // lookup. (Sorting every cluster again for every payment made big statements quadratic.)
+  const clusters: { txs: Transaction[]; amounts: number[] }[] = []
+  const middle = (s: number[]) => {
+    const mid = s.length >> 1
+    return s.length % 2 ? s[mid]! : Math.round((s[mid - 1]! + s[mid]!) / 2)
+  }
   for (const t of [...txs].sort((a, b) => -a.amount - -b.amount)) {
     const amt = -t.amount
-    const home = clusters.find((c) => close(median(c.map((x) => -x.amount)), amt))
-    if (home) home.push(t)
-    else clusters.push([t])
+    const home = clusters.find((c) => close(middle(c.amounts), amt))
+    if (home) {
+      home.txs.push(t)
+      home.amounts.push(amt)
+    } else clusters.push({ txs: [t], amounts: [amt] })
   }
-  return clusters
+  return clusters.map((c) => c.txs)
+}
+
+/**
+ * The payment to count monthly and yearly dates from: the latest one on the run's usual day of
+ * the month. A bill on the 31st is paid on the 30th or 28th in shorter months; counting from
+ * that payment moved every later due date to the 28th for good.
+ */
+function anchorOf(run: Transaction[], cadence: Cadence): ISODate {
+  const last = run[run.length - 1]!.date
+  if (cadence === 'weekly') return last
+  const counts = new Map<number, number>()
+  for (const t of run) {
+    const day = Number(t.date.slice(8, 10))
+    counts.set(day, (counts.get(day) ?? 0) + 1)
+  }
+  let usual = 0
+  for (const [day, n] of counts)
+    if (n > (counts.get(usual) ?? 0) || (n === counts.get(usual) && day > usual)) usual = day
+  return [...run].reverse().find((t) => Number(t.date.slice(8, 10)) === usual)?.date ?? last
 }
 
 function cadenceOf(gaps: number[]): { cadence: Cadence; regular: number } | null {
@@ -106,7 +133,11 @@ export function detectRecurring(
         cadence: found.cadence,
         typicalAmount: latest,
         lastDate: last.date,
-        nextDue: nextOnOrAfter(last.date, found.cadence, maxDate(today, addDays(last.date, 1))),
+        nextDue: nextOnOrAfter(
+          anchorOf(run, found.cadence),
+          found.cadence,
+          maxDate(today, addDays(last.date, 1)),
+        ),
         confidence,
         transactionIds: run.map((t) => t.id),
         ...(latest > previous && { priceIncrease: { from: previous, to: latest, date: run[change]!.date } }),

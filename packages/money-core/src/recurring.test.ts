@@ -108,6 +108,25 @@ describe('detectRecurring', () => {
     expect(c!.transactionIds).toHaveLength(3)
   })
 
+  it('keeps a bill on the 31st on the last day of the month, not the 28th for good', () => {
+    const txs = ['2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31', '2027-02-28'].map((d) =>
+      tx(d, -4500, 'Council Tax'),
+    )
+    expect(detectRecurring(txs, '2027-03-01')[0]!.nextDue).toBe('2027-03-31')
+    const april = [...txs, tx('2027-03-31', -4500, 'Council Tax'), tx('2027-04-30', -4500, 'Council Tax')]
+    expect(detectRecurring(april, '2027-05-01')[0]!.nextDue).toBe('2027-05-31')
+  })
+
+  it('stays fast on a big statement', () => {
+    // Years of daily shop with one merchant, every amount a little different.
+    const txs = Array.from({ length: 20_000 }, (_, i) =>
+      tx(addDays('2020-01-01', i % 2000), -(500 + i), 'Corner Shop'),
+    )
+    const start = performance.now()
+    detectRecurring(txs, '2026-11-17')
+    expect(performance.now() - start).toBeLessThan(1_500)
+  })
+
   it('finds the subscriptions in a real-looking statement', () => {
     const text = readFileSync(new URL('./fixtures/monzo.csv', import.meta.url), 'utf8')
     const r = parseStatement(text, { accountName: 'Monzo' })

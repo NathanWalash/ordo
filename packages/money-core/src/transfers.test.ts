@@ -64,6 +64,17 @@ describe('pairOwnTransfers', () => {
     expect(r.find((t) => t.id === out2.id)!.transferWith).toBe(inn2.id)
   })
 
+  it('stays fast on big statements', () => {
+    const rows: Transaction[] = []
+    for (let i = 0; i < 20_000; i++) {
+      const date = `2026-${String((i % 12) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`
+      rows.push(tx('HSBC', date, -(100 + i), `Shop ${i}`), tx('Monzo', date, 100 + i * 3, `Refund ${i}`))
+    }
+    const start = performance.now()
+    pairOwnTransfers(rows)
+    expect(performance.now() - start).toBeLessThan(1_500)
+  })
+
   it('keeps a category you chose yourself', () => {
     const out = tx('HSBC', '2026-11-13', -3000, 'Me Monzo BP', { category: 'Bills', categorisedBy: 'you' })
     const inn = tx('Monzo', '2026-11-13', 3000, 'Me · Monzo')
