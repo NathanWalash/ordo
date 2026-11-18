@@ -83,6 +83,8 @@ export interface MessageContent {
   from: Address | null
   to: Address[]
   cc: Address[]
+  /** Only ever set on your own drafts and sent copies. */
+  bcc: Address[]
   replyTo: Address[]
   messageId: string | null
   /** In-Reply-To and References, oldest first, for threading a reply. */

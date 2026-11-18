@@ -173,7 +173,11 @@ describe.skipIf(!port)('mail client against GreenMail', () => {
     const saved = await provider.append('Drafts', draft.raw, ['\\Draft', '\\Seen'])
     expect(saved.uid).toBeGreaterThan(0)
     const m = await provider.fetchMessage('Drafts', saved.uid!)
-    expect(m).toMatchObject({ subject: `Draft ${run}`, draft: true })
+    expect(m).toMatchObject({
+      subject: `Draft ${run}`,
+      draft: true,
+      bcc: [{ address: 'hidden@friend.example' }],
+    })
     expect(await provider.deleteDraft('Drafts', saved.uid!)).toBe(true)
     expect(await provider.fetchMessage('Drafts', saved.uid!)).toBeNull()
     // Something that isn't a draft is never removed.

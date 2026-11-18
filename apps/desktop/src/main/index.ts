@@ -5,6 +5,7 @@ import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
+import { closeMailClient, registerMailIpc } from './mail-client'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { closeMoney, registerMoneyIpc } from './money'
@@ -78,6 +79,12 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+  // Email is shown in a sandboxed frame inside the window. It may load its own srcdoc and
+  // nothing else: a link clicked there never navigates in the app (the window asks first and
+  // opens it in the browser).
+  win.webContents.on('will-frame-navigate', (e) => {
+    if (!e.isMainFrame && e.url !== 'about:srcdoc' && e.url !== 'about:blank') e.preventDefault()
+  })
 
   if (isWin) nativeTheme.on('updated', () => win.setTitleBarOverlay(winOverlay()))
 
@@ -111,15 +118,20 @@ function startApp(): void {
   ipcMain.handle(IPC.accountStatus, () => mail.status())
   ipcMain.handle(IPC.accountTest, (_e, input: ConnectInput) => mail.test(input))
   ipcMain.handle(IPC.accountConnect, (_e, input: ConnectInput) => mail.connect(input))
-  ipcMain.handle(IPC.accountDisconnect, () => mail.disconnect().then(clearCalendar))
+  ipcMain.handle(IPC.accountDisconnect, () => {
+    closeMailClient()
+    return mail.disconnect().then(clearCalendar)
+  })
   ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
   ipcMain.handle(IPC.scanStop, () => mail.stopScan())
   ipcMain.handle(IPC.sendersList, () => sendersWithAi())
   registerCalendarIpc()
   registerCleanupIpc()
+  registerMailIpc()
   registerMoneyIpc()
 
   app.on('before-quit', () => mail.closeMail())
+  app.on('before-quit', () => closeMailClient())
   app.on('before-quit', () => closeCalendar())
   app.on('before-quit', () => closeMoney())
   app.whenReady().then(() => {

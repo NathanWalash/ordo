@@ -464,6 +464,7 @@ function toContent(
     from,
     to: toAddresses(env?.to),
     cc: toAddresses(env?.cc),
+    bcc: toAddresses(env?.bcc),
     // Servers fill the envelope's Reply-To with From when there is none: only keep a real one.
     replyTo: toAddresses(env?.replyTo).filter((a) => a.address.toLowerCase() !== from?.address.toLowerCase()),
     messageId: env?.messageId?.trim() || null,

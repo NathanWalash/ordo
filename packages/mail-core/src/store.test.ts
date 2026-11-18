@@ -128,6 +128,7 @@ const content = (uid: number, mailbox = 'INBOX'): MessageContent => ({
   from: { address: 'a@x.example' },
   to: [],
   cc: [],
+  bcc: [],
   replyTo: [],
   messageId: '<m@x.example>',
   references: [],

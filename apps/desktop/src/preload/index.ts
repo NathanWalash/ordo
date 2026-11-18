@@ -4,6 +4,7 @@ import type { CalendarSyncProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
+import { mailApi } from './mail'
 import { moneyApi } from './money'
 
 const api: OrdoApi = {
@@ -75,6 +76,7 @@ const api: OrdoApi = {
     undo: (id) => ipcRenderer.invoke(CLEANUP_IPC.undo, id),
   },
   money: moneyApi,
+  mail: mailApi,
 }
 
 contextBridge.exposeInMainWorld('ordo', api)
