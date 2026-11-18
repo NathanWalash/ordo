@@ -100,10 +100,19 @@ export async function reconcileFolder(
   const onServer = new Set(await source.allUids(mailbox))
   const gone = cached.filter((u) => !onServer.has(u))
   store.deleteMessages(mailbox, gone)
-  const recent = cached
-    .filter((u) => onServer.has(u))
-    .slice(-(opts.flagWindow ?? FOLDER_SYNC_DEFAULTS.flagWindow))
-  const changed = store.updateFlags(mailbox, await source.fetchFlags(mailbox, recent))
+  // The newest messages every time, plus the next slice of older ones, so over a few syncs every
+  // cached message's flags are checked without fetching them all at once.
+  const window = opts.flagWindow ?? FOLDER_SYNC_DEFAULTS.flagWindow
+  const present = cached.filter((u) => onServer.has(u))
+  const recent = present.slice(-window)
+  const older = present.slice(0, Math.max(0, present.length - window))
+  let cursor = store.flagCursor(mailbox)
+  if (cursor >= older.length) cursor = 0
+  const slice = older.slice(cursor, cursor + window)
+  store.setFlagCursor(mailbox, cursor + window)
+  const fetchedAt = Date.now()
+  const flags = await source.fetchFlags(mailbox, [...slice, ...recent])
+  const changed = store.updateFlags(mailbox, flags, fetchedAt)
   return { removed: gone.length, changed }
 }
 

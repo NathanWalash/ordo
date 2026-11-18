@@ -130,6 +130,8 @@ const MESSAGE_COLUMNS: [string, string][] = [
   ['cc_json', 'TEXT'],
   ['message_id', 'TEXT'],
   ['has_attachments', 'INTEGER NOT NULL DEFAULT 0'],
+  // When Ordo last changed this message's flags itself (ms), so a sync doesn't undo it.
+  ['flags_at', 'INTEGER NOT NULL DEFAULT 0'],
 ]
 
 // INSERT OR REPLACE doesn't fire delete triggers (recursive_triggers is off), so re-caching a
@@ -240,7 +242,23 @@ export class MailStore implements AiCategoryCache {
     )
     for (const [name, type] of MESSAGE_COLUMNS)
       if (!have.has(name)) this.db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${type}`)
+    const state = new Set(
+      (this.db.prepare('PRAGMA table_info(mailbox_state)').all() as { name: string }[]).map((c) => c.name),
+    )
+    if (!state.has('flag_cursor'))
+      this.db.exec('ALTER TABLE mailbox_state ADD COLUMN flag_cursor INTEGER NOT NULL DEFAULT 0')
     this.db.exec(AFTER_COLUMNS)
+  }
+
+  /** Where the rotating flag refresh of older messages got to in a mailbox (see reconcileFolder). */
+  flagCursor(mailbox: string): number {
+    const row = this.db.prepare('SELECT flag_cursor FROM mailbox_state WHERE mailbox = ?').get(mailbox) as
+      { flag_cursor: number } | undefined
+    return row?.flag_cursor ?? 0
+  }
+
+  setFlagCursor(mailbox: string, cursor: number): void {
+    this.db.prepare('UPDATE mailbox_state SET flag_cursor = ? WHERE mailbox = ?').run(cursor, mailbox)
   }
 
   mailboxState(mailbox: string): MailboxState | null {
@@ -343,11 +361,15 @@ export class MailStore implements AiCategoryCache {
     return rows.map((r) => r.uid)
   }
 
-  /** Update flags of messages already cached; unknown UIDs are ignored. Returns how many changed. */
-  updateFlags(mailbox: string, updates: readonly FlagUpdate[]): number {
+  /**
+   * Update flags of messages already cached; unknown UIDs are ignored. Returns how many changed.
+   * With `fetchedAt`, messages whose flags you changed in Ordo since then are left alone, so a
+   * fetch that started before your change can't undo it.
+   */
+  updateFlags(mailbox: string, updates: readonly FlagUpdate[], fetchedAt = Number.MAX_SAFE_INTEGER): number {
     const update = this.db.prepare(
       'UPDATE messages SET seen = ?, flagged = ?, answered = ? WHERE mailbox = ? AND uid = ? ' +
-        'AND (seen != ? OR flagged != ? OR answered != ?)',
+        'AND (seen != ? OR flagged != ? OR answered != ?) AND flags_at < ?',
     )
     let changed = 0
     this.transaction(() => {
@@ -355,7 +377,7 @@ export class MailStore implements AiCategoryCache {
         const s = u.seen ? 1 : 0
         const f = u.flagged ? 1 : 0
         const a = u.answered ? 1 : 0
-        changed += Number(update.run(s, f, a, mailbox, u.uid, s, f, a).changes)
+        changed += Number(update.run(s, f, a, mailbox, u.uid, s, f, a, fetchedAt).changes)
       }
     })
     return changed
@@ -369,9 +391,12 @@ export class MailStore implements AiCategoryCache {
     on: boolean,
   ): void {
     // `flag` is one of three fixed column names, never user input.
-    const update = this.db.prepare(`UPDATE messages SET ${flag} = ? WHERE mailbox = ? AND uid = ?`)
+    const update = this.db.prepare(
+      `UPDATE messages SET ${flag} = ?, flags_at = ? WHERE mailbox = ? AND uid = ?`,
+    )
+    const now = Date.now()
     this.transaction(() => {
-      for (const uid of uids) update.run(on ? 1 : 0, mailbox, uid)
+      for (const uid of uids) update.run(on ? 1 : 0, now, mailbox, uid)
     })
   }
 
