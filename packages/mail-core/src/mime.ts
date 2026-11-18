@@ -35,7 +35,7 @@ const ATTACHMENT_NAME_MAX = 200
 export function safeFilename(name: string | undefined, fallback = 'attachment'): string {
   const cleaned = (name ?? '')
     // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/[/\\:*?"<>|]/g, '_')
     .replace(/^[\s.]+/, '')
     .trim()

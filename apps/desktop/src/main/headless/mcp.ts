@@ -8,6 +8,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { commandFrom, MAX_EVENT_DAYS, UsageError, type CommandName } from './args'
 import { runCommand, type CommandResult, type OrdoServices } from './commands'
+import { escapeForTerminal } from './format'
 
 /**
  * Ordo as an MCP server, over stdio only: no port, no network listener. Read tools are always
@@ -45,11 +46,14 @@ const category = z
   .describe('Only senders in this category ("uncategorised" is Other in the app)')
 
 function toToolResult(result: CommandResult): CallToolResult {
-  if (result.ok) return { content: [{ type: 'text', text: JSON.stringify(result.data) }] }
+  if (result.ok) return { content: [{ type: 'text', text: escapeForTerminal(JSON.stringify(result.data)) }] }
   return {
     isError: true,
     content: [
-      { type: 'text', text: JSON.stringify({ error: { code: result.code, message: result.message } }) },
+      {
+        type: 'text',
+        text: escapeForTerminal(JSON.stringify({ error: { code: result.code, message: result.message } })),
+      },
     ],
   }
 }

@@ -316,11 +316,24 @@ export function formatHuman(name: CommandName, result: CommandResult): string {
 
 /** The JSON document to print: the data, or `{ "error": { "code", "message" } }`. */
 export function formatJson(result: CommandResult): string {
-  return JSON.stringify(
-    result.ok ? result.data : { error: { code: result.code, message: result.message } },
-    null,
-    2,
+  return escapeForTerminal(
+    JSON.stringify(
+      result.ok ? result.data : { error: { code: result.code, message: result.message } },
+      null,
+      2,
+    ),
   )
+}
+
+/** C1 controls, bidi marks, overrides and isolates, and the line and paragraph separators. */
+const TERMINAL_UNSAFE = /[\u0080-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g
+
+/**
+ * JSON.stringify already escapes C0 controls; this escapes the rest of what a terminal would act
+ * on (C1 controls like CSI, and bidi tricks) as \u sequences. Still the same JSON.
+ */
+export function escapeForTerminal(json: string): string {
+  return json.replace(TERMINAL_UNSAFE, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 export const HELP = `Ordo, headless. Runs without a window, for scripts and AI agents.

@@ -141,7 +141,7 @@ describe('commands', () => {
     const services = fakeServices()
     services.mail.messages = vi.fn(() => ({
       total: 1,
-      messages: [summary(7, { subject: 'Hi\u001b[31m‮evil' })],
+      messages: [summary(7, { subject: 'Hi\u001b[31m\u202eevil' })],
     }))
     const r = await cli(services, 'mail', 'list', '--mailbox', 'Archive', '--unread')
     expect(services.mail.messages).toHaveBeenCalledWith({
@@ -317,6 +317,18 @@ describe('commands', () => {
 })
 
 describe('output', () => {
+  it('--json escapes C1 controls and bidi characters, so it is safe to print, and still parses', async () => {
+    const tricky = `a\u009bb\u202ec\u2066d\u200fe\u2028f`
+    const services = fakeServices()
+    services.mail.messages = vi.fn(() => ({ total: 1, messages: [summary(7, { subject: tricky })] }))
+    const r = await cli(services, 'mail', 'list', '--json')
+    const unsafe = new RegExp('[\\u0080-\\u009f\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069\\u2028\\u2029]')
+    expect(r.stdout).not.toMatch(unsafe)
+    expect(r.stdout).toContain('\\u009b')
+    expect(r.stdout).toContain('\\u202e')
+    expect(JSON.parse(r.stdout).messages[0].subject).toBe(tricky)
+  })
+
   it('--json prints exactly one JSON document on stdout', async () => {
     const r = await cli(fakeServices(), 'senders', '--json')
     expect(r.stderr).toBe('')
@@ -378,7 +390,7 @@ describe('output', () => {
   })
 
   it('strips control characters and bidi tricks from third-party text', () => {
-    expect(clean('Evil\u001b[2J\r\nCorp‮')).toBe('Evil [2J  Corp ')
+    expect(clean('Evil\u001b[2J\r\nCorp\u202e')).toBe('Evil [2J  Corp ')
     expect(clean('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
     // Right-to-left and left-to-right marks reorder text; line and paragraph separators start lines.
     const sneaky = ['a', 0x200f, 'b', 0x200e, 'c', 0x061c, 'd', 0x2028, 'e', 0x2029, 'f']

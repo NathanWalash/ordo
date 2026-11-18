@@ -45,7 +45,7 @@ const server = vi.hoisted(() => ({
 }))
 
 vi.mock('@ordo/mail-core/node', async (importOriginal) => {
-  const real = await importOriginal<typeof import('@ordo/mail-core/node')>()
+  const real = await importOriginal<Record<string, unknown>>()
   const box = (path: string): Box => {
     const b = server.boxes.get(path)
     if (!b) throw new Error(`No mailbox ${path}`)

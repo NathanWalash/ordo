@@ -69,6 +69,6 @@ describe('bodyText and tidy', () => {
 
 describe('printable', () => {
   it('removes control characters and bidi overrides but keeps newlines and tabs', () => {
-    expect(printable('a\u001b[31mred‮b\r\nc\td')).toBe('a[31mredb\nc\td')
+    expect(printable('a\u001b[31mred\u202eb\r\nc\td')).toBe('a[31mredb\nc\td')
   })
 })

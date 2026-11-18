@@ -189,7 +189,7 @@ export function bodyText(
 
 // C0 (except tab and newline), DEL, C1, and bidi overrides/isolates.
 // eslint-disable-next-line no-control-regex
-const UNSAFE_TEXT = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g
+const UNSAFE_TEXT = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g
 
 /** Text from an email, safe to print in a terminal: control characters and bidi overrides removed. */
 export function printable(text: string): string {
