@@ -82,8 +82,36 @@ process through the typed `window.ordo` API exposed by the preload script
   twelve ahead. Calendars whose CTag hasn't changed are skipped on re-sync.
 - Times with a TZID are converted with the runtime's IANA database, falling back to
   the event's VTIMEZONE; all-day events stay on their date whatever the time zone.
-- Read-only in the first version. Other modules can show items on the calendar
-  (bill due dates, renewals, trial ends) through `OVERLAY_SOURCES` in the renderer.
+- Other modules can show items on the calendar (bill due dates, renewals, trial
+  ends) through `OVERLAY_SOURCES` in the renderer.
+
+### Changing events
+
+- Writable iCloud calendars take new, changed and deleted events. Calendars added
+  by link or file, calendars iCloud marks read-only and other people's invitations
+  (an ORGANIZER that isn't the account) can't be changed; the popover says why.
+- One service does it for every front end: `createEvent`, `updateEvent` and
+  `deleteEvent` in `calendar-core/src/edit.ts`, wrapped in the main process by
+  `calendar.ts` (account, write lock, waiting for a sync in progress) and called by
+  IPC, headless commands and MCP tools alike. Future callers (the AI assistant,
+  kanban cards with dates) should use the same functions.
+- The cache keeps each CalDAV object's href, ETag and iCalendar (`resources` table).
+  A change edits that iCalendar and PUTs it with `If-Match: <ETag>` (`If-None-Match: *`
+  to create). A 412 means it changed somewhere else: Ordo refetches that calendar
+  and says so, and never overwrites. A server that sends no ETag is checked by
+  fetching the object and comparing it first. Writes only go to URLs inside the
+  calendar they came from.
+- Drafts (`EventDraft`) are wall-clock times in an IANA zone, so 09:00 in London
+  stays 09:00 across a clock change. Ordo writes TZIDs with a VTIMEZONE built from
+  the runtime's zone data (a yearly rule when the zone has one, otherwise every
+  change for the years around the event, never more than 20 years, never outside
+  1900 to 2200).
+- Everything Ordo doesn't edit (attendees, URLs, other apps' X- properties, extra
+  alarms, custom repeat rules) is kept, and SEQUENCE goes up. "This event only"
+  writes a RECURRENCE-ID override, or an EXDATE when deleting. "All events" moves the
+  series by however much the occurrence moved (days, then time of day) and moves
+  EXDATEs and overrides with it; a different repeat frequency drops them.
+- The window shows a change at once and rolls it back if iCloud refuses it.
 
 ## Mail module
 

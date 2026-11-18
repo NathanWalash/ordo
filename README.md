@@ -47,9 +47,9 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | One-click unsubscribe (RFC 8058) and move to Trash, with a review step | Done    |
 | Unclutter clean-up history with undo                                   | Done    |
 | Full mail client: read, search, compose                                | Planned |
-| Calendar: iCloud calendars in month, week and agenda views (read-only) | Done    |
+| Calendar: iCloud calendars in month, week and agenda views             | Done    |
 | Calendar: subscribe by link (Google, Outlook, webcal) or import .ics   | Done    |
-| Create and edit calendar events                                        | Planned |
+| Create and edit calendar events                                        | Done    |
 | Money: import bank statement CSVs, spending by category and month      | Done    |
 | Money: find bills and subscriptions in statements and email receipts   | Done    |
 | Money: split bills with flatmates, balances and settling up            | Done    |
