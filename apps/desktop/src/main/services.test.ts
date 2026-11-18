@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -190,6 +190,39 @@ describe('AI sort', () => {
       message: 'Choose a model in Settings → AI first.',
     })
   })
+})
+
+describe('importing a statement file', () => {
+  const CSV = 'Date,Description,Amount\r\n13/11/2026,TESCO STORES,-£3.41\r\n'
+
+  it('reads Excel’s UTF-16 “Unicode text” export', async () => {
+    const file = join(dir.path, 'unicode.csv')
+    writeFileSync(file, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(CSV, 'utf16le')]))
+    expect(await money.importStatementFile(file, 'Unicode')).toMatchObject({ ok: true, added: 1 })
+  })
+
+  it('reads a Windows code page export, where £ is one byte', async () => {
+    const file = join(dir.path, 'cp1252.csv')
+    writeFileSync(file, Buffer.from(CSV.replace('TESCO', 'ALDI'), 'latin1'))
+    expect(await money.importStatementFile(file, 'Windows')).toMatchObject({ ok: true, added: 1 })
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'says a file it can’t open can’t be read, instead of failing inside Ordo',
+    async () => {
+      const file = join(dir.path, 'locked.csv')
+      writeFileSync(file, CSV)
+      chmodSync(file, 0o000)
+      try {
+        expect(await money.importStatementFile(file)).toEqual({
+          ok: false,
+          message: expect.stringContaining('couldn’t read that file'),
+        })
+      } finally {
+        chmodSync(file, 0o600)
+      }
+    },
+  )
 })
 
 describe('what connecting to iCloud says when it fails', () => {

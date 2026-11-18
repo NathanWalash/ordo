@@ -9,6 +9,7 @@ import {
   applyCategoryOverrides,
   applySuggestions,
   cachedMatchAdvisor,
+  decodeStatement,
   merchantsNeedingCategory,
   balances,
   billsToCalendarItems,
@@ -124,8 +125,15 @@ async function pickStatement(win: BrowserWindow | null): Promise<StatementFile |
   const fileName = basename(path)
   if ((await stat(path)).size > MAX_STATEMENT_BYTES)
     return { fileName, text: '', error: 'That file is too big to be a bank statement export.' }
-  return { fileName, text: await readFile(path, 'utf8') }
+  try {
+    return { fileName, text: decodeStatement(await readFile(path)) }
+  } catch {
+    return { fileName, text: '', error: UNREADABLE }
+  }
 }
+
+const UNREADABLE =
+  'Ordo couldn’t read that file. Check you have permission to open it and that no other program is using it.'
 
 /** Headless imports read a file named on the command line: a CSV export, never anything big. */
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
@@ -149,18 +157,23 @@ export async function importStatementFile(path: string, accountName?: string): P
     ok: false,
     message: 'That file is too big to be a bank statement export (over 5 MB).',
   } as const
-  const file = await open(real, 'r')
   let bytes: Buffer
   try {
-    const info = await file.stat()
-    if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
-    if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
-    bytes = await file.readFile()
-  } finally {
-    await file.close()
+    const file = await open(real, 'r')
+    try {
+      const info = await file.stat()
+      if (!info.isFile()) return { ok: false, message: 'That isn’t a regular file.' }
+      if (info.size > MAX_IMPORT_FILE_BYTES) return tooBig
+      bytes = await file.readFile()
+    } finally {
+      await file.close()
+    }
+  } catch {
+    // No permission, or another program has it locked (EACCES, EPERM, EBUSY on Windows).
+    return { ok: false, message: UNREADABLE }
   }
   if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
-  return importStatement({ fileName: basename(real), text: bytes.toString('utf8'), accountName })
+  return importStatement({ fileName: basename(real), text: decodeStatement(bytes), accountName })
 }
 
 /** How much is stored, for `status`. */
