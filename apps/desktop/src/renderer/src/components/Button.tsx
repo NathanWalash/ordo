@@ -14,7 +14,7 @@ export function Button({ variant = 'secondary', icon, className = '', children, 
   return (
     <button
       type="button"
-      className={`no-drag inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-50 ${look} ${className}`}
+      className={`no-drag inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium disabled:opacity-50 ${look} ${className}`}
       {...rest}
     >
       {icon}

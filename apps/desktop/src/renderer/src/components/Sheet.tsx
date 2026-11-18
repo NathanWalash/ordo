@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useFocusTrap } from './focus'
 
 /**
  * Render over the content area (the app's <main>), whatever is scrolled, leaving the
@@ -20,6 +21,8 @@ interface Props {
   busy?: boolean
   footer: ReactNode
   children: ReactNode
+  /** A selector for what to focus first; the first field by default. */
+  initialFocus?: string
 }
 
 /** A macOS-style sheet: slides over the content, Escape cancels, Return submits. */
@@ -33,13 +36,24 @@ export function Sheet({
   busy,
   footer,
   children,
+  initialFocus,
 }: Props) {
   const titleId = useId()
   const panel = useRef<HTMLFormElement>(null)
+  useFocusTrap(panel)
 
   useEffect(() => {
-    const first = panel.current?.querySelector<HTMLElement>('input:not([disabled]), select, textarea')
+    // Focus goes back to whatever opened the sheet when it closes.
+    const opener = document.activeElement
+    const first =
+      (initialFocus && panel.current?.querySelector<HTMLElement>(initialFocus)) ||
+      panel.current?.querySelector<HTMLElement>('input:not([disabled]), select, textarea')
     first?.focus()
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    }
+    // Only when the sheet opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { CircleCheck, Ellipsis, Plus } from 'lucide-react'
 import type { Column } from '@ordo/boards-core'
+import { tint, toneStyle } from './model'
 
 interface Props {
   column: Column
@@ -63,8 +64,8 @@ export function ColumnLane({
       data-column-id={column.id}
       aria-label={`${column.name}, ${countLabel}`}
       className={`flex max-h-full w-[272px] shrink-0 flex-col rounded-xl bg-lane ${
-        over ? 'ring-1 ring-[color-mix(in_srgb,var(--danger)_45%,transparent)] ring-inset' : ''
-      } ${lifted ? 'rotate-[1deg] bg-sheet shadow-[var(--lift-shadow)]' : ''}`}
+        lifted ? 'rotate-[1deg] bg-sheet shadow-[var(--lift-shadow)]' : ''
+      }`}
     >
       <div
         tabIndex={lifted ? -1 : 0}
@@ -80,7 +81,14 @@ export function ColumnLane({
         }}
         className="group/col flex h-10 shrink-0 cursor-grab items-center gap-1.5 rounded-t-xl pr-1.5 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset active:cursor-grabbing"
       >
-        {column.done && <CircleCheck size={13} className="shrink-0 text-success" aria-label="Done column" />}
+        {column.done && (
+          <CircleCheck
+            size={13}
+            className="shrink-0"
+            style={{ color: tint('var(--success)') }}
+            aria-label="Done column"
+          />
+        )}
         {renaming ? (
           <NameInput
             initial={column.name}
@@ -93,20 +101,25 @@ export function ColumnLane({
         ) : (
           <h3 className="min-w-0 truncate text-[13px] font-semibold">{column.name}</h3>
         )}
-        <span
-          className={`shrink-0 rounded-[5px] px-1 text-[12px] tabular-nums ${
-            over
-              ? 'bg-[color-mix(in_srgb,var(--danger)_14%,transparent)] font-medium text-danger'
-              : atLimit
-                ? 'text-ink-2'
-                : 'text-ink-3'
-          }`}
-          title={column.wipLimit !== null ? `Limit: ${column.wipLimit} cards` : undefined}
-        >
-          {shown !== undefined && shown !== count
-            ? `${shown} of ${count}`
-            : `${count}${column.wipLimit !== null ? `/${column.wipLimit}` : ''}`}
-        </span>
+        {shown !== undefined && shown !== count ? (
+          // Filtered: how many show, neutral; the limit stays on its own chip.
+          <span className="shrink-0 px-1 text-[12px] text-ink-2 tabular-nums">
+            {shown} of {count}
+          </span>
+        ) : (
+          column.wipLimit === null && (
+            <span className="shrink-0 px-1 text-[12px] text-ink-2 tabular-nums">{count}</span>
+          )
+        )}
+        {column.wipLimit !== null && (
+          <span
+            className={`shrink-0 rounded-[5px] px-1 text-[12px] tabular-nums ${over ? 'font-medium' : atLimit ? 'text-ink' : 'text-ink-2'}`}
+            style={over ? toneStyle('var(--danger)') : undefined}
+            title={`Limit: ${column.wipLimit} ${column.wipLimit === 1 ? 'card' : 'cards'}${over ? '. Over the limit.' : ''}`}
+          >
+            {count}/{column.wipLimit}
+          </span>
+        )}
         <span className="flex-1" />
         <IconButton
           label={`Add a card to ${column.name}`}
@@ -269,9 +282,9 @@ function QuickAdd({
         onBlur={() => {
           if (!title.trim()) onClose()
         }}
-        className="block w-full resize-none bg-transparent px-3 py-2.5 text-[13px] leading-snug font-medium text-ink outline-none select-text placeholder:font-normal placeholder:text-ink-3"
+        className="block w-full resize-none bg-transparent px-3 py-2.5 text-[13px] leading-snug font-medium text-ink outline-none select-text placeholder:font-normal placeholder:text-ink-3 focus-visible:outline-none"
       />
-      <div className="flex items-center justify-between px-3 pb-2 text-[11px] text-ink-3">
+      <div className="flex items-center justify-between px-3 pb-2 text-[11px] text-ink-2">
         <span>Return to add · Esc to close</span>
       </div>
     </div>

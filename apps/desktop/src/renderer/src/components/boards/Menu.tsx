@@ -12,6 +12,10 @@ export type MenuItem =
       disabled?: boolean
       danger?: boolean
       checked?: boolean
+      /** Choosing it leaves the menu open, for ticking several things. */
+      keepOpen?: boolean
+      /** A colour dot before the label, for labels and options. */
+      swatch?: string
     }
   | { separator: true }
   | { heading: string }
@@ -123,7 +127,7 @@ export function Menu({
             tabIndex={-1}
             onClick={() => {
               if (item.disabled) return
-              onClose()
+              if (!item.keepOpen) onClose()
               item.onSelect()
             }}
             className={`flex h-[26px] items-center gap-2 rounded-[5px] px-2 text-left outline-none ${
@@ -135,6 +139,13 @@ export function Menu({
             <span className="flex w-3.5 shrink-0 justify-center">
               {item.checked ? <Check size={13} /> : item.icon}
             </span>
+            {item.swatch && (
+              <span
+                className="size-2 shrink-0 rounded-full ring-1 ring-black/10"
+                style={{ background: item.swatch }}
+                aria-hidden="true"
+              />
+            )}
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
             {item.hint && (
               <span className="shrink-0 text-[12px] text-ink-3 group-hover:text-white/80 group-focus:text-white/80">

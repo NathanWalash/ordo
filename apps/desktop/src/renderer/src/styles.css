@@ -40,6 +40,11 @@
   --lane: rgb(0 0 0 / 0.035);
   --card-shadow: 0 1px 1px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06);
   --lift-shadow: 0 18px 40px rgb(0 0 0 / 0.18), 0 4px 12px rgb(0 0 0 / 0.1);
+  /* How much of a colour goes into coloured text, the rest being ink: enough contrast to read. */
+  --chip-mix: 50%;
+  /* Where a dragged card or column will land. */
+  --drop-border: color-mix(in srgb, var(--accent) 55%, transparent);
+  --drop-fill: color-mix(in srgb, var(--accent) 8%, transparent);
   color-scheme: light dark;
 }
 
@@ -77,6 +82,9 @@
     --lane: rgb(255 255 255 / 0.035);
     --card-shadow: 0 1px 2px rgb(0 0 0 / 0.4), inset 0 0.5px 0 rgb(255 255 255 / 0.06);
     --lift-shadow: 0 18px 40px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+    --chip-mix: 70%;
+    --drop-border: color-mix(in srgb, var(--accent) 75%, transparent);
+    --drop-fill: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 }
 

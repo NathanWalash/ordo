@@ -1,7 +1,7 @@
-import type { KeyboardEvent, MouseEvent, PointerEvent, Ref } from 'react'
+import { useId, type KeyboardEvent, type MouseEvent, type PointerEvent, type Ref } from 'react'
 import { AlignLeft, CalendarDays, Link2, SquareCheck, UserRound } from 'lucide-react'
 import { dueState, fieldText, type Card, type FieldDef, type ISODate, type Label } from '@ordo/boards-core'
-import { chipStyle, datesLabel, dayLabel, labelColor } from './model'
+import { chipStyle, datesLabel, dayLabel, labelColor, tint, toneStyle } from './model'
 
 interface Props {
   card: Card
@@ -22,12 +22,13 @@ interface Props {
 }
 
 const DUE_TONE = {
-  overdue: 'text-danger bg-[color-mix(in_srgb,var(--danger)_12%,transparent)]',
-  today:
-    'text-[color-mix(in_srgb,var(--label-orange)_80%,var(--ink))] bg-[color-mix(in_srgb,var(--label-orange)_14%,transparent)]',
-  soon: 'text-ink-2',
-  later: 'text-ink-2',
+  overdue: toneStyle('var(--danger)', 12),
+  today: toneStyle('var(--label-orange)'),
+  soon: undefined,
+  later: undefined,
 } as const
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /** A card on the board: labels, title, then dates, checklist, links and fields in one quiet row. */
 export function CardTile({
@@ -50,6 +51,22 @@ export function CardTile({
   const shown = fields.filter((f) => card.fields[f.id] !== undefined && f.showOnCard)
   const { done: ticked, total } = card.checklist
   const hasMeta = dates || total > 0 || card.links > 0 || card.notes.trim() || shown.length > 0
+  const summaryId = useId()
+  // What the card shows, in words, read after its title.
+  const summary = [
+    cardLabels.length ? `Labels: ${cardLabels.map((l) => l.name).join(', ')}.` : '',
+    dates ? (state === 'overdue' ? `Overdue, due ${dates}.` : `Due ${dates}.`) : '',
+    total ? `${ticked} of ${plural(total, 'step')} done.` : '',
+    card.links ? `${plural(card.links, 'link')}.` : '',
+    card.notes.trim() ? 'Has notes.' : '',
+    ...shown.map((f) => {
+      const text =
+        f.type === 'date' ? dayLabel(String(card.fields[f.id]), today) : fieldText(f, card.fields[f.id])
+      return f.type === 'checkbox' ? `${f.name}.` : f.type === 'url' ? '' : `${f.name}: ${text}.`
+    }),
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <button
@@ -57,7 +74,7 @@ export function CardTile({
       type="button"
       data-card-id={card.id}
       aria-label={card.title}
-      aria-describedby={describedBy}
+      aria-describedby={[summary && summaryId, describedBy].filter(Boolean).join(' ') || undefined}
       aria-roledescription="card"
       tabIndex={lifted ? -1 : 0}
       onClick={onClick}
@@ -70,6 +87,11 @@ export function CardTile({
           : 'shadow-[var(--card-shadow)] hover:border-[color-mix(in_srgb,var(--ink)_16%,transparent)]'
       }`}
     >
+      {summary && (
+        <span id={summaryId} className="sr-only">
+          {summary}
+        </span>
+      )}
       {cardLabels.length > 0 && (
         <span className="flex flex-wrap gap-1">
           {cardLabels.map((l) => (
@@ -94,8 +116,9 @@ export function CardTile({
           {dates && (
             <span
               className={`-mx-1 inline-flex h-[18px] items-center gap-1 rounded-[5px] px-1 font-medium tabular-nums ${
-                state ? DUE_TONE[state] : 'text-ink-3'
+                state ? '' : 'text-ink-2'
               }`}
+              style={state ? DUE_TONE[state] : undefined}
               title={state === 'overdue' ? 'Overdue' : undefined}
             >
               <CalendarDays size={11} aria-hidden="true" />
@@ -104,7 +127,8 @@ export function CardTile({
           )}
           {total > 0 && (
             <span
-              className={`inline-flex items-center gap-1 tabular-nums ${ticked === total ? 'text-success' : ''}`}
+              className="inline-flex items-center gap-1 tabular-nums"
+              style={ticked === total ? { color: tint('var(--success)') } : undefined}
               title={`${ticked} of ${total} steps done`}
             >
               <SquareCheck size={11} aria-hidden="true" />

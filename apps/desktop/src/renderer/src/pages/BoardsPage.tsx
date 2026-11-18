@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, SquareKanban } from 'lucide-react'
-import { toISODate, type Card, type Column, type UndoToken } from '@ordo/boards-core'
+import { toISODate, type Card, type Column } from '@ordo/boards-core'
 import type { BoardSummary, BoardView as BoardData } from '@ordo/shared'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
@@ -46,6 +46,7 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
   const [openCard, setOpenCard] = useState<string | null>(null)
   const [sheet, setSheet] = useState<Sheet | null>(null)
   const [message, setMessage] = useState('')
+  const [loadError, setLoadError] = useState(false)
   const [today, setToday] = useState(() => toISODate())
   const selectedRef = useRef(selected)
 
@@ -69,17 +70,24 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
 
   const reload = useCallback(async () => {
     const started = epoch.current
+    const wanted = selectedRef.current
     const list = await api.list()
-    const id = list.some((b) => b.id === selectedRef.current) ? selectedRef.current : (list[0]?.id ?? null)
+    const id = list.some((b) => b.id === wanted) ? wanted : (list[0]?.id ?? null)
     const next = id ? await api.board(id) : null
     if (epoch.current !== started) return
     setBoards(list)
-    if (id !== selectedRef.current) select(id)
+    // You picked another board while this was loading: that choice wins.
+    if (selectedRef.current !== wanted) return
+    if (id !== wanted) select(id)
     setView(next)
   }, [api, select])
 
-  const toast = useToast(reload)
-  const announce = useCallback((m: string) => setMessage(m), [])
+  // The same words twice are still read out: clear, then set on the next frame.
+  const announce = useCallback((m: string) => {
+    setMessage('')
+    requestAnimationFrame(() => setMessage(m))
+  }, [])
+  const toast = useToast({ onUndone: reload, announce })
 
   useEffect(() => {
     let live = true
@@ -93,7 +101,10 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
         setOpenCard(detail.card.id)
       }
       await reload()
-    })()
+    })().catch((err) => {
+      console.error(err)
+      if (live) setLoadError(true)
+    })
     return () => {
       live = false
     }
@@ -123,11 +134,12 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
 
   const showBoard = async (id: string) => {
     select(id)
-    setView(await api.board(id))
+    const next = await api.board(id)
+    // Only if it's still the board you want.
+    if (selectedRef.current === id) setView(next)
   }
 
-  const offerUndo = useCallback((token: UndoToken, m: string) => toast.show(m, token), [toast])
-  const showError = useCallback((m: string) => toast.show(m, undefined, true), [toast])
+  const { offerUndo, showError } = toast
 
   const closeCard = useCallback(() => {
     setOpenCard(null)
@@ -140,7 +152,9 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
       if (!d) return
       if (d.card.boardId !== selectedRef.current) {
         select(d.card.boardId)
-        setView(await api.board(d.card.boardId))
+        const next = await api.board(d.card.boardId)
+        if (selectedRef.current !== d.card.boardId) return
+        setView(next)
       }
       setOpenCard(id)
     },
@@ -162,6 +176,24 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
     [announce, offerUndo, openCardById, reload, showError],
   )
 
+  if (loadError)
+    return (
+      <EmptyState
+        icon={<SquareKanban size={40} strokeWidth={1.5} />}
+        title="Couldn’t open your boards"
+        body="Something went wrong reading them from this computer. Nothing has been changed."
+        action={
+          <Button
+            onClick={() => {
+              setLoadError(false)
+              reload().catch(() => setLoadError(true))
+            }}
+          >
+            Try again
+          </Button>
+        }
+      />
+    )
   if (boards === null) return null
 
   return (
@@ -215,6 +247,7 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
 
       {view && openCard && (
         <CardDetail
+          key={openCard}
           cardId={openCard}
           view={view}
           today={today}
@@ -223,6 +256,10 @@ export function BoardsPage({ onNavigate }: { onNavigate: (r: Route) => void }) {
           offerUndo={offerUndo}
           onOpenCard={(id) => void openCardById(id)}
           onOpenSettings={() => onNavigate('settings')}
+          onOpenBoardSettings={() => {
+            closeCard()
+            setSheet({ kind: 'settings' })
+          }}
           announce={announce}
         />
       )}

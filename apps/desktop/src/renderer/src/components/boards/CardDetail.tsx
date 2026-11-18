@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   Archive,
   ArchiveRestore,
@@ -7,6 +15,7 @@ import {
   ExternalLink,
   Link2,
   LoaderCircle,
+  Pencil,
   Plus,
   Sparkles,
   Trash2,
@@ -21,8 +30,17 @@ import {
   type LinkCandidate,
   type UndoToken,
 } from '@ordo/boards-core'
-import type { BoardView, CardDetail as Detail, SuggestOutcome, SuggestProvider } from '@ordo/shared'
-import { OverContent } from '../Sheet'
+import type {
+  BoardView,
+  CardDetail as Detail,
+  SuggestInfo,
+  SuggestOutcome,
+  SuggestProvider,
+} from '@ordo/shared'
+import { Button } from '../Button'
+import { useFocusTrap } from '../focus'
+import { OverContent, Sheet } from '../Sheet'
+import { Switch } from '../Switch'
 import { Markdown } from './Markdown'
 import { Menu, type MenuAnchor } from './Menu'
 import { LinkPicker } from './LinkPicker'
@@ -41,7 +59,40 @@ interface Props {
   offerUndo: (token: UndoToken, message: string) => void
   onOpenCard: (id: string) => void
   onOpenSettings: () => void
+  /** Open the board's labels and fields. */
+  onOpenBoardSettings: () => void
   announce: (message: string) => void
+}
+
+const KIND_WORDS: Record<SuggestInfo['sends'][number], string> = {
+  event: 'upcoming events',
+  bill: 'bills',
+  email: 'email subjects',
+  card: 'other cards',
+}
+
+/** "events, bills and other cards" */
+const listOf = (words: string[]) =>
+  words.length < 2 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
+
+/** What pressing Suggest will do, said before anything is sent. */
+export function suggestTitle(info: SuggestInfo | null): string {
+  if (!info) return 'Suggest a due date, steps, labels and links'
+  if (!info.ready) return info.message
+  const related = listOf(info.sends.map((k) => KIND_WORDS[k]))
+  const p = info.provider!
+  return p.kind === 'local'
+    ? `Asks ${p.label} on this computer about this card, with related ${related}.`
+    : `Sends this card, with related ${related}, to ${p.vendor ?? p.label} through ${p.label}.`
+}
+
+const cloudKey = (label: string) => `ordo.boards.suggest-cloud-ok.${label}`
+function cloudAgreed(label: string): boolean {
+  try {
+    return localStorage.getItem(cloudKey(label)) === '1'
+  } catch {
+    return false
+  }
 }
 
 type Result<T> = { ok: true; value: T } | { ok: false; message: string }
@@ -56,6 +107,7 @@ export function CardDetail({
   offerUndo,
   onOpenCard,
   onOpenSettings,
+  onOpenBoardSettings,
   announce,
 }: Props) {
   const api = window.ordo.boards
@@ -71,7 +123,43 @@ export function CardDetail({
     items: Suggestion[]
   } | null>(null)
   const [suggestError, setSuggestError] = useState<{ message: string; settings: boolean } | null>(null)
+  const [info, setInfo] = useState<SuggestInfo | null>(null)
+  const [confirmCloud, setConfirmCloud] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
+  const asking$ = useRef(false)
+  const loaded = detail !== null
+  useFocusTrap(panel, loaded)
+
+  useEffect(() => {
+    let live = true
+    void api.suggestInfo().then((i) => live && setInfo(i))
+    return () => {
+      live = false
+    }
+  }, [api])
+
+  // Leaving this card (closing, or opening another) stops a question still on its way.
+  useEffect(
+    () => () => {
+      if (asking$.current) void api.stopSuggest()
+    },
+    [api],
+  )
+
+  // Focus the dialog once the card is there, and give focus back on the way out.
+  useEffect(() => {
+    if (!loaded) return
+    const opener = document.activeElement
+    const dialog = panel.current
+    dialog?.focus()
+    return () => {
+      const back =
+        opener instanceof HTMLElement && opener.isConnected && !dialog?.contains(opener)
+          ? opener
+          : document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(cardId)}"]`)
+      requestAnimationFrame(() => back?.focus())
+    }
+  }, [loaded, cardId])
 
   const load = useCallback(async () => {
     const d = await api.card(cardId)
@@ -91,14 +179,6 @@ export function CardDetail({
     }
   }, [api, cardId, onClose])
 
-  // A new card: start with no suggestions.
-  const [shownFor, setShownFor] = useState(cardId)
-  if (shownFor !== cardId) {
-    setShownFor(cardId)
-    setSuggested(null)
-    setSuggestError(null)
-  }
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
@@ -109,10 +189,6 @@ export function CardDetail({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
-
-  useEffect(() => {
-    panel.current?.focus()
-  }, [cardId])
 
   /** Run a change, then show the card and the board as they are now. */
   const change = async <T,>(p: Promise<Result<T>>): Promise<T | null> => {
@@ -130,15 +206,26 @@ export function CardDetail({
   const update = (patch: Omit<Parameters<typeof api.updateCard>[0], 'id'>) =>
     change(api.updateCard({ id: card.id, ...patch }))
 
-  const suggest = async () => {
+  const suggest = async (confirmed = false) => {
+    // The first time with a cloud provider, say what goes before anything does.
+    const provider = info?.ready ? info.provider : null
+    if (!confirmed && provider?.kind === 'cloud' && !cloudAgreed(provider.label)) return setConfirmCloud(true)
     setAsking(true)
     setSuggestError(null)
+    asking$.current = true
     const r: SuggestOutcome = await api.suggest(card.id)
+    asking$.current = false
     setAsking(false)
+    // An answer for another card (it can't be shown here) is dropped.
+    if (r.ok && r.cardId !== card.id) return
     if (r.ok) {
       setSuggested({ provider: r.provider, sent: r.sent.candidates, items: flatten(r.suggestions) })
       announce(`${flatten(r.suggestions).length} suggestions from ${r.provider.label}.`)
-    } else setSuggestError({ message: r.message, settings: r.error === 'no-ai' || r.error === 'consent' })
+    } else
+      setSuggestError({
+        message: r.message,
+        settings: r.error === 'no-ai' || r.error === 'consent' || r.error === 'off',
+      })
   }
 
   const accept = async (s: Suggestion) => {
@@ -194,15 +281,14 @@ export function CardDetail({
               </span>
             )}
             <span className="flex-1" />
-            <button
-              type="button"
+            <Button
               onClick={() => void suggest()}
               disabled={asking}
-              className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-[color-mix(in_srgb,var(--label-purple)_80%,var(--ink))] hover:bg-hover disabled:opacity-60"
+              title={suggestTitle(info)}
+              icon={asking ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
             >
-              {asking ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />}
               {asking ? 'Thinking…' : 'Suggest'}
-            </button>
+            </Button>
             {asking && (
               <button
                 type="button"
@@ -266,15 +352,13 @@ export function CardDetail({
                 />
               )}
 
-              <Section title="Notes">
-                <NotesEditor notes={card.notes} onSave={(notes) => void update({ notes })} />
-              </Section>
+              <NotesSection notes={card.notes} onSave={(notes) => void update({ notes })} />
 
               <Section
                 title="Checklist"
                 aside={
                   checklist.length > 0 && (
-                    <span className="text-[11px] text-ink-3 tabular-nums">
+                    <span className="text-[11px] text-ink-2 tabular-nums">
                       {checklist.filter((i) => i.done).length} of {checklist.length}
                     </span>
                   )
@@ -319,7 +403,7 @@ export function CardDetail({
                 }
               >
                 {links.length === 0 && backlinks.length === 0 ? (
-                  <p className="text-[12px] text-ink-3">
+                  <p className="text-[12px] text-ink-2">
                     Link an event, email, bill, payment or another card.
                   </p>
                 ) : (
@@ -411,7 +495,10 @@ export function CardDetail({
 
               <Property label="Labels">
                 {view.labels.length === 0 ? (
-                  <span className="text-ink-3">No labels on this board.</span>
+                  <span className="flex flex-col items-start gap-1 text-ink-2">
+                    No labels on this board.
+                    <LinkButton onClick={onOpenBoardSettings}>Add labels…</LinkButton>
+                  </span>
                 ) : (
                   <div className="flex flex-wrap gap-1" role="group" aria-label="Labels">
                     {view.labels.map((l) => {
@@ -494,6 +581,44 @@ export function CardDetail({
           ]}
         />
       )}
+      {confirmCloud && info?.provider && (
+        <Sheet
+          title={`Send this card to ${info.provider.vendor ?? info.provider.label}?`}
+          icon={<Sparkles size={22} />}
+          width={460}
+          onClose={() => setConfirmCloud(false)}
+          onSubmit={() => {
+            setConfirmCloud(false)
+            try {
+              localStorage.setItem(cloudKey(info.provider!.label), '1')
+            } catch {
+              // Asking again next time is fine.
+            }
+            void suggest(true)
+          }}
+          footer={
+            <>
+              <span className="flex-1" />
+              <Button onClick={() => setConfirmCloud(false)}>Cancel</Button>
+              <Button type="submit" variant="primary">
+                Suggest
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2 text-[13px] leading-snug text-ink-2">
+            <p>
+              Suggest sends this card’s title, notes, checklist and labels to {info.provider.vendor} under
+              your own account, through {info.provider.label}, with the titles and days of related{' '}
+              {listOf(info.sends.map((k) => KIND_WORDS[k]))}.
+            </p>
+            <p>
+              Never email addresses or bodies, amounts, balances or account details. Nothing on the card
+              changes until you add a suggestion.
+            </p>
+          </div>
+        </Sheet>
+      )}
       {picker && (
         <LinkPicker
           cardId={card.id}
@@ -547,7 +672,7 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
   return (
     <section aria-label={title} className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold tracking-wide text-ink-3 uppercase">{title}</h3>
+        <h3 className="text-[11px] font-semibold text-ink-2">{title}</h3>
         {aside}
       </div>
       {children}
@@ -558,7 +683,7 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
 function Property({ label, icon, children }: { label: string; icon?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-3">
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-2">
         {icon}
         {label}
       </span>
@@ -581,10 +706,12 @@ function TitleEditor({ id, title, onSave }: { id: string; title: string; onSave:
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   }, [text])
+  const reverting = useRef(false)
   const commit = () => {
     const t = text.replace(/\s+/g, ' ').trim()
-    if (t && t !== title) onSave(t)
+    if (!reverting.current && t && t !== title) onSave(t)
     else setText(title)
+    reverting.current = false
   }
   return (
     <textarea
@@ -601,14 +728,17 @@ function TitleEditor({ id, title, onSave }: { id: string; title: string; onSave:
           e.preventDefault()
           e.currentTarget.blur()
         }
-        if (e.key === 'Escape') setText(title)
+        if (e.key === 'Escape') {
+          reverting.current = true
+          setText(title)
+        }
       }}
-      className="-mx-1.5 block w-[calc(100%+12px)] resize-none rounded-md bg-transparent px-1.5 py-0.5 text-[19px] leading-snug font-semibold tracking-tight text-ink outline-none select-text hover:bg-hover focus:bg-field focus:ring-1 focus:ring-accent"
+      className="-mx-1.5 block w-[calc(100%+12px)] resize-none rounded-md bg-transparent px-1.5 py-0.5 text-[20px] leading-snug font-semibold tracking-tight text-ink outline-none select-text hover:bg-hover focus:bg-field focus:ring-1 focus:ring-accent"
     />
   )
 }
 
-function NotesEditor({ notes, onSave }: { notes: string; onSave: (n: string) => void }) {
+function NotesSection({ notes, onSave }: { notes: string; onSave: (n: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(notes)
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -619,57 +749,65 @@ function NotesEditor({ notes, onSave }: { notes: string; onSave: (n: string) => 
     el.style.height = 'auto'
     el.style.height = `${Math.max(96, el.scrollHeight)}px`
   }, [editing, text])
-  if (editing)
-    return (
-      <div className="flex flex-col gap-1">
-        <textarea
-          ref={ref}
-          autoFocus
-          value={text}
-          maxLength={20_000}
-          aria-label="Notes"
-          placeholder="Write anything. **Bold**, *italic*, lists with - and [links](https://…) work."
-          onChange={(e) => setText(e.target.value)}
-          onBlur={() => {
-            setEditing(false)
-            if (text !== notes) onSave(text)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault()
-              setText(notes)
-              setEditing(false)
-            }
-          }}
-          className="w-full resize-none rounded-md border border-accent bg-field px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none ring-1 ring-accent select-text placeholder:text-ink-3"
-        />
-        <span className="text-[11px] text-ink-3">Simple markdown. Click away to save, Esc to cancel.</span>
-      </div>
-    )
+  const edit = () => {
+    setText(notes)
+    setEditing(true)
+  }
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={notes.trim() ? 'Edit notes' : 'Add notes'}
-      onClick={() => {
-        setText(notes)
-        setEditing(true)
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) {
-          e.preventDefault()
-          setText(notes)
-          setEditing(true)
-        }
-      }}
-      className="-mx-2.5 cursor-text rounded-md px-2.5 py-2 hover:bg-hover"
+    <Section
+      title="Notes"
+      aside={
+        notes.trim() &&
+        !editing && (
+          <button
+            type="button"
+            onClick={edit}
+            className="flex items-center gap-1 rounded px-1.5 text-[12px] font-medium text-accent hover:bg-hover"
+          >
+            <Pencil size={11} /> Edit
+          </button>
+        )
+      }
     >
-      {notes.trim() ? (
-        <Markdown source={notes} />
+      {editing ? (
+        <div className="flex flex-col gap-1">
+          <textarea
+            ref={ref}
+            autoFocus
+            value={text}
+            maxLength={20_000}
+            aria-label="Notes"
+            placeholder="Write anything. **Bold**, *italic*, lists with - and [links](https://…) work."
+            onChange={(e) => setText(e.target.value)}
+            onBlur={() => {
+              setEditing(false)
+              if (text !== notes) onSave(text)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                setText(notes)
+                setEditing(false)
+              }
+            }}
+            className="w-full resize-none rounded-md border border-accent bg-field px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none ring-1 ring-accent select-text placeholder:text-ink-3"
+          />
+          <span className="text-[11px] text-ink-2">Simple markdown. Click away to save, Esc to cancel.</span>
+        </div>
+      ) : notes.trim() ? (
+        <div onDoubleClick={edit}>
+          <Markdown source={notes} />
+        </div>
       ) : (
-        <span className="text-[13px] text-ink-3">Add notes…</span>
+        <button
+          type="button"
+          onClick={edit}
+          className="-mx-2.5 rounded-md px-2.5 py-2 text-left text-[13px] text-ink-2 hover:bg-hover"
+        >
+          Add notes…
+        </button>
       )}
-    </div>
+    </Section>
   )
 }
 
@@ -763,6 +901,7 @@ function StepText({
 }) {
   const [text, setText] = useState(item.text)
   const [prev, setPrev] = useState(item.text)
+  const reverting = useRef(false)
   if (prev !== item.text) {
     setPrev(item.text)
     setText(item.text)
@@ -775,10 +914,15 @@ function StepText({
       onChange={(e) => setText(e.target.value)}
       onBlur={() => {
         const t = text.trim()
-        if (t && t !== item.text) onSave(t)
+        if (!reverting.current && t && t !== item.text) onSave(t)
         else setText(item.text)
+        reverting.current = false
       }}
       onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          reverting.current = true
+          setText(item.text)
+        }
         if (e.key === 'Enter') e.currentTarget.blur()
         if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
           e.preventDefault()
@@ -849,8 +993,13 @@ function FieldInput({
     setPrev(value)
     setText(value === undefined ? '' : String(value))
   }
+  const saved = value === undefined ? '' : String(value)
+  const reverting = useRef(false)
   const commit = () => {
-    if (text.trim() === (value === undefined ? '' : String(value))) return
+    const revert = reverting.current
+    reverting.current = false
+    if (revert) return setText(saved)
+    if (text.trim() === saved) return
     onChange(text.trim() ? (field.type === 'number' ? Number(text) : text.trim()) : null)
   }
   const textProps = {
@@ -858,7 +1007,14 @@ function FieldInput({
     'aria-label': field.name,
     onChange: (e: { target: { value: string } }) => setText(e.target.value),
     onBlur: commit,
-    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && e.currentTarget.blur(),
+    onKeyDown: (e: ReactKeyboardEvent<HTMLInputElement>) => {
+      // Escape puts back what was saved; the dialog then takes focus off the field.
+      if (e.key === 'Escape') {
+        reverting.current = true
+        setText(saved)
+      }
+      if (e.key === 'Enter') e.currentTarget.blur()
+    },
     className: FIELD_CLASS,
   }
   switch (field.type) {
@@ -880,15 +1036,7 @@ function FieldInput({
       )
     case 'checkbox':
       return (
-        <label className="flex items-center gap-2 text-[12px]">
-          <input
-            type="checkbox"
-            checked={value === true}
-            onChange={(e) => onChange(e.target.checked)}
-            className="size-3.5 accent-[var(--accent)]"
-          />
-          {value === true ? 'Yes' : 'No'}
-        </label>
+        <Switch size="mini" label={field.name} checked={value === true} onChange={(on) => onChange(on)} />
       )
     case 'date':
       return (

@@ -143,10 +143,22 @@ export function datesLabel(card: Pick<Card, 'start' | 'due'>, today: ISODate): s
 /** The CSS colour for a label or option colour (light and dark come from the stylesheet). */
 export const labelColor = (c: LabelColor) => `var(--label-${c})`
 
+/**
+ * A colour as text that reads on the content: mixed towards the ink, more in light mode, where
+ * pure system colours are too pale (`--chip-mix` is 50% light, 70% dark).
+ */
+export const tint = (color: string) => `color-mix(in srgb, ${color} var(--chip-mix), var(--ink))`
+
 /** A soft fill and a readable text colour for a label chip, in light and dark mode. */
 export const chipStyle = (c: LabelColor) => ({
   background: `color-mix(in srgb, ${labelColor(c)} 16%, transparent)`,
-  color: `color-mix(in srgb, ${labelColor(c)} 70%, var(--ink))`,
+  color: tint(labelColor(c)),
+})
+
+/** The same for a state colour such as `var(--danger)`. */
+export const toneStyle = (color: string, fill = 14) => ({
+  background: `color-mix(in srgb, ${color} ${fill}%, transparent)`,
+  color: tint(color),
 })
 
 export const LABEL_COLOR_NAMES: Record<LabelColor, string> = {

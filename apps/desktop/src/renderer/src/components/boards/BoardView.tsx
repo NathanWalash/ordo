@@ -40,7 +40,16 @@ import { Button } from '../Button'
 import { CardTile } from './CardTile'
 import { ColumnLane, NameInput } from './ColumnLane'
 import { Menu, type MenuAnchor, type MenuItem } from './Menu'
-import { byColumn, focusTarget, fullIndex, moveLocally, reorder, stepTarget, type Direction } from './model'
+import {
+  byColumn,
+  focusTarget,
+  fullIndex,
+  labelColor,
+  moveLocally,
+  reorder,
+  stepTarget,
+  type Direction,
+} from './model'
 import { useDrag } from './useDrag'
 
 export interface BoardActions {
@@ -90,6 +99,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
   const [adding, setAdding] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [addingColumn, setAddingColumn] = useState(false)
+  const [filterAt, setFilterAt] = useState<DOMRect | null>(null)
   const [menu, setMenu] = useState<{ label: string; anchor: MenuAnchor; items: MenuItem[] } | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
@@ -161,13 +171,14 @@ export function BoardView({ view, setView, today, actions }: Props) {
     (source.get(columnId) ?? []).filter((c) => c.id !== cardId).map((c) => c.id)
 
   const moveCard = useCallback(
-    async (card: Card, columnId: string, visibleIndex: number, how: 'drag' | 'keys') => {
-      const index = fullIndex(
-        otherIds(columnId, card.id, all),
-        otherIds(columnId, card.id, shown),
-        visibleIndex,
-      )
-      const column = columns.find((c) => c.id === columnId)!
+    async (card: Card, columnId: string, visibleIndex: number | 'end', how: 'drag' | 'keys') => {
+      const column = columns.find((c) => c.id === columnId)
+      if (!column) return
+      // "The end" means after every card, including any a filter hides.
+      const index =
+        visibleIndex === 'end'
+          ? otherIds(columnId, card.id, all).length
+          : fullIndex(otherIds(columnId, card.id, all), otherIds(columnId, card.id, shown), visibleIndex)
       setView((v) => v && { ...v, cards: moveLocally(v.cards, card.id, columnId, index) })
       const target = how === 'keys' ? { kind: 'card' as const, id: card.id } : null
       if (target) focusAfter.current = target
@@ -252,7 +263,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
           label: c.name,
           checked: c.id === card.columnId,
           onSelect: () => {
-            if (c.id !== card.columnId) void moveCard(card, c.id, Number.MAX_SAFE_INTEGER, 'keys')
+            if (c.id !== card.columnId) void moveCard(card, c.id, 'end', 'keys')
           },
         })),
         { separator: true },
@@ -465,7 +476,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
         <div
           key="gap"
           aria-hidden="true"
-          className="shrink-0 rounded-[9px] border border-dashed border-[color-mix(in_srgb,var(--accent)_55%,transparent)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]"
+          className="shrink-0 rounded-[9px] border border-dashed border-[var(--drop-border)] bg-[var(--drop-fill)]"
           style={{ height: dragCard!.height }}
         />,
       )
@@ -475,7 +486,8 @@ export function BoardView({ view, setView, today, actions }: Props) {
   const labelFilterCount = filter.labelIds?.length ?? 0
   const filterCount = labelFilterCount + (filter.due ? 1 : 0) + (filter.field ? 1 : 0)
 
-  const filterMenu = (anchor: DOMRect) => {
+  // Drawn from the current filter on every render, so ticks show while the menu stays open.
+  const filterItems = (): MenuItem[] => {
     const toggleLabel = (id: string) =>
       setFilter((f) => {
         const ids = new Set(f.labelIds ?? [])
@@ -504,6 +516,11 @@ export function BoardView({ view, setView, today, actions }: Props) {
         { heading: f.name },
         ...values.map((v): MenuItem => ({
           label: v.label,
+          keepOpen: true,
+          swatch:
+            f.type === 'select'
+              ? labelColor(f.options.find((o) => o.id === v.value)?.color ?? 'grey')
+              : undefined,
           checked: filter.field?.fieldId === f.id && filter.field.value === v.value,
           onSelect: () =>
             setFilter((x) =>
@@ -514,41 +531,53 @@ export function BoardView({ view, setView, today, actions }: Props) {
         })),
       ]
     })
-    setMenu({
-      label: 'Filter cards',
-      anchor,
-      items: [
-        ...(labels.length
-          ? [
-              { heading: 'Labels' } as MenuItem,
-              ...labels.map((l): MenuItem => ({
-                label: l.name,
-                checked: filter.labelIds?.includes(l.id) ?? false,
-                onSelect: () => toggleLabel(l.id),
-              })),
-            ]
-          : []),
-        { heading: 'Dates' },
-        ...DUE_OPTIONS.map((o): MenuItem => ({
-          label: o.label,
-          checked: filter.due === o.value,
-          onSelect: () => setFilter((f) => ({ ...f, due: f.due === o.value ? undefined : o.value })),
-        })),
-        ...fieldItems,
-        ...(filterCount
-          ? [{ separator: true } as MenuItem, { label: 'Clear filters', onSelect: () => setFilter({}) }]
-          : []),
-      ],
-    })
+    return [
+      ...(labels.length
+        ? [
+            { heading: 'Labels' } as MenuItem,
+            ...labels.map((l): MenuItem => ({
+              label: l.name,
+              keepOpen: true,
+              swatch: labelColor(l.color),
+              checked: filter.labelIds?.includes(l.id) ?? false,
+              onSelect: () => toggleLabel(l.id),
+            })),
+          ]
+        : []),
+      { heading: 'Dates' },
+      ...DUE_OPTIONS.map((o): MenuItem => ({
+        label: o.label,
+        keepOpen: true,
+        checked: filter.due === o.value,
+        onSelect: () => setFilter((f) => ({ ...f, due: f.due === o.value ? undefined : o.value })),
+      })),
+      ...fieldItems,
+      ...(filterCount
+        ? [{ separator: true } as MenuItem, { label: 'Clear filters', onSelect: () => setFilter({}) }]
+        : []),
+    ]
   }
+
+  // Say how many cards show once the search or filter settles, not on every key.
+  const shownCount = visible.length
+  useEffect(() => {
+    if (!filtering) return
+    const t = setTimeout(
+      () => actions.announce(`Showing ${shownCount} of ${total} ${total === 1 ? 'card' : 'cards'}.`),
+      600,
+    )
+    return () => clearTimeout(t)
+  }, [actions, filtering, shownCount, total, query, filter])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-sep px-4">
         <h2 className="min-w-0 truncate text-[20px] font-semibold tracking-tight">{board.name}</h2>
-        <span className="shrink-0 pt-1 text-[12px] text-ink-3 tabular-nums">
-          {filtering ? `${visible.length} of ${total}` : total} {total === 1 ? 'card' : 'cards'}
-        </span>
+        {!filtering && (
+          <span className="hidden shrink-0 pt-1 text-[12px] text-ink-2 tabular-nums min-[1100px]:inline">
+            {total} {total === 1 ? 'card' : 'cards'}
+          </span>
+        )}
         <span className="flex-1" />
         <label className="relative flex items-center">
           <Search size={13} className="pointer-events-none absolute left-2 text-ink-3" aria-hidden="true" />
@@ -560,13 +589,13 @@ export function BoardView({ view, setView, today, actions }: Props) {
             onKeyDown={(e) => e.key === 'Escape' && (setQuery(''), e.currentTarget.blur())}
             placeholder="Search"
             aria-label="Search cards"
-            className="h-7 w-44 rounded-md border border-sep bg-field pr-2 pl-7 text-[13px] text-ink outline-none select-text placeholder:text-ink-3 focus:border-accent focus:ring-1 focus:ring-accent"
+            className="h-7 w-36 rounded-md border border-sep bg-field pr-2 pl-7 text-[13px] text-ink outline-none transition-[width] select-text placeholder:text-ink-3 focus:w-44 focus:border-accent focus:ring-1 focus:ring-accent"
           />
         </label>
         <ToolbarButton
           label={filterCount ? `Filter, ${filterCount} on` : 'Filter'}
           active={filterCount > 0}
-          onClick={(e) => filterMenu(e.currentTarget.getBoundingClientRect())}
+          onClick={(e) => setFilterAt(e.currentTarget.getBoundingClientRect())}
         >
           <ListFilter size={15} />
           {filterCount > 0 && <span className="text-[11px] font-semibold tabular-nums">{filterCount}</span>}
@@ -583,12 +612,11 @@ export function BoardView({ view, setView, today, actions }: Props) {
       </div>
 
       {filtering && (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b border-sep px-4 py-1.5 text-[12px] text-ink-2"
-          role="status"
-        >
-          Showing {visible.length} of {total} {total === 1 ? 'card' : 'cards'}
-          {query && <>matching “{query}”</>}.
+        <div className="flex shrink-0 items-center gap-2 border-b border-sep px-4 py-1.5 text-[12px] text-ink-2">
+          <span>
+            Showing {visible.length} of {total} {total === 1 ? 'card' : 'cards'}
+            {query && <> matching “{query}”</>}.
+          </span>
           <button
             type="button"
             onClick={() => {
@@ -613,7 +641,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
             <div
               key="gap"
               aria-hidden="true"
-              className="w-[272px] shrink-0 self-stretch rounded-xl border border-dashed border-[color-mix(in_srgb,var(--accent)_55%,transparent)] bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]"
+              className="w-[272px] shrink-0 self-stretch rounded-xl border border-dashed border-[var(--drop-border)] bg-[var(--drop-fill)]"
               style={{ maxHeight: columnDrag.drag?.height }}
             />
           ) : (
@@ -673,6 +701,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
       {dragCard &&
         createPortal(
           <div
+            aria-hidden="true"
             className="pointer-events-none fixed z-50"
             style={{
               left: dragCard.x - dragCard.offsetX,
@@ -695,6 +724,7 @@ export function BoardView({ view, setView, today, actions }: Props) {
         createPortal(
           <div
             data-lifted="true"
+            aria-hidden="true"
             className="pointer-events-none fixed z-50 overflow-hidden"
             style={{
               left: columnDrag.drag.x - columnDrag.drag.offsetX,
@@ -732,6 +762,14 @@ export function BoardView({ view, setView, today, actions }: Props) {
         )}
       {menu && (
         <Menu label={menu.label} anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />
+      )}
+      {filterAt && (
+        <Menu
+          label="Filter cards"
+          anchor={filterAt}
+          items={filterItems()}
+          onClose={() => setFilterAt(null)}
+        />
       )}
     </div>
   )
