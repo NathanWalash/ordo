@@ -163,7 +163,7 @@ describe.skipIf(!port)('changing events on CalDAV (Radicale)', () => {
     )
     expect(starts()).toEqual([
       'Standup 2026-10-19T08:30:00.000Z',
-      'Standup (late) 2026-10-26T11:00:00.000Z',
+      'Standup (late) 2026-10-26T11:30:00.000Z', // moves with the series, keeping its own change
       'Standup 2026-11-09T09:30:00.000Z',
     ])
     // The server agrees, read fresh.
