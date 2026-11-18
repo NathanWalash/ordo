@@ -7,6 +7,7 @@ describe('routeFromHash', () => {
     expect(routeFromHash('#mail/inbox')).toBe('mail/inbox')
     expect(routeFromHash('#/money/finances')).toBe('money/finances')
     expect(routeFromHash('#/money/bills')).toBe('money/bills')
+    expect(routeFromHash('#/money/ask')).toBe('money/ask')
     expect(routeFromHash('#/calendar')).toBe('calendar')
     expect(routeFromHash('#/settings')).toBe('settings')
     expect(routeFromHash('#/mail/history')).toBe('mail/history')

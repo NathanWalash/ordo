@@ -1,5 +1,15 @@
 import type { ReactNode } from 'react'
-import { CalendarDays, History, House, Inbox, Receipt, Sparkles, Wallet, Settings } from 'lucide-react'
+import {
+  CalendarDays,
+  History,
+  House,
+  Inbox,
+  MessageCircleQuestion,
+  Receipt,
+  Sparkles,
+  Wallet,
+  Settings,
+} from 'lucide-react'
 import type { AppInfo } from '@ordo/shared'
 import type { Route } from '../routes'
 
@@ -62,6 +72,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           label="Bills & Subscriptions"
           active={route === 'money/bills'}
           onClick={() => onNavigate('money/bills')}
+        />
+        <Item
+          icon={<MessageCircleQuestion size={15} />}
+          label="Ask Ordo"
+          active={route === 'money/ask'}
+          onClick={() => onNavigate('money/ask')}
         />
       </Section>
 

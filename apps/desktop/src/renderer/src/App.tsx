@@ -8,6 +8,7 @@ import { InboxPage } from './pages/InboxPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancesPage } from './pages/FinancesPage'
 import { BillsPage } from './pages/BillsPage'
+import { AskPage } from './pages/AskPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -82,6 +83,7 @@ export function App() {
           {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
           {route === 'money/finances' && <FinancesPage onOpenSettings={() => setRoute('settings')} />}
           {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
+          {route === 'money/ask' && <AskPage onNavigate={setRoute} />}
           {route === 'settings' && <SettingsPage />}
         </div>
         {connecting && (

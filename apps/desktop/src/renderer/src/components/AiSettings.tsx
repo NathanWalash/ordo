@@ -10,6 +10,7 @@ import {
 } from '@ordo/shared'
 import { Button } from './Button'
 import { Row, Section } from './SettingsSection'
+import { SegmentedControl } from './SegmentedControl'
 import { Switch } from './Switch'
 
 interface Props {
@@ -67,15 +68,38 @@ export function AiSettings({ ai, onSave }: Props) {
 
   const choose = (id: Choice) => {
     if (id === ai.provider) return
-    if (id === 'none') return void save({ ...ai, provider: 'none', model: null, cloudConsent: null })
+    // Each consent is for one provider: switching clears both.
+    if (id === 'none')
+      return void save({
+        ...ai,
+        provider: 'none',
+        model: null,
+        cloudConsent: null,
+        moneyDetailsConsent: null,
+      })
     if (isCloudProvider(id)) return setConfirming(id)
-    void save({ ...ai, provider: id, model: statusOf(id)?.recommended ?? null, cloudConsent: null })
+    void save({
+      ...ai,
+      provider: id,
+      model: statusOf(id)?.recommended ?? null,
+      cloudConsent: null,
+      moneyDetailsConsent: null,
+    })
   }
 
   const confirm = (id: AiProviderId) => {
     setConfirming(null)
-    void save({ ...ai, provider: id, model: statusOf(id)?.recommended ?? null, cloudConsent: id })
+    void save({
+      ...ai,
+      provider: id,
+      model: statusOf(id)?.recommended ?? null,
+      cloudConsent: id,
+      moneyDetailsConsent: null,
+    })
   }
+
+  const [confirmingDetails, setConfirmingDetails] = useState(false)
+  const detailsOn = ai.provider !== 'none' && ai.moneyDetailsConsent === ai.provider
 
   const runTest = async () => {
     if (ai.provider === 'none') return
@@ -199,6 +223,47 @@ export function AiSettings({ ai, onSave }: Props) {
               />
             }
           />
+          <Row
+            label="Ask Ordo answers"
+            detail="Ask Ordo on Money answers questions about your money using Ordo’s own sums."
+            control={
+              <SegmentedControl
+                label="Ask Ordo answers"
+                value={ai.askStyle}
+                options={[
+                  { value: 'brief', label: 'Briefly' },
+                  { value: 'detailed', label: 'In detail' },
+                ]}
+                onChange={(v) => void save({ ...ai, askStyle: v })}
+              />
+            }
+          />
+          <Row
+            label="Let Ask Ordo ask me back"
+            detail="A short question when something doesn’t add up. Your answers can be saved as facts."
+            control={
+              <Switch
+                label="Let Ask Ordo ask me back"
+                checked={ai.askClarify}
+                onChange={(on) => void save({ ...ai, askClarify: on })}
+              />
+            }
+          />
+          {cloud && (
+            <Row
+              label={`Send amounts, dates and names to ${vendorOf(ai.provider as AiProviderId).vendor}`}
+              detail="Ask Ordo needs exact amounts, dates and people’s names from your statements. A model on this computer needs no permission."
+              control={
+                <Switch
+                  label={`Send amounts, dates and names to ${vendorOf(ai.provider as AiProviderId).vendor}`}
+                  checked={detailsOn}
+                  onChange={(on) =>
+                    on ? setConfirmingDetails(true) : void save({ ...ai, moneyDetailsConsent: null })
+                  }
+                />
+              }
+            />
+          )}
           <div className="flex items-start gap-2 px-4 py-2.5 text-[12px] leading-snug text-ink-2">
             {cloud ? (
               <Cloud size={14} className="mt-px shrink-0" />
@@ -206,10 +271,21 @@ export function AiSettings({ ai, onSave }: Props) {
               <Cpu size={14} className="mt-px shrink-0" />
             )}
             {cloud
-              ? `Sender names, addresses and subject lines${ai.money ? ', and merchant names with rough amounts,' : ''} are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
+              ? `Sender names, addresses and subject lines${ai.money ? ', and merchant names with rough amounts,' : ''}${detailsOn ? ' and, for Ask Ordo, exact amounts, dates and names' : ''} are sent to ${vendorOf(ai.provider as AiProviderId).vendor} under your own account.`
               : 'Stays on this computer.'}
           </div>
         </>
+      )}
+
+      {confirmingDetails && cloud && (
+        <DetailsConfirm
+          id={ai.provider as AiProviderId}
+          onCancel={() => setConfirmingDetails(false)}
+          onConfirm={() => {
+            setConfirmingDetails(false)
+            void save({ ...ai, moneyDetailsConsent: ai.provider as AiProviderId })
+          }}
+        />
       )}
 
       {confirming && (
@@ -336,6 +412,65 @@ function CloudConfirm({
           </Button>
           <Button variant="primary" onClick={onConfirm}>
             Use {info.label}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The separate consent for Ask Ordo: exact amounts, dates and names to a cloud provider. */
+function DetailsConfirm({
+  id,
+  onCancel,
+  onConfirm,
+}: {
+  id: AiProviderId
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const info = vendorOf(id)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCancel()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div className="fixed inset-0 z-30 flex justify-center bg-black/20 pt-24 dark:bg-black/40">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="details-confirm-title"
+        aria-describedby="details-confirm-body"
+        className="glass-panel flex h-fit w-[460px] flex-col gap-4 rounded-xl p-6 pb-5"
+      >
+        <div className="flex items-center gap-3.5">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-[10px] bg-accent text-white">
+            <Cloud size={22} />
+          </span>
+          <h2 id="details-confirm-title" className="text-[15px] font-semibold">
+            Send your money details to {info.vendor}?
+          </h2>
+        </div>
+        <div id="details-confirm-body" className="flex flex-col gap-2 text-[13px] leading-snug text-ink-2">
+          <p>
+            When you use Ask Ordo, exact amounts, dates, account names and the names of people you pay will be
+            sent to {info.vendor} under your own account, through {info.label}. Your account’s terms and data
+            settings apply.
+          </p>
+          <p>
+            Ordo still does every sum itself, and only sends what the model asks to look up. Nothing is sent
+            until you ask a question.
+          </p>
+          <p>A model on this computer through LM Studio or Ollama keeps all of it on this computer.</p>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button autoFocus onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onConfirm}>
+            Allow for Ask Ordo
           </Button>
         </div>
       </div>
