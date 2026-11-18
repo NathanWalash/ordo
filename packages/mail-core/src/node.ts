@@ -5,8 +5,12 @@ export {
   ICLOUD_IMAP,
   MailAuthError,
   MailConnectionError,
+  MailUnavailableError,
+  classifyImapError,
+  serverWords,
   testImapLogin,
   type ImapConfig,
+  type MailConnectionReason,
 } from './imap'
 export { MailStore, type MailboxState, type NewCleanup } from './store'
 export { scanMailbox, type ScanOptions } from './scan'

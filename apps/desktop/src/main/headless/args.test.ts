@@ -162,6 +162,29 @@ describe('parseInvocation', () => {
   })
 })
 
+describe('stricter parsing', () => {
+  it('reads numbers only as plain digits, so a mistyped undo id reaches nothing', () => {
+    expect(usage('undo', '1e3', '--confirm')).toMatch(/clean-up id/)
+    expect(usage('senders', '--limit', '0x10')).toBe('--limit must be a number')
+    expect(usage('senders', '--limit', '2.5')).toBe('--limit must be a number')
+    expect(command('undo', '12', '--confirm')).toMatchObject({ command: { id: 12 } })
+    expect(command('senders', '--limit', '5')).toMatchObject({ command: { limit: 5 } })
+  })
+
+  it('help for an unknown command is still an unknown command', () => {
+    expect(usage('frobnicate', '--help')).toBe('Unknown command: frobnicate. See `help`.')
+    expect(usage('help', 'frobnicate')).toBe('Unknown command: frobnicate. See `help`.')
+    expect(parseInvocation(['money', '--help'])).toMatchObject({ kind: 'help' })
+    expect(parseInvocation(['help', 'senders'])).toMatchObject({ kind: 'help' })
+  })
+
+  it('takes everything after -- as arguments, for a file whose name starts with a dash', () => {
+    expect(command('money', 'import', '--confirm', '--', '-statement.csv')).toMatchObject({
+      command: { name: 'money import', file: '-statement.csv' },
+    })
+  })
+})
+
 describe('commandFrom', () => {
   it('validates programmatic input with the CLI rules (used by the MCP server)', () => {
     expect(commandFrom('senders', { limit: 3 })).toEqual({ name: 'senders', limit: 3 })

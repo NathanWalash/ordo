@@ -183,4 +183,46 @@ describe('FeedProvider', () => {
       message: /Work didn’t return a calendar/,
     })
   })
+
+  it('keeps the good events when one in the file is broken', async () => {
+    const broken = ICS.replace(
+      'BEGIN:VEVENT\r\nUID:standup',
+      'BEGIN:VEVENT\r\nUID:bad\r\nDTSTART:20261117T090000Z\r\nRRULE:FREQ=SOMETIMES\r\nSUMMARY:Bad\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:standup',
+    )
+    expect(describeIcs(broken)).toMatchObject({ name: 'Work', events: 2 })
+    const p = new FeedProvider([{ id: 'feed:3', kind: 'file', name: 'Work', ics: broken }])
+    const titles = (await p.fetchEvents('feed:3', week)).map((e) => e.title)
+    expect(titles).toContain('Standup')
+    expect(titles).toContain('Team offsite')
+    expect(titles).not.toContain('Bad')
+  })
+
+  it('reads a file that starts with a byte order mark', async () => {
+    expect(describeIcs(`\uFEFF${ICS}`)).toMatchObject({ name: 'Work', events: 2 })
+    const p = new FeedProvider([{ id: 'feed:4', kind: 'file', name: 'Work', ics: `\uFEFF${ICS}` }])
+    expect(await p.fetchEvents('feed:4', week)).toHaveLength(6)
+  })
+})
+
+describe('fetchFeed failures say what happened', () => {
+  it('a redirect to a link that won’t parse', async () => {
+    const f = fakeFetch({
+      'https://a.test/cal': () => new Response(null, { status: 302, headers: { location: 'https://[bad' } }),
+    })
+    await expect(fetchFeed('https://a.test/cal', { fetch: f })).rejects.toBeInstanceOf(FeedError)
+  })
+
+  it('a download that stops part way', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('BEGIN:VCALENDAR\r\n'))
+        controller.error(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+      },
+    })
+    const f = fakeFetch({ 'https://a.test/cal': () => new Response(body) })
+    await expect(fetchFeed('https://a.test/cal', { fetch: f })).rejects.toMatchObject({
+      kind: 'network',
+      message: /stopped downloading part way/,
+    })
+  })
 })

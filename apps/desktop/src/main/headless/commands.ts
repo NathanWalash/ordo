@@ -178,6 +178,12 @@ export function gate(name: string, allowChanges: boolean, confirm: boolean): Com
 // Output shapes. Kept small: agents read these.
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null)
+const pad = (n: number) => String(n).padStart(2, '0')
+/**
+ * The calendar day of an all-day event. They're stored at local midnight, so in UTC (and in
+ * `toISOString`) one in London in summer starts at 23:00 the day before.
+ */
+const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
 export function senderRow(s: CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number }) {
   return {
@@ -364,7 +370,13 @@ export async function runCommand(
       const p = page(all, command.limit, offset)
       return {
         ok: true,
-        data: { total: p.total, offset: p.offset, shown: p.shown, senders: p.items.map(senderRow) },
+        data: {
+          category: command.category ?? null,
+          total: p.total,
+          offset: p.offset,
+          shown: p.shown,
+          senders: p.items.map(senderRow),
+        },
       }
     }
 
@@ -533,8 +545,9 @@ export async function runCommand(
           shown: p.shown,
           events: p.items.map((e) => ({
             title: e.title,
-            start: iso(e.start),
-            end: iso(e.end),
+            // All-day events give dates (the end is the day after, as in iCalendar); timed ones instants.
+            start: e.allDay ? localDay(e.start) : iso(e.start),
+            end: e.allDay ? localDay(e.end) : iso(e.end),
             allDay: e.allDay,
             calendar: names.get(e.calendarId) ?? null,
             location: e.location ?? null,
