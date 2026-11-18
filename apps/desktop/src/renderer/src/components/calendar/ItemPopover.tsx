@@ -110,7 +110,7 @@ export function ItemPopover({
             <div className="flex items-center gap-2 border-t border-sep px-4 py-2.5 text-[12px] text-ink-2">
               <span className="size-2.5 rounded-full" style={{ background: color }} aria-hidden="true" />
               {item.calendar.name}
-              {item.calendar.readOnly && <span className="text-ink-3">· Read only</span>}
+              {item.calendar.readOnly && !edit && <span className="text-ink-3">· Read only</span>}
             </div>
           )}
           {item.event.notes && (

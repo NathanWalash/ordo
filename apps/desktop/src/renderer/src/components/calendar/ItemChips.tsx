@@ -60,6 +60,7 @@ export function ItemBar({
       type="button"
       onClick={open(onOpen, item)}
       onDoubleClick={edit(onEdit, item)}
+      data-event-key={item.key}
       className={`flex h-[18px] w-full min-w-0 items-center px-1.5 text-left text-[11px] font-medium hover:brightness-95 dark:hover:brightness-125 ${radius}`}
       style={{ background: fill(item.color, 24), color: ink(item.color) }}
     >
@@ -84,6 +85,7 @@ export function TimedRow({
       type="button"
       onClick={open(onOpen, item)}
       onDoubleClick={edit(onEdit, item)}
+      data-event-key={item.key}
       className="flex h-[18px] w-full min-w-0 items-center gap-1 rounded-[4px] px-1 text-left text-[11px] hover:bg-hover"
     >
       <span className="size-[7px] shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />

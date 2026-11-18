@@ -16,18 +16,22 @@ import {
   type DateRange,
   type EditScope,
   type EventDraft,
+  type RepeatFrequency,
 } from '@ordo/calendar-core'
 import type { CalendarListItem } from '@ordo/shared'
 
 /** Calendars new events can go in: iCloud ones that aren't read-only. */
 export const writable = (c: CalendarListItem) => (c.source ?? 'icloud') === 'icloud' && !c.readOnly
 
-/** Why an event on this calendar can't be changed, or null if it can. */
+/** Why an event on this calendar can't be changed, and where it can be, or null if it can. */
 export function readOnlyReason(c: CalendarListItem | undefined): string | null {
   if (!c) return null
-  if (c.source === 'link' || c.source === 'file')
-    return `${c.source === 'file' ? 'Calendars imported from a file' : 'Calendars added by link'} are read-only in Ordo.`
-  if (c.readOnly) return 'This calendar is read-only, so its events can’t be changed here.'
+  if (c.source === 'link')
+    return 'Added by link, so Ordo can’t change its events. Change them where the calendar is published.'
+  if (c.source === 'file')
+    return 'Imported from a file, so Ordo can’t change its events. Change them in the app the file came from.'
+  if (c.readOnly)
+    return 'Shared with you read-only, so Ordo can’t change its events. Ask its owner for access.'
   return null
 }
 
@@ -96,15 +100,79 @@ export function withStart(d: EventDraft, start: string): EventDraft {
   return { ...d, start, end: formatDayTime(addWallMinutes(s, Math.max(0, wallMinutes(a, b)))) }
 }
 
-/** In the editor: turn all-day on or off, keeping the days. */
-export function withAllDay(d: EventDraft, allDay: boolean, zone = localZone()): EventDraft {
-  if (allDay === d.allDay) return d
+/** What the editor remembers across switching all-day off and on: the times, zone and alert. */
+export interface TimedMemory {
+  startTime: string
+  endTime: string
+  timeZone: string | null
+  alert: number | null
+}
+
+/** The all-day alert closest to a timed one (and back): "1 day before (09:00)". */
+const ALL_DAY_DEFAULT_ALERT = 900
+const TIMED_DEFAULT_ALERT = 1440
+
+/**
+ * In the editor: turn all-day on or off, keeping the days. Turning it off again brings back the
+ * times, zone and alert the event had; an alert stays an alert (none stays none).
+ */
+export function toggleAllDay(
+  d: EventDraft,
+  allDay: boolean,
+  memory: TimedMemory | null,
+  zone = localZone(),
+): { draft: EventDraft; memory: TimedMemory | null } {
+  if (allDay === d.allDay) return { draft: d, memory }
   const day = (s: string) => s.slice(0, 10)
   if (allDay) {
     const end = day(d.end) < day(d.start) ? day(d.start) : day(d.end)
-    return { ...d, allDay: true, start: day(d.start), end, timeZone: null }
+    return {
+      draft: {
+        ...d,
+        allDay: true,
+        start: day(d.start),
+        end,
+        timeZone: null,
+        alert: d.alert === null ? null : ALL_DAY_DEFAULT_ALERT,
+      },
+      memory: {
+        startTime: d.start.slice(11, 16),
+        endTime: d.end.slice(11, 16),
+        timeZone: d.timeZone,
+        alert: d.alert,
+      },
+    }
   }
-  return { ...d, allDay: false, start: `${day(d.start)}T09:00`, end: `${day(d.end)}T10:00`, timeZone: zone }
+  const m = memory ?? { startTime: '09:00', endTime: '10:00', timeZone: zone, alert: null }
+  let end = `${day(d.end)}T${m.endTime}`
+  const start = `${day(d.start)}T${m.startTime}`
+  if (end < start) end = `${day(d.start)}T${m.endTime}`
+  if (end < start) end = start
+  return {
+    draft: {
+      ...d,
+      allDay: false,
+      start,
+      end,
+      timeZone: m.timeZone,
+      alert: d.alert === null ? null : (m.alert ?? TIMED_DEFAULT_ALERT),
+    },
+    memory: null,
+  }
+}
+
+/**
+ * Where a repeat ends by default when "On date" is chosen: a month on for daily and weekly
+ * events, a year on for monthly and yearly ones.
+ */
+export function defaultUntil(start: string, frequency: RepeatFrequency): string {
+  const d = parseDay(start.slice(0, 10))
+  if (!d) return start.slice(0, 10)
+  const months = frequency === 'daily' || frequency === 'weekly' ? 1 : 12
+  const t = new Date(Date.UTC(d.year, d.month - 1 + months, d.day))
+  // 31 January plus a month is the last day of February, not 3 March.
+  if (t.getUTCDate() !== d.day) t.setUTCDate(0)
+  return formatDay({ year: t.getUTCFullYear(), month: t.getUTCMonth() + 1, day: t.getUTCDate() })
 }
 
 // ---- Optimistic changes ------------------------------------------------------------------------
@@ -204,6 +272,15 @@ export function nudged(
 /** Snap minutes to the grid, rounding to the nearest step. */
 export const snap = (minutes: number) => Math.round(minutes / SNAP) * SNAP
 
+/**
+ * Keep a move by `days` inside the week shown, for an event in column `col` of `count` days.
+ * `clamped` says it hit the edge.
+ */
+export function clampDays(col: number, days: number, count = 7): { days: number; clamped: boolean } {
+  const kept = Math.max(-col, Math.min(count - 1 - col, days)) || 0
+  return { days: kept, clamped: kept !== days }
+}
+
 /** The keyboard nudge for a key press on a focused event, if any. Option (Alt) + arrows. */
 export function nudgeFor(e: { key: string; altKey: boolean; shiftKey: boolean }) {
   if (!e.altKey) return null
@@ -242,10 +319,22 @@ export const ALL_DAY_ALERTS: { value: number; label: string }[] = [
   { value: 9540, label: '1 week before (09:00)' },
 ]
 
+const unit = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+
+/** "3 days before", "1 hour 30 minutes before", "2 hours after the start". */
 export function alertLabel(minutes: number): string {
   const known = [...TIMED_ALERTS, ...ALL_DAY_ALERTS].find((a) => a.value === minutes)
   if (known) return known.label
-  return minutes < 0 ? `${-minutes} minutes after the start` : `${minutes} minutes before`
+  const m = Math.abs(minutes)
+  const parts: string[] = []
+  const days = Math.floor(m / 1440)
+  const hours = Math.floor((m % 1440) / 60)
+  const mins = m % 60
+  if (days) parts.push(unit(days, 'day'))
+  if (hours) parts.push(unit(hours, 'hour'))
+  if (mins) parts.push(unit(mins, 'minute'))
+  const span = parts.join(' ')
+  return minutes < 0 ? `${span} after the start` : `${span} before`
 }
 
 export const REPEAT_LABELS = {
@@ -255,9 +344,38 @@ export const REPEAT_LABELS = {
   yearly: 'Every year',
 } as const
 
-/** Every time zone the runtime knows, with the ones in use first. */
+/** Old names some runtimes still list, mapped to the names people know now. */
+const RENAMED: Record<string, string> = {
+  'Asia/Calcutta': 'Asia/Kolkata',
+  'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Europe/Kiev': 'Europe/Kyiv',
+  'Asia/Katmandu': 'Asia/Kathmandu',
+  'America/Godthab': 'America/Nuuk',
+  'Asia/Rangoon': 'Asia/Yangon',
+}
+
+/** The current name of a zone. */
+export const canonicalZone = (z: string) => RENAMED[z] ?? z
+
+/** "London" for Europe/London, "Ho Chi Minh" for Asia/Ho_Chi_Minh. */
+export const zoneCity = (z: string) => (canonicalZone(z).split('/').pop() ?? z).replace(/_/g, ' ')
+
+/** "London (United Kingdom Time)", for the time zone list. */
+export function zoneLabel(z: string, at = new Date()): string {
+  const city = zoneCity(z)
+  try {
+    const name = new Intl.DateTimeFormat(undefined, { timeZone: z, timeZoneName: 'longGeneric' })
+      .formatToParts(at)
+      .find((p) => p.type === 'timeZoneName')?.value
+    return name && name !== city ? `${city} (${name})` : city
+  } catch {
+    return city
+  }
+}
+
+/** Every time zone the runtime knows, by its current name, with the ones in use first. */
 export function timeZones(...first: (string | null)[]): string[] {
-  const all = supportedZones()
-  const top = [...new Set(first.filter((z): z is string => !!z))]
+  const all = [...new Set(supportedZones().map(canonicalZone))]
+  const top = [...new Set(first.filter((z): z is string => !!z).map(canonicalZone))]
   return [...top, ...all.filter((z) => !top.includes(z))]
 }

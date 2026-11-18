@@ -9,8 +9,9 @@ import {
 } from 'react'
 import { daysIn, isLong, layoutDay, sameDay, segments, type DateRange } from '@ordo/calendar-core'
 import { ItemBar } from './ItemChips'
-import { nudged, nudgeFor, snap, SNAP } from './editing'
+import { clampDays, nudged, nudgeFor, snap, SNAP } from './editing'
 import { fill, formatHour, formatTime, ink, type CalendarItem, type OpenItem } from './model'
+import type { MoveResult } from './useEventEditing'
 
 /** Pixels per minute in the time grid (48px an hour). */
 const PX = 0.8
@@ -18,14 +19,19 @@ const GUTTER = 56
 const LANE = 20
 /** A keyboard move is saved once the keys have been still this long. */
 const KEY_SETTLE_MS = 900
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+const OPTION = isMac ? 'Option' : 'Alt'
+const EDGE = 'That’s the edge of the week. Move it to another week from the editor.'
 
-/** A move in progress, by drag or keys, shown before it's saved. */
+/** A move in progress, by drag or keys, shown until it's saved (or asked about) or cancelled. */
 interface Pending {
   key: string
   item: CalendarItem
   days: number
   minutes: number
   resize: number
+  /** Handed over to be saved: the move stays drawn until the change itself shows. */
+  saving?: boolean
 }
 
 interface Props {
@@ -39,7 +45,7 @@ interface Props {
   onEditItem?: (item: CalendarItem) => void
   /** Which timed events can be dragged or moved with the keyboard. */
   canMove?: (item: CalendarItem) => boolean
-  onMove?: (item: CalendarItem, span: { start: Date; end: Date }) => void
+  onMove?: (item: CalendarItem, span: { start: Date; end: Date }) => Promise<MoveResult> | void
 }
 
 export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, canMove, onMove }: Props) {
@@ -78,23 +84,47 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
     const w = grid.current?.getBoundingClientRect().width ?? 0
     return Math.max(1, (w - GUTTER) / days.length)
   }
+  /** Which day of the week shown an event starts on. */
+  const column = (item: CalendarItem) =>
+    Math.max(
+      0,
+      days.findIndex((d) => sameDay(d, item.start)),
+    )
 
-  /** Save the move being shown, if there is one and it actually moved. */
+  /**
+   * Save the move being shown, if there is one and it moved. It stays drawn where it was dropped
+   * until the change shows (or Ordo has asked "this event or all events?" and been answered).
+   */
   const commit = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
     const p = pendingRef.current
-    show(null)
-    if (!p || (!p.days && !p.minutes && !p.resize)) return
-    onMove?.(p.item, nudged(p.item, p))
+    if (!p || p.saving) return
+    if ((!p.days && !p.minutes && !p.resize) || !onMove) return show(null)
+    const handed = { ...p, saving: true }
+    show(handed)
+    const done = () => pendingRef.current === handed && show(null)
+    void Promise.resolve(onMove(p.item, nudged(p.item, p))).then(
+      (r) => {
+        done()
+        if (r === 'cancelled') setAnnounce('Move cancelled.')
+        else if (r === 'refused') setAnnounce('Not saved.')
+        else if (r) void r.saved.then((ok) => setAnnounce(ok ? 'Saved.' : 'Not saved.'))
+      },
+      () => {
+        done()
+        setAnnounce('Not saved.')
+      },
+    )
   }, [onMove])
 
   const startDrag = (e: ReactPointerEvent<HTMLElement>, item: CalendarItem, mode: 'move' | 'resize') => {
-    if (e.button !== 0 || !canMove?.(item)) return
+    if (e.button !== 0 || !canMove?.(item) || pendingRef.current?.saving) return
     e.stopPropagation()
     const el = e.currentTarget
     const origin = { x: e.clientX, y: e.clientY }
     const width = columnWidth()
+    const col = column(item)
     let moving = false
     el.setPointerCapture?.(e.pointerId)
     const move = (ev: PointerEvent) => {
@@ -105,14 +135,29 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
       const minutes = snap(dy / PX)
       show(
         mode === 'move'
-          ? { key: item.key, item, days: Math.round(dx / width), minutes, resize: 0 }
-          : { key: item.key, item, days: 0, minutes: 0, resize: minutes },
+          ? {
+              key: item.key,
+              item,
+              days: clampDays(col, Math.round(dx / width), days.length).days,
+              minutes,
+              resize: 0,
+            }
+          : {
+              key: item.key,
+              item,
+              days: 0,
+              minutes: 0,
+              resize: Math.max(SNAP - (item.end.getTime() - item.start.getTime()) / 60_000, minutes),
+            },
       )
     }
-    const end = () => {
+    const stop = () => {
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerup', end)
       el.removeEventListener('pointercancel', cancel)
+    }
+    const end = () => {
+      stop()
       if (moving) {
         dragged.current = true
         setTimeout(() => (dragged.current = false), 0)
@@ -120,9 +165,7 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
       }
     }
     const cancel = () => {
-      el.removeEventListener('pointermove', move)
-      el.removeEventListener('pointerup', end)
-      el.removeEventListener('pointercancel', cancel)
+      stop()
       show(null)
     }
     el.addEventListener('pointermove', move)
@@ -131,7 +174,7 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
   }
 
   const onKey = (e: KeyboardEvent<HTMLElement>, item: CalendarItem) => {
-    if (e.key === 'Escape' && pendingRef.current?.key === item.key) {
+    if (e.key === 'Escape' && pendingRef.current?.key === item.key && !pendingRef.current.saving) {
       e.stopPropagation()
       if (timer.current) clearTimeout(timer.current)
       show(null)
@@ -141,13 +184,16 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
     const n = nudgeFor(e)
     if (!n || !canMove?.(item)) return
     e.preventDefault()
+    if (pendingRef.current?.saving) return
     // Another event's move is still waiting: save it before starting this one.
     if (pendingRef.current && pendingRef.current.key !== item.key) commit()
     const was = pendingRef.current ?? { days: 0, minutes: 0, resize: 0 }
+    const wanted = was.days + (n.days ?? 0)
+    const { days: kept, clamped } = clampDays(column(item), wanted, days.length)
     const next = {
       key: item.key,
       item,
-      days: was.days + (n.days ?? 0),
+      days: kept,
       minutes: was.minutes + (n.minutes ?? 0),
       resize: Math.max(
         SNAP - (item.end.getTime() - item.start.getTime()) / 60_000,
@@ -157,7 +203,9 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
     show(next)
     const span = nudged(item, next)
     setAnnounce(
-      `${item.title}: ${span.start.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}, ${formatTime(span.start)} to ${formatTime(span.end)}. Saves in a moment.`,
+      clamped
+        ? EDGE
+        : `${item.title}: ${span.start.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}, ${formatTime(span.start)} to ${formatTime(span.end)}.`,
     )
     if (timer.current) clearTimeout(timer.current)
     timer.current = setTimeout(commit, KEY_SETTLE_MS)
@@ -166,11 +214,13 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
   const cols = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`
   return (
     // One scroller with a sticky header keeps the columns aligned whatever the scrollbar width.
-    <div ref={scroller} className="h-full min-h-0 overflow-y-auto" aria-label="Week">
+    // `isolate` keeps the header's stacking inside the view, under sheets and popovers.
+    <div ref={scroller} className="isolate h-full min-h-0 overflow-y-auto" aria-label="Week">
       <span id={hintId} className="sr-only">
-        Option and the arrow keys move this event by 15 minutes or a day. Add Shift to change how long it is.
+        {OPTION} and the arrow keys move this event by 15 minutes or a day. Add Shift to change how long it
+        is.
       </span>
-      <span className="sr-only" aria-live="polite">
+      <span className="sr-only" aria-live="polite" data-testid="week-announce">
         {announce}
       </span>
       <div className="sticky top-0 z-30 bg-content">
@@ -289,6 +339,9 @@ export function WeekView({ range, today, items, onOpen, onCreate, onEditItem, ca
   )
 }
 
+const KEYS_MOVE =
+  'Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Shift+ArrowUp Alt+Shift+ArrowDown'
+
 function DayColumn({
   day,
   items,
@@ -339,14 +392,15 @@ function DayColumn({
         const shownTop = top + (p?.minutes ?? 0)
         const shownHeight = Math.max(SNAP, height + (p?.resize ?? 0))
         const compact = shownHeight * PX < 34
-        const shownStart = p ? nudged(item, p).start : item.start
+        const span = p ? nudged(item, p) : item
         return (
           <button
             key={item.key}
             type="button"
             data-testid="week-event"
+            data-event-key={item.key}
             aria-describedby={movable ? hintId : undefined}
-            aria-keyshortcuts={movable ? 'Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight' : undefined}
+            aria-keyshortcuts={movable ? KEYS_MOVE : undefined}
             onClick={(e) => {
               e.stopPropagation()
               onOpen(item, e.currentTarget.getBoundingClientRect())
@@ -375,11 +429,18 @@ function DayColumn({
             }}
           >
             <span className="truncate font-semibold">{item.title}</span>
-            {/* Short items show their title only; the time is in the popover. */}
-            <span className={compact ? 'hidden' : 'truncate opacity-80'}>
-              {formatTime(shownStart)}
-              {!compact && item.type === 'event' && item.event.location ? ` · ${item.event.location}` : ''}
-            </span>
+            {p ? (
+              // While moving or resizing: where it will start and end, even on short events.
+              <span className="shrink-0 tabular-nums" data-testid="move-times">
+                {formatTime(span.start)} – {formatTime(span.end)}
+              </span>
+            ) : (
+              // Short items show their title only; the time is in the popover.
+              <span className={compact ? 'hidden' : 'truncate opacity-80'}>
+                {formatTime(item.start)}
+                {item.type === 'event' && item.event.location ? ` · ${item.event.location}` : ''}
+              </span>
+            )}
             {movable && (
               <span
                 aria-hidden="true"

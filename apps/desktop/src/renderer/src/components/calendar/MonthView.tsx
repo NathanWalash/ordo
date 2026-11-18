@@ -36,7 +36,7 @@ export function MonthView({ range, cursor, today, items, onOpen, onShowDay, onCr
   const maxLanes = Math.max(1, Math.floor((rowHeight - HEADER - 4) / LANE))
 
   return (
-    <div className="flex h-full min-h-0 flex-col" role="grid" aria-label="Month">
+    <div className="isolate flex h-full min-h-0 flex-col" role="grid" aria-label="Month">
       <div className="grid shrink-0 grid-cols-7 border-b border-sep" role="row">
         {weeks[0]!.map((d) => (
           <div

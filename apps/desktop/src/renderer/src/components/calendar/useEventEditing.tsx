@@ -26,6 +26,15 @@ const NEW_IN_KEY = 'ordo.calendar.new-in'
 
 type EventItem = Extract<CalendarItem, { type: 'event' }>
 
+/** A message above the calendar: something went wrong, or why something can't be done. */
+export interface Notice {
+  kind: 'error' | 'info'
+  text: string
+}
+
+/** How a move by drag or keyboard went, for the week view to announce. */
+export type MoveResult = { saved: Promise<boolean> } | 'cancelled' | 'refused'
+
 type EditorState =
   | { mode: 'new'; draft: EventDraft; calendarId: string }
   | { mode: 'edit'; ref: EventRef; details: EventDetails; calendar: CalendarListItem; draft: EventDraft }
@@ -43,8 +52,13 @@ const refOf = (e: CalendarEvent): EventRef => ({
   ...(e.recurrenceId && { recurrenceId: e.recurrenceId }),
 })
 
+/** The key the views give an event (see `toItems`). */
+const keyOf = (r: EventRef) => `${r.calendarId}|${r.uid}|${r.recurrenceId ?? ''}`
+
 /** Shown events that are still on their way to iCloud have a temporary UID. */
 const isPending = (e: CalendarEvent) => e.uid.startsWith('pending-')
+
+const NOT_READY = 'Ordo hasn’t got this event’s details yet. Sync, then try again.'
 
 function remembered(): string | null {
   try {
@@ -52,6 +66,24 @@ function remembered(): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Put focus back on an event in the views once they've drawn it: the occurrence `key` if it's
+ * there, otherwise any occurrence of the same event.
+ */
+function focusEvent(key: string) {
+  const [calendarId, uid] = key.split('|')
+  const find = () =>
+    document.querySelector<HTMLElement>(`[data-event-key="${CSS.escape(key)}"]`) ??
+    document.querySelector<HTMLElement>(`[data-event-key^="${CSS.escape(`${calendarId}|${uid}|`)}"]`)
+  let tries = 0
+  const attempt = () => {
+    const el = find()
+    if (el) el.focus()
+    else if (tries++ < 10) setTimeout(attempt, 50)
+  }
+  requestAnimationFrame(attempt)
 }
 
 /**
@@ -72,7 +104,7 @@ export function useEventEditing({
   reload: () => Promise<void>
 }) {
   const [pending, setPending] = useState<{ id: number; apply: Optimistic }[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [ask, setAsk] = useState<Ask | null>(null)
   const [selected, setSelected] = useState<{ key: string; details: EventDetails | null | 'loading' } | null>(
@@ -80,6 +112,8 @@ export function useEventEditing({
   )
   const seq = useRef(0)
   const rangeRef = useRef(range)
+  /** The event focus goes back to when the editor closes. */
+  const returnKey = useRef<string | null>(null)
   useEffect(() => {
     rangeRef.current = range
   }, [range])
@@ -87,22 +121,37 @@ export function useEventEditing({
   const targets = useMemo(() => calendars.filter(writable), [calendars])
   const byId = useMemo(() => new Map(calendars.map((c) => [c.id, c])), [calendars])
   const busy = editor !== null || ask !== null
+  const info = (text: string) => setNotice({ kind: 'info', text })
 
-  /** Apply `optimistic` now, make the change, then show what the cache says. */
+  /** Apply `optimistic` now, make the change, then show what the cache says. True if it was saved. */
   const run = useCallback(
-    async (optimistic: Optimistic, call: () => Promise<CalendarChangeOutcome>) => {
+    async (
+      optimistic: Optimistic,
+      call: () => Promise<CalendarChangeOutcome>,
+      focus?: (uid: string) => string,
+    ) => {
       const id = ++seq.current
       setNotice(null)
       setPending((p) => [...p, { id, apply: optimistic }])
+      let saved = false
+      let uid: string | null = null
       try {
         const r = await call()
-        if (!r.ok) setNotice(r.message)
+        if (r.ok) {
+          saved = true
+          uid = r.uid
+        } else setNotice({ kind: 'error', text: r.message })
       } catch {
-        setNotice('Something went wrong changing your calendar. Try again in a moment.')
+        setNotice({
+          kind: 'error',
+          text: 'Something went wrong changing your calendar. Try again in a moment.',
+        })
       } finally {
         await reload().catch(() => {})
         setPending((p) => p.filter((x) => x.id !== id))
       }
+      if (focus && uid) focusEvent(focus(uid))
+      return saved
     },
     [reload],
   )
@@ -113,14 +162,11 @@ export function useEventEditing({
   const details = async (e: CalendarEvent): Promise<EventDetails | null> => {
     const d = await window.ordo.calendar.details(refOf(e))
     if (!d) {
-      setNotice(
-        readOnlyReason(byId.get(e.calendarId)) ??
-          'Ordo hasn’t got this event’s details yet. Sync, then try again.',
-      )
+      info(readOnlyReason(byId.get(e.calendarId)) ?? NOT_READY)
       return null
     }
     if (!d.editable) {
-      setNotice(d.reason ?? 'This event can’t be changed.')
+      info(d.reason ?? 'Ordo can’t change this event.')
       return null
     }
     return d
@@ -138,41 +184,65 @@ export function useEventEditing({
   const create = (at: Date, { allDay = false, exact = false } = {}) => {
     if (!enabled || busy) return
     if (!targets.length) {
-      setNotice('Add events to one of your iCloud calendars. Calendars added by link or file are read-only.')
+      info('Add events to one of your iCloud calendars. Calendars added by link or file can’t be changed.')
       return
     }
     const saved = remembered()
     const calendarId =
       targets.find((c) => c.id === saved)?.id ?? targets.find((c) => c.visible)?.id ?? targets[0]!.id
     setNotice(null)
+    returnKey.current = null
     setEditor({ mode: 'new', draft: newDraft(at, { allDay, exact }), calendarId })
   }
 
-  const edit = async (item: CalendarItem) => {
-    if (!canEdit(item) || busy) return
-    const d = await details(item.event)
-    if (d && item.calendar)
-      setEditor({ mode: 'edit', ref: refOf(item.event), details: d, calendar: item.calendar, draft: d.draft })
+  const openEditor = (item: EventItem, d: EventDetails) => {
+    if (!item.calendar) return
+    returnKey.current = item.key
+    setEditor({ mode: 'edit', ref: refOf(item.event), details: d, calendar: item.calendar, draft: d.draft })
   }
 
-  const remove = async (ref: EventRef, d: EventDetails) => {
+  const edit = async (item: CalendarItem) => {
+    if (busy || item.type !== 'event') return
+    const reason = readOnlyReason(item.calendar)
+    if (reason) return info(reason)
+    if (!canEdit(item)) return
+    const d = await details(item.event)
+    if (d) openEditor(item, d)
+  }
+
+  /** Confirm and delete. `restore` brings the editor back if the delete is cancelled from it. */
+  const remove = async (ref: EventRef, d: EventDetails, restore?: () => void) => {
     const scope = await askScope('delete', d.draft.title, d.recurring)
-    if (!scope) return
+    if (!scope) {
+      restore?.()
+      if (!restore) focusEvent(keyOf(ref))
+      return
+    }
     await run(optimisticDelete(ref, scope), () => window.ordo.calendar.deleteEvent({ ref, scope }))
   }
 
-  /** Drag or keyboard move in the week view. */
-  const move = async (item: CalendarItem, span: { start: Date; end: Date }) => {
-    if (!canEdit(item)) return
+  /**
+   * Drag or keyboard move in the week view. Resolves once the move is showing (or was cancelled
+   * or refused); `saved` says how the save went.
+   */
+  const move = async (item: CalendarItem, span: { start: Date; end: Date }): Promise<MoveResult> => {
+    // One question at a time: a second move while Ordo is asking about the first is ignored.
+    if (busy || !canEdit(item)) return 'refused'
     const d = await details(item.event)
-    if (!d) return
+    if (!d) return 'refused'
     const draft = moveDraft(d.draft, span.start, span.end)
     const scope = d.recurring ? await askScope('save', d.draft.title, true) : 'all'
-    if (!scope) return
+    if (!scope) {
+      focusEvent(item.key)
+      return 'cancelled'
+    }
     const ref = refOf(item.event)
-    await run(optimisticUpdate(ref, draft, scope, rangeRef.current), () =>
-      window.ordo.calendar.updateEvent({ ref, draft, scope }),
+    const saved = run(
+      optimisticUpdate(ref, draft, scope, rangeRef.current),
+      () => window.ordo.calendar.updateEvent({ ref, draft, scope }),
+      () => item.key,
     )
+    return { saved }
   }
 
   const save = async (draft: EventDraft, calendarId: string, repeatChanged: boolean) => {
@@ -185,8 +255,10 @@ export function useEventEditing({
       } catch {
         // Not remembering the calendar is fine.
       }
-      await run(optimisticCreate(calendarId, draft, rangeRef.current), () =>
-        window.ordo.calendar.createEvent({ calendarId, draft }),
+      await run(
+        optimisticCreate(calendarId, draft, rangeRef.current),
+        () => window.ordo.calendar.createEvent({ calendarId, draft }),
+        (uid) => `${calendarId}|${uid}|`,
       )
       return
     }
@@ -196,9 +268,16 @@ export function useEventEditing({
       setEditor({ ...ed, draft })
       return
     }
-    await run(optimisticUpdate(ed.ref, draft, scope, rangeRef.current), () =>
-      window.ordo.calendar.updateEvent({ ref: ed.ref, draft, scope }),
+    await run(
+      optimisticUpdate(ed.ref, draft, scope, rangeRef.current),
+      () => window.ordo.calendar.updateEvent({ ref: ed.ref, draft, scope }),
+      () => keyOf(ed.ref),
     )
+  }
+
+  const closeEditor = () => {
+    setEditor(null)
+    if (returnKey.current) focusEvent(returnKey.current)
   }
 
   // ---- The popover ---------------------------------------------------------------------------
@@ -225,26 +304,14 @@ export function useEventEditing({
     const s = selected?.key === item.key ? selected.details : 'loading'
     if (s === 'loading') return { state: 'checking', onEdit: noop, onDelete: noop }
     if (!s || !s.editable)
-      return {
-        state: 'locked',
-        reason: s?.reason ?? 'Ordo hasn’t got this event’s details yet. Sync, then try again.',
-        onEdit: noop,
-        onDelete: noop,
-      }
+      return { state: 'locked', reason: s?.reason ?? NOT_READY, onEdit: noop, onDelete: noop }
     const r = s.draft.repeat
     return {
       state: 'editable',
       repeats: r ? (r.custom ? 'Repeats' : `Repeats ${REPEAT_LABELS[r.frequency].toLowerCase()}`) : undefined,
       onEdit: () => {
         close()
-        if (item.calendar)
-          setEditor({
-            mode: 'edit',
-            ref: refOf(item.event),
-            details: s,
-            calendar: item.calendar,
-            draft: s.draft,
-          })
+        openEditor(item, s)
       },
       onDelete: () => {
         close()
@@ -275,14 +342,15 @@ export function useEventEditing({
           onSave={(d, c, repeatChanged) => void save(d, c, repeatChanged)}
           onDelete={
             editor.mode === 'edit'
-              ? () => {
+              ? (draft) => {
                   const ed = editor
                   setEditor(null)
-                  void remove(ed.ref, ed.details)
+                  // Cancelling the delete goes back to the editor, with any changes made there.
+                  void remove(ed.ref, ed.details, () => setEditor({ ...ed, draft }))
                 }
               : undefined
           }
-          onClose={() => setEditor(null)}
+          onClose={closeEditor}
         />
       )}
       {ask && (
@@ -304,7 +372,7 @@ export function useEventEditing({
   )
 
   return {
-    /** Whether the toolbar's New Event button can be used, and why not. */
+    /** Whether new events have somewhere to go; the button still explains when they don't. */
     canCreate: enabled && targets.length > 0,
     busy,
     create,

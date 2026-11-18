@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type { CalendarEvent, EventDraft } from '@ordo/calendar-core'
 import type { CalendarListItem } from '@ordo/shared'
 import {
+  alertLabel,
+  canonicalZone,
+  clampDays,
+  defaultUntil,
   moveDraft,
   newDraft,
   nudged,
@@ -12,9 +16,11 @@ import {
   readOnlyReason,
   snap,
   timeZones,
-  withAllDay,
+  toggleAllDay,
   withStart,
   writable,
+  zoneCity,
+  zoneLabel,
 } from './editing'
 
 const RANGE = { start: new Date(2026, 9, 1), end: new Date(2027, 0, 1) }
@@ -54,9 +60,11 @@ describe('which calendars can be changed', () => {
     expect(writable(cal({ readOnly: true }))).toBe(false)
     expect(writable(cal({ source: 'link', readOnly: true }))).toBe(false)
     expect(readOnlyReason(cal({}))).toBeNull()
-    expect(readOnlyReason(cal({ source: 'link' }))).toBe('Calendars added by link are read-only in Ordo.')
-    expect(readOnlyReason(cal({ source: 'file' }))).toMatch(/imported from a file/)
-    expect(readOnlyReason(cal({ readOnly: true }))).toMatch(/read-only/)
+    expect(readOnlyReason(cal({ source: 'link' }))).toBe(
+      'Added by link, so Ordo can’t change its events. Change them where the calendar is published.',
+    )
+    expect(readOnlyReason(cal({ source: 'file' }))).toMatch(/^Imported from a file/)
+    expect(readOnlyReason(cal({ readOnly: true }))).toMatch(/^Shared with you read-only/)
   })
 })
 
@@ -101,25 +109,70 @@ describe('editor helpers', () => {
     expect(withStart(allDay, '2026-11-10')).toMatchObject({ start: '2026-11-10', end: '2026-11-12' })
     expect(withStart(draft(), '')).toMatchObject({ start: '', end: '2026-11-02T09:30' })
   })
-  it('switches all-day on and off, keeping the days', () => {
-    expect(withAllDay(draft(), true)).toMatchObject({
+  it('switches all-day on and back off, keeping the days, times, zone and alert', () => {
+    const timed = draft({
+      start: '2026-11-02T14:15',
+      end: '2026-11-02T15:00',
+      alert: 30,
+      timeZone: 'Asia/Tokyo',
+    })
+    const on = toggleAllDay(timed, true, null)
+    expect(on.draft).toMatchObject({ allDay: true, start: '2026-11-02', end: '2026-11-02', timeZone: null })
+    // An alert stays an alert: the all-day one closest to it.
+    expect(on.draft.alert).toBe(900)
+    const off = toggleAllDay({ ...on.draft, start: '2026-11-05', end: '2026-11-05' }, false, on.memory, 'UTC')
+    expect(off.draft).toMatchObject({
+      allDay: false,
+      start: '2026-11-05T14:15',
+      end: '2026-11-05T15:00',
+      timeZone: 'Asia/Tokyo',
+      alert: 30,
+    })
+    // None stays none; without a memory, 09:00 to 10:00 here.
+    const fresh = toggleAllDay(
+      draft({ allDay: true, start: '2026-11-02', end: '2026-11-03', timeZone: null }),
+      false,
+      null,
+      'Asia/Tokyo',
+    )
+    expect(fresh.draft).toMatchObject({
+      start: '2026-11-02T09:00',
+      end: '2026-11-03T10:00',
+      timeZone: 'Asia/Tokyo',
+      alert: null,
+    })
+    const allDayAlert = draft({
       allDay: true,
       start: '2026-11-02',
       end: '2026-11-02',
       timeZone: null,
+      alert: -540,
     })
-    expect(
-      withAllDay(
-        draft({ allDay: true, start: '2026-11-02', end: '2026-11-03', timeZone: null }),
-        false,
-        'Asia/Tokyo',
-      ),
-    ).toMatchObject({
-      allDay: false,
-      start: '2026-11-02T09:00',
-      end: '2026-11-03T10:00',
-      timeZone: 'Asia/Tokyo',
-    })
+    expect(toggleAllDay(allDayAlert, false, null).draft.alert).toBe(1440)
+  })
+  it('ends a repeat a month on for daily and weekly events, a year on for monthly and yearly', () => {
+    expect(defaultUntil('2026-11-02T09:00', 'weekly')).toBe('2026-12-02')
+    expect(defaultUntil('2026-11-02', 'daily')).toBe('2026-12-02')
+    expect(defaultUntil('2026-01-31', 'daily')).toBe('2026-02-28')
+    expect(defaultUntil('2026-11-02T09:00', 'monthly')).toBe('2027-11-02')
+    expect(defaultUntil('2028-02-29', 'yearly')).toBe('2029-02-28')
+  })
+  it('describes any alert in days, hours and minutes', () => {
+    expect(alertLabel(15)).toBe('15 minutes before')
+    expect(alertLabel(4320)).toBe('3 days before')
+    expect(alertLabel(90)).toBe('1 hour 30 minutes before')
+    expect(alertLabel(-120)).toBe('2 hours after the start')
+    expect(alertLabel(1)).toBe('1 minute before')
+  })
+  it('names time zones by city and their current names', () => {
+    expect(zoneCity('America/Los_Angeles')).toBe('Los Angeles')
+    expect(canonicalZone('Asia/Calcutta')).toBe('Asia/Kolkata')
+    expect(zoneCity('Asia/Saigon')).toBe('Ho Chi Minh')
+    expect(zoneLabel('Europe/London', new Date('2026-11-02T12:00:00Z'))).toMatch(/^London \(.+\)$/)
+    const zones = timeZones('Asia/Calcutta')
+    expect(zones[0]).toBe('Asia/Kolkata')
+    expect(zones).not.toContain('Asia/Calcutta')
+    expect(zones).not.toContain('Europe/Kiev')
   })
   it('writes moved instants as wall-clock times in the event’s own zone', () => {
     const moved = moveDraft(
@@ -226,6 +279,12 @@ describe('moving in the week view', () => {
   })
   it('snaps to quarter hours', () => {
     expect([snap(7), snap(8), snap(-22), snap(0)]).toEqual([0, 15, -15, 0])
+  })
+  it('keeps a move inside the week shown, and says when it hit the edge', () => {
+    expect(clampDays(6, 1)).toEqual({ days: 0, clamped: true })
+    expect(clampDays(0, -3)).toEqual({ days: 0, clamped: true })
+    expect(clampDays(2, 9)).toEqual({ days: 4, clamped: true })
+    expect(clampDays(3, -2)).toEqual({ days: -2, clamped: false })
   })
   it('maps Option-arrow keys to moves and Option-Shift to resizing', () => {
     const k = (key: string, altKey = true, shiftKey = false) => nudgeFor({ key, altKey, shiftKey })
