@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Monitor, Moon, Sun } from 'lucide-react'
-import type { AiSettings as Ai, Settings, Theme } from '@ordo/shared'
+import type { AccountStatus, AiSettings as Ai, Settings, Theme } from '@ordo/shared'
+import { Button } from '../components/Button'
 import { AiSettings } from '../components/AiSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { Row, Section } from '../components/SettingsSection'
@@ -12,8 +13,14 @@ const THEME_OPTIONS = [
   { value: 'dark', label: 'Dark', icon: <Moon size={13} /> },
 ] as const satisfies readonly { value: Theme; label: string; icon: ReactNode }[]
 
-/** App preferences, grouped into sections. Accounts will join Appearance and AI here. */
-export function SettingsPage() {
+interface Props {
+  account: AccountStatus | null
+  onConnect: () => void
+  onDisconnect: () => void
+}
+
+/** App preferences, grouped into sections: the account, appearance and AI. */
+export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const appearance = useAppearance()
 
@@ -37,6 +44,27 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl px-8 py-8">
+      {account && (
+        <Section title="Account">
+          {account.connected ? (
+            <Row
+              label="iCloud Mail and Calendar"
+              detail={`Connected as ${account.email}. Disconnecting forgets your password and the mail Ordo has downloaded.`}
+              control={<Button onClick={onDisconnect}>Disconnect</Button>}
+            />
+          ) : (
+            <Row
+              label="iCloud Mail and Calendar"
+              detail="Not connected. You’ll need an app-specific password from account.apple.com."
+              control={
+                <Button variant="primary" onClick={onConnect}>
+                  Connect iCloud
+                </Button>
+              }
+            />
+          )}
+        </Section>
+      )}
       <Section title="Appearance">
         <Row
           label="Theme"
