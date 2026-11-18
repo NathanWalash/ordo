@@ -33,6 +33,20 @@ if (userData) app.setPath('userData', userData)
 const isMac = process.platform === 'darwin'
 const isWin = process.platform === 'win32'
 
+/**
+ * Tests (unpackaged builds only): run without pulling the person away from what they're doing.
+ * On macOS Ordo is a background app (no Dock icon, never active) whose window is never shown; it
+ * still loads and paints, so Playwright can drive and screenshot it. Windows and Linux crash when
+ * Playwright drags over a hidden window, so there it's shown without taking focus instead.
+ * `ORDO_E2E_SHOW=1` in the test runner turns this off to watch a run.
+ */
+const quietTest = !app.isPackaged && process.env['ORDO_TEST_BACKGROUND'] === '1'
+const hiddenWindow = quietTest && isMac
+/** No Dock icon and never the active app. Set before `ready`, so Ordo never takes focus at launch. */
+const keepInBackground = () => {
+  if (isMac) app.setActivationPolicy('accessory')
+}
+
 function winOverlay() {
   return {
     color: '#00000000',
@@ -60,6 +74,8 @@ function createWindow(): BrowserWindow {
     minWidth: 920,
     minHeight: 600,
     show: false,
+    // A quiet test run keeps the window hidden for good, so it must paint and run timers anyway.
+    ...(hiddenWindow && { paintWhenInitiallyHidden: true }),
     title: 'Ordo',
     // Transparent so the native material (macOS vibrancy / Windows Mica) shows through the sidebar.
     backgroundColor: '#00000000',
@@ -79,10 +95,11 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      ...(hiddenWindow && { backgroundThrottling: false }),
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  if (!hiddenWindow) win.once('ready-to-show', () => (quietTest ? win.showInactive() : win.show()))
 
   // Never let web content open windows or navigate the app away; send https links to the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -162,7 +179,7 @@ function startApp(): void {
   app.whenReady().then(() => {
     applyTestOverrides()
     // Only the windowed app: headless mode hides the Dock icon instead.
-    if (devIcon && isMac) app.dock?.setIcon(devIcon)
+    if (devIcon && isMac && !quietTest) app.dock?.setIcon(devIcon)
     setupAppearance()
     blockFrameLoads()
     initAi()
@@ -172,7 +189,7 @@ function startApp(): void {
     createWindow()
     void tidyBoards()
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      if (!quietTest && BrowserWindow.getAllWindows().length === 0) createWindow()
     })
   })
 
@@ -186,5 +203,7 @@ process.on('exit', releaseWriteLock)
 
 // `--headless <command>` or `--headless --mcp`: no window, see headless/run.ts and docs/headless.md.
 const headless = headlessArgs(process.argv)
+// Headless runs (scripts, agents, MCP) and quiet test runs stay in the background from the start.
+if (headless || quietTest) keepInBackground()
 if (headless) void runHeadless(headless, applyTestOverrides)
 else startApp()
