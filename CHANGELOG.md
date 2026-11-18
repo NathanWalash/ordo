@@ -21,6 +21,12 @@ All notable changes to Ordo are recorded here. The format follows
 
 ### Added
 
+- Assistant: press ⌘K or ⌘J (Ctrl on Windows and Linux), or **Assistant** in the toolbar, to ask about your mail, calendar and money. It looks things up with Ordo's own tools, shows each step and what it did, can open a page for you (Finances on a given month, say), and can be stopped or tried again. It sits beside the page when there's room. Suggested prompts follow the page you're on. It uses the model from Settings → AI. The conversation stays in memory for the session; New conversation, a reload or quitting forgets it. See [docs/assistant.md](docs/assistant.md).
+- With Claude Code or Codex, the assistant asks for its own OK first, separately from AI sorting, and says exactly what it sends (transactions with amounts and dates, balances, bills, calendar events, sender details and your iCloud address). Nothing is sent until you allow it, and Stop sharing takes it back.
+- Changes the assistant suggests (clean-ups, undo, statement imports, sorting with AI) never run until you press Confirm on a card that shows exactly what will change, built from Ordo's own dry run, and checked again at Confirm. The card says "You asked for this" only when your own words asked for exactly that and nothing untrusted had been read; otherwise it says to check it first. Cards take focus themselves and ignore presses for a moment, so they can't be confirmed by accident.
+- The assistant's tool loop is strict: one JSON reply at a time, checked against each tool's schema, with a retry and a step cap. Tool results go back as escaped, delimited data marked untrusted unless they hold only numbers, and the Claude and Codex CLIs still run with their own tools off.
+- One tool registry for the MCP server and the assistant (`headless/tools.ts`): adding a tool is one entry. See [docs/assistant.md](docs/assistant.md#adding-a-tool).
+
 - `pnpm dev` on macOS shows the app as Ordo in the menu bar, Dock and Cmd-Tab instead of Electron, by renaming the development copy of Electron before it starts. Packaged builds were already named Ordo.
 - Add a calendar by link: paste a calendar's iCal link (Google's **Secret address in iCal format**, Outlook's published ICS link, any `webcal://` or `.ics` link) and Ordo shows it under **Other calendars**, read-only, next to iCloud's. Useful for a Google work calendar that doesn't sync properly into iCloud. Ordo checks the link really is a calendar before saving it, keeps it encrypted with the system keychain, refreshes it with every sync, and says which link stopped working instead of dropping its events. Links must be https, and neither a link nor its redirects may reach this computer or the local network.
 - Import an `.ics` file as a calendar of its own, with its recurring events expanded like any other.
@@ -71,3 +77,9 @@ All notable changes to Ordo are recorded here. The format follows
 - Unclutter preview using sample data: inbox makeup, category filters and a sender list where people can never be selected.
 - `mail-core` package: sender grouping and `List-Unsubscribe` parsing (RFC 2369 and RFC 8058).
 - Unit tests (Vitest), end-to-end tests (Playwright), CI on macOS, Windows and Linux, and a tag-driven release workflow.
+
+### Changed
+
+- Statement imports from a path (headless, MCP and the assistant) refuse UNC and device paths such as `\\server\share` before touching the file system, so a path can't reach the network. `ordo_import_statement` needs a full local path.
+- LM Studio and Ollama errors read "LM Studio couldn’t answer (error 500). Check it’s running with a model loaded, then try again."
+- Text from emails and statements shown in the terminal or on cards also loses zero-width characters, direction marks, line separators and the byte order mark.

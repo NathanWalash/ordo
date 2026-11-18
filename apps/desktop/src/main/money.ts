@@ -58,6 +58,7 @@ import {
 } from '@ordo/shared'
 import { aiSettings, message as aiMessage, resolveModel, usableProvider } from './ai'
 import { cachedInboxHeaders } from './mail'
+import { pathProblem } from './paths'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
@@ -138,11 +139,16 @@ const UNREADABLE =
 /** Headless imports read a file named on the command line: a CSV export, never anything big. */
 export const MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
 
+type StatementRead = { ok: true; fileName: string; text: string } | { ok: false; message: string }
+
 /**
- * Import a statement from a path (headless mode). The path must resolve to a regular `.csv`
- * file under 5 MB; it is then parsed and saved exactly like a file picked in the app.
+ * Read a statement named by a path (headless mode and the assistant). The path must be local and
+ * resolve to a regular `.csv` file under 5 MB.
  */
-export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+async function readStatementFile(path: string): Promise<StatementRead> {
+  // Before any file-system call: a UNC or device path could reach the network or a device.
+  const problem = pathProblem(path, { requireAbsolute: false })
+  if (problem) return { ok: false, message: problem }
   let real: string
   try {
     real = await realpath(resolve(path))
@@ -173,7 +179,17 @@ export async function importStatementFile(path: string, accountName?: string): P
     return { ok: false, message: UNREADABLE }
   }
   if (bytes.length > MAX_IMPORT_FILE_BYTES) return tooBig
-  return importStatement({ fileName: basename(real), text: decodeStatement(bytes), accountName })
+  return { ok: true, fileName: basename(real), text: decodeStatement(bytes) }
+}
+
+/**
+ * Import a statement from a path (headless mode and the assistant). It is then parsed and saved
+ * exactly like a file picked in the app.
+ */
+export async function importStatementFile(path: string, accountName?: string): Promise<ImportOutcome> {
+  const read = await readStatementFile(path)
+  if (!read.ok) return read
+  return importStatement({ fileName: read.fileName, text: read.text, accountName })
 }
 
 /** How much is stored, for `status`. */

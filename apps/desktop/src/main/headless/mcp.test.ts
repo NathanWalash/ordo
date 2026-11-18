@@ -70,6 +70,21 @@ describe('MCP server', () => {
     }
   })
 
+  it('keeps its tool surface stable: every name, description and input schema', async () => {
+    const { client } = await connect(true)
+    const { tools } = await client.listTools()
+    expect(
+      [...tools]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+          annotations: t.annotations,
+        })),
+    ).toMatchSnapshot()
+  })
+
   it('says which fields are untrusted third-party text', async () => {
     const { client } = await connect(false)
     const { tools } = await client.listTools()

@@ -6,8 +6,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
-import { commandFrom, MAX_EVENT_DAYS, UsageError, type CommandName } from './args'
-import { runCommand, type CommandResult, type OrdoServices } from './commands'
+import type { CommandResult, OrdoServices } from './commands'
+import { runTool, TOOLS } from './tools'
 
 /**
  * Ordo as an MCP server, over stdio only: no port, no network listener. Read tools are always
@@ -24,25 +24,7 @@ const CHANGE =
   'Only available because Ordo was started with --allow-changes. Requires confirm: true; ' +
   'ask the user before calling it.'
 
-const limit = (fallback: number, max: number) =>
-  z
-    .number()
-    .int()
-    .min(1)
-    .max(max)
-    .default(fallback)
-    .describe(`How many to return (default ${fallback}, max ${max})`)
-const offset = z.number().int().min(0).max(1_000_000).default(0).describe('How many to skip, for paging')
 const confirm = z.boolean().optional().describe('Must be true: the user has agreed to this change')
-const senderList = z
-  .array(z.string().min(3).max(320))
-  .min(1)
-  .max(100)
-  .describe('Sender email addresses, as listed by ordo_senders')
-const category = z
-  .enum(['promotions', 'newsletters', 'notifications', 'receipts', 'people', 'uncategorised'])
-  .optional()
-  .describe('Only senders in this category ("uncategorised" is Other in the app)')
 
 function toToolResult(result: CommandResult): CallToolResult {
   if (result.ok) return { content: [{ type: 'text', text: JSON.stringify(result.data) }] }
@@ -81,253 +63,40 @@ export function createMcpServer(
     },
   )
 
-  /** Validate with the CLI's rules, run the command, and wrap the result. */
-  const call = async (
-    name: CommandName,
-    input: Record<string, unknown>,
-    paging?: { offset?: number },
-  ): Promise<CallToolResult> => {
-    try {
-      const command = commandFrom(name, input)
-      const work = runCommand(services, command, {
-        allowChanges: options.allowChanges,
-        offset: paging?.offset,
-      })
-      options.track?.(work)
-      return toToolResult(await work)
-    } catch (err) {
-      if (err instanceof UsageError) return toToolResult({ ok: false, code: 'usage', message: err.message })
-      process.stderr.write(`${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`)
-      return toToolResult({ ok: false, code: 'internal', message: 'Something went wrong inside Ordo.' })
-    }
-  }
-
-  const readOnly = { readOnlyHint: true, openWorldHint: false } as const
-
-  server.registerTool(
-    'ordo_status',
-    {
-      description:
-        'Ordo’s state: whether an iCloud account is connected (its email only, never the password), ' +
-        'last scan, the AI provider, counts, and whether another Ordo process is busy writing.',
-      annotations: readOnly,
-    },
-    () => call('status', {}),
-  )
-
-  server.registerTool(
-    'ordo_senders',
-    {
-      description:
-        'Senders in the cached inbox, most emails first, with category and unsubscribe method. ' +
-        'protected: true marks people the user has written to; Ordo never clears them. ' +
-        'Run ordo_scan first to refresh. ' +
-        UNTRUSTED,
-      inputSchema: { category, limit: limit(25, 200), offset },
-      annotations: readOnly,
-    },
-    ({ category: c, limit: n, offset: o }) => call('senders', { category: c, limit: n }, { offset: o }),
-  )
-
-  server.registerTool(
-    'ordo_cleanup_plan',
-    {
-      description:
-        'Dry run of a clean-up: exactly which emails Ordo would move to Trash and how it would unsubscribe, ' +
-        'with the same checks as the app (people are refused, plain http links and unsubscribe emails to ' +
-        'another domain need the app). Changes nothing. ' +
-        UNTRUSTED,
-      inputSchema: {
-        senders: senderList,
-        unsubscribe: z.boolean().default(true).describe('Unsubscribe where the sender offers a way'),
-        trash: z.boolean().default(true).describe('Move their cached inbox emails to Trash'),
-      },
-      annotations: readOnly,
-    },
-    ({ senders, unsubscribe, trash }) =>
-      call('cleanup plan', { sender: senders, 'no-unsubscribe': !unsubscribe, 'no-trash': !trash }),
-  )
-
-  server.registerTool(
-    'ordo_history',
-    {
-      description:
-        'Past clean-ups, newest first, with what was moved and whether it can be undone. ' + UNTRUSTED,
-      inputSchema: { limit: limit(10, 50), offset },
-      annotations: readOnly,
-    },
-    ({ limit: n, offset: o }) => call('history', { limit: n }, { offset: o }),
-  )
-
-  server.registerTool(
-    'ordo_calendar_events',
-    {
-      description:
-        `Cached events from the user’s visible iCloud calendars between two days (inclusive, at most ${MAX_EVENT_DAYS} days). ` +
-        'Run ordo_calendar_sync first to refresh. ' +
-        UNTRUSTED,
-      inputSchema: {
-        from: z.string().describe('First day, YYYY-MM-DD'),
-        to: z.string().describe('Last day, YYYY-MM-DD'),
-        limit: limit(50, 200),
-        offset,
-      },
-      annotations: readOnly,
-    },
-    ({ from, to, limit: n, offset: o }) => call('calendar events', { from, to, limit: n }, { offset: o }),
-  )
-
-  server.registerTool(
-    'ordo_bills',
-    {
-      description:
-        'Bills and subscriptions from Ordo Money, with amounts in pence (GBP), cadence, next due date and splits. ' +
-        UNTRUSTED,
-      annotations: readOnly,
-    },
-    () => call('money bills', {}),
-  )
-
-  server.registerTool(
-    'ordo_transactions',
-    {
-      description:
-        'Bank transactions imported into Ordo Money, newest first, amounts in pence (GBP). ' + UNTRUSTED,
-      inputSchema: {
-        month: z.string().optional().describe('Only this month, YYYY-MM'),
-        account: z.string().max(60).optional().describe('Only this account, by name'),
-        limit: limit(50, 200),
-        offset,
-      },
-      annotations: readOnly,
-    },
-    ({ month, account, limit: n, offset: o }) =>
-      call('money transactions', { month, account, limit: n }, { offset: o }),
-  )
-
-  server.registerTool(
-    'ordo_balances',
-    {
-      description: 'Who owes whom for shared bills, in pence (GBP). ' + UNTRUSTED,
-      annotations: readOnly,
-    },
-    () => call('money balances', {}),
-  )
-
-  server.registerTool(
-    'ordo_scan',
-    {
-      description:
-        'Fetch new inbox headers from iCloud into Ordo’s local cache. Reads headers only; changes nothing in the mailbox. ' +
-        'Fails with code "locked" if the Ordo app or another agent is writing.',
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    },
-    () => call('scan', {}),
-  )
-
-  server.registerTool(
-    'ordo_calendar_sync',
-    {
-      description:
-        'Fetch changed iCloud calendars into Ordo’s local cache. Changes nothing on the server. ' +
-        'Fails with code "locked" if the Ordo app or another agent is writing.',
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    },
-    () => call('calendar sync', {}),
-  )
-
-  if (!options.allowChanges) return server
-
-  const changes = {
-    readOnlyHint: false,
-    destructiveHint: true,
-    idempotentHint: false,
-    openWorldHint: true,
+  const annotations = {
+    read: { readOnlyHint: true, openWorldHint: false },
+    refresh: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    change: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   } as const
 
-  server.registerTool(
-    'ordo_cleanup_run',
-    {
-      description:
-        'Unsubscribe from the given senders and move their cached inbox emails to Trash (nothing is deleted; ' +
-        'ordo_undo puts them back). Call ordo_cleanup_plan first and show the user the plan. People are refused. ' +
-        CHANGE +
-        ' ' +
-        UNTRUSTED,
-      inputSchema: {
-        senders: senderList,
-        unsubscribe: z.boolean().default(true),
-        trash: z.boolean().default(true),
-        confirm,
+  // One registration per tool in the shared registry (tools.ts). Change tools only exist with
+  // --allow-changes, and take an extra `confirm` argument that runTool checks.
+  for (const tool of TOOLS) {
+    if (tool.kind === 'change' && !options.allowChanges) continue
+    const description = [tool.description, tool.kind === 'change' && CHANGE, tool.untrusted && UNTRUSTED]
+      .filter(Boolean)
+      .join(' ')
+    const inputSchema = tool.kind === 'change' ? { ...tool.input, confirm } : tool.input
+    server.registerTool(
+      tool.name,
+      {
+        description,
+        ...(Object.keys(inputSchema).length > 0 && { inputSchema }),
+        annotations: annotations[tool.kind],
       },
-      annotations: changes,
-    },
-    ({ senders, unsubscribe, trash, confirm: yes }) =>
-      call('cleanup run', {
-        sender: senders,
-        'no-unsubscribe': !unsubscribe,
-        'no-trash': !trash,
-        confirm: yes,
-      }),
-  )
-
-  server.registerTool(
-    'ordo_undo',
-    {
-      description:
-        'Move a clean-up’s emails from Trash back to the inbox (unsubscribes can’t be undone). Ids come from ordo_history. ' +
-        CHANGE,
-      inputSchema: { id: z.number().int().positive(), confirm },
-      annotations: changes,
-    },
-    ({ id, confirm: yes }) => call('undo', { id, confirm: yes }),
-  )
-
-  server.registerTool(
-    'ordo_import_statement',
-    {
-      description:
-        'Import a bank statement into Ordo Money from a path on this computer: a regular .csv file under 5 MB. ' +
-        'Transactions already imported are skipped. ' +
-        CHANGE,
-      inputSchema: {
-        path: z.string().min(1).max(4096).describe('Path to the .csv file'),
-        account: z.string().max(60).optional().describe('Account name (default: from the file)'),
-        confirm,
+      async (...params: unknown[]): Promise<CallToolResult> => {
+        // With no input schema the SDK passes only `extra`.
+        const raw = Object.keys(inputSchema).length > 0 ? { ...(params[0] as Record<string, unknown>) } : {}
+        const yes = raw['confirm'] === true
+        delete raw['confirm']
+        // Tracked until it settles, even if the client cancels, so a change can finish (and save
+        // its undo record) before the server exits.
+        const work = runTool(services, tool, raw, { allowChanges: options.allowChanges, confirm: yes })
+        options.track?.(work)
+        return toToolResult(await work)
       },
-      annotations: changes,
-    },
-    ({ path, account, confirm: yes }) => call('money import', { file: path, account, confirm: yes }),
-  )
-
-  server.registerTool(
-    'ordo_money_sort',
-    {
-      description:
-        'Ask the model chosen in Ordo’s Settings → AI to categorise the merchants left in Other and to match ' +
-        'bank payments to email senders the rules couldn’t. Needs AI for Money turned on in Ordo. Only merchant ' +
-        'names, a description without numbers and a rough amount go to that model, never balances, accounts or ' +
-        'dates; a cloud provider is only used if the user agreed to it in Ordo. Matches only become bills to ' +
-        'review in the app. ' +
-        CHANGE,
-      inputSchema: { confirm },
-      annotations: changes,
-    },
-    ({ confirm: yes }) => call('money sort', { confirm: yes }),
-  )
-
-  server.registerTool(
-    'ordo_ai_sort',
-    {
-      description:
-        'Ask the model chosen in Ordo’s Settings → AI to sort the senders in Other. Sender names and subject lines go to ' +
-        'that model; a cloud provider is only used if the user agreed to it in Ordo. ' +
-        CHANGE,
-      inputSchema: { confirm },
-      annotations: changes,
-    },
-    ({ confirm: yes }) => call('ai sort', { confirm: yes }),
-  )
+    )
+  }
 
   return server
 }
