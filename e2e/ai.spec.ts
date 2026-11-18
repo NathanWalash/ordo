@@ -95,6 +95,9 @@ test('picking LM Studio preselects gpt-oss-20b and saves it', async () => {
     sortSenders: false,
     money: false,
     cloudConsent: null,
+    moneyDetailsConsent: null,
+    askStyle: 'brief',
+    askClarify: true,
   })
 
   const toggle = page.getByRole('switch', { name: "Use AI to sort senders Ordo isn't sure about" })
