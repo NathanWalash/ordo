@@ -10,6 +10,7 @@ import {
   parseAddressList,
   referencesFor,
   safeFilename,
+  type AttachmentInfo,
   type MailboxInfo,
   type MessageContent,
   type MessageHeader,
@@ -21,6 +22,7 @@ import {
   ImapMailProvider,
   loadRemoteImages,
   MailAuthError,
+  RecipientsRefused,
   reconcileFolder,
   scanMailbox,
   sendMessage,
@@ -53,8 +55,18 @@ import {
   type PickedFile,
 } from '@ordo/shared'
 import { loadAccount } from './account'
-import { allowLoopbackHttp, explain, imapConfig, INBOX, mailStore, scan, smtpConfig } from './mail'
+import {
+  allowLoopbackHttp,
+  explain,
+  imapConfig,
+  INBOX,
+  mailStore,
+  scan,
+  smtpConfig,
+  trackMailWork,
+} from './mail'
 import { closeImapSession, NotConnected, withImap } from './mail-session'
+import { markAsDownloaded } from './quarantine'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 /**
@@ -66,6 +78,7 @@ import { Locked, toRenderer, withWriteLock } from './writes'
 const fail = (error: MailError, message: string): MailFailure => ({ ok: false, error, message })
 const NO_ACCOUNT = fail('auth', 'Connect your iCloud account first.')
 const INVALID = fail('invalid', 'That request isn’t valid.')
+const STOPPED = fail('busy', 'Stopped.')
 const UNKNOWN_MAILBOX = fail('not-found', 'That mailbox isn’t there any more. Refresh and try again.')
 
 /** A failure the window can show, from anything a mail call threw. */
@@ -110,6 +123,16 @@ function mailboxFor(role: MoveTarget | 'sent' | 'drafts'): string | null {
   )
 }
 
+const SPECIAL_USE = { sent: '\\Sent', drafts: '\\Drafts' } as const
+
+/**
+ * Sent or Drafts: from the cached folder list, or, before the first list has arrived (a big
+ * first inbox scan), asked of the server.
+ */
+async function specialMailbox(p: ImapMailProvider, role: 'sent' | 'drafts'): Promise<string | null> {
+  return mailboxFor(role) ?? (await p.findMailbox(SPECIAL_USE[role]).catch(() => null))
+}
+
 const summary = (h: MessageHeader): MessageSummary => ({
   mailbox: h.mailbox,
   uid: h.uid,
@@ -146,6 +169,11 @@ export async function refresh(
   const store = mailStore()
   try {
     if (mailbox === INBOX) {
+      // The folder list first, so Drafts, Sent and the rest work while a big first scan runs.
+      if (!store.mailboxes().length)
+        await trackMailWork(withImap((p) => p.listMailboxes()))
+          .then((list) => loadAccount()?.email === account.email && store.saveMailboxes(list))
+          .catch(() => {})
       // The inbox goes through the same scan as Unclutter, so its cache stays complete.
       let removed = 0
       let changed = 0
@@ -162,21 +190,26 @@ export async function refresh(
       }
       return { ok: true, added: r.added, removed, changed }
     }
-    return await changing('checking for new mail', async () => {
-      const provider = new ImapMailProvider(imapConfig(account.email, account.password))
-      try {
-        await provider.connect()
-        const list = await provider.listMailboxes()
-        store.saveMailboxes(list)
-        if (!list.some((m) => m.path === mailbox)) return UNKNOWN_MAILBOX
-        // Other folders fetch a few hundred headers at most, so progress is just "done".
-        const res = await syncFolder(provider, store, mailbox)
-        onProgress?.({ mailbox, checked: res.total, total: res.total })
-        return { ok: true, added: res.added, removed: res.removed, changed: res.changed }
-      } finally {
-        await provider.close().catch(() => {})
-      }
-    })
+    const ctrl = new AbortController()
+    return await trackMailWork(
+      changing('checking for new mail', async () => {
+        const provider = new ImapMailProvider(imapConfig(account.email, account.password))
+        try {
+          await provider.connect()
+          const list = await provider.listMailboxes()
+          if (ctrl.signal.aborted) return STOPPED
+          store.saveMailboxes(list)
+          if (!list.some((m) => m.path === mailbox)) return UNKNOWN_MAILBOX
+          // Other folders fetch a few hundred headers at most, so progress is just "done".
+          const res = await syncFolder(provider, store, mailbox, { signal: ctrl.signal })
+          onProgress?.({ mailbox, checked: res.total, total: res.total })
+          return { ok: true, added: res.added, removed: res.removed, changed: res.changed }
+        } finally {
+          await provider.close().catch(() => {})
+        }
+      }),
+      () => ctrl.abort(),
+    )
   } catch (err) {
     return failure(err)
   } finally {
@@ -421,6 +454,8 @@ export async function saveAttachment(
     const file = await withImap((p) => p.downloadPart(ref.mailbox, ref.uid, ref.part))
     if (!file) return fail('unavailable', 'Ordo couldn’t download that attachment. It may be too big.')
     await writeFile(choice.filePath, file.content)
+    // Like a browser download: the system warns before opening a file that came by email.
+    await markAsDownloaded(choice.filePath)
     return { ok: true, saved: true }
   } catch (err) {
     return failure(err)
@@ -471,9 +506,19 @@ async function compose(input: ComposeInput, from: string, needRecipients: boolea
     if (ref && !knownMailbox(ref.mailbox)) return UNKNOWN_MAILBOX
 
   let original: MessageContent | null = null
+  let thread: { inReplyTo: string; references: string[] } | null = null
   if (input.replyTo) {
     original = await fetchContent(input.replyTo)
     if (!original) return fail('not-found', 'The message you’re replying to isn’t there any more.')
+    if (original.messageId) thread = { inReplyTo: original.messageId, references: referencesFor(original) }
+  } else if (input.draft) {
+    // A reply saved as a draft keeps its place in the thread when it's finished and sent.
+    const draft = await fetchContent(input.draft)
+    if (draft?.inReplyTo && /^<[^<>\s]+>$/.test(draft.inReplyTo) && !hasControlChars(draft.inReplyTo))
+      thread = {
+        inReplyTo: draft.inReplyTo,
+        references: referencesFor({ references: draft.references, messageId: null }),
+      }
   }
   const attachments: OutgoingMessage['attachments'] = []
   if (input.forward) {
@@ -505,7 +550,7 @@ async function compose(input: ComposeInput, from: string, needRecipients: boolea
     subject: input.subject.trim(),
     text: input.body.replace(/\r\n?/g, '\n'),
     attachments,
-    ...(original?.messageId && { inReplyTo: original.messageId, references: referencesFor(original) }),
+    ...(thread && { inReplyTo: thread.inReplyTo, references: thread.references }),
   }
   const problem = checkOutgoing(message, { needRecipients })
   return problem ? fail('invalid', problem) : { message, original }
@@ -513,10 +558,15 @@ async function compose(input: ComposeInput, from: string, needRecipients: boolea
 
 /** Remove the draft a sent or re-saved message replaces, if it really is a draft in Drafts. */
 async function removeOldDraft(p: ImapMailProvider, draft: MessageRef | undefined): Promise<void> {
-  const drafts = mailboxFor('drafts')
-  if (!draft || draft.mailbox !== drafts) return
+  const drafts = await specialMailbox(p, 'drafts')
+  if (!draft || !drafts || draft.mailbox !== drafts) return
   if (await p.deleteDraft(drafts, draft.uid)) mailStore().deleteMessages(drafts, [draft.uid])
 }
+
+const listed = (addresses: string[]) =>
+  addresses.length > 3
+    ? `${addresses.slice(0, 3).join(', ')} and ${addresses.length - 3} more`
+    : addresses.join(', ')
 
 /**
  * Send a message through iCloud SMTP, then keep a copy in Sent, mark the original answered and
@@ -532,10 +582,17 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
   return changing('sending an email', async () => {
     const built = await compose(data, account.email, true)
     if ('ok' in built) return built
-    let sent: { sentCopy: Buffer }
+    let sent: { sentCopy: Buffer; rejected: string[] }
     try {
       sent = await sendMessage(smtpConfig(account.email, account.password), built.message)
     } catch (err) {
+      if (err instanceof RecipientsRefused)
+        return fail(
+          'invalid',
+          err.recipients.length
+            ? `iCloud refused ${listed(err.recipients)}. Check the addresses. Nothing was sent.`
+            : 'iCloud refused the recipients. Check the addresses. Nothing was sent.',
+        )
       const e = err as { code?: string; message?: string }
       if (err instanceof MailAuthError || e.code === 'EAUTH' || /\b(535|534)\b/.test(String(e.message)))
         return fail(
@@ -550,8 +607,9 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
     for (const id of data.attachments) picked.delete(id)
     // Sent. Everything after this is tidying up: report problems as a warning, never as a failure.
     const warnings: string[] = []
+    if (sent.rejected.length) warnings.push(`iCloud refused ${listed(sent.rejected)}, so they won’t get it.`)
     await withImap(async (p) => {
-      const sentBox = mailboxFor('sent')
+      const sentBox = await specialMailbox(p, 'sent')
       if (!sentBox) warnings.push('There’s no Sent mailbox, so no copy was kept.')
       else
         await p.append(sentBox, sent.sentCopy, ['\\Seen']).catch(() => {
@@ -563,28 +621,38 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
       }
       await removeOldDraft(p, data.draft).catch(() => {})
     }).catch(() => warnings.push('Ordo couldn’t keep a copy in Sent.'))
-    return { ok: true, ...(warnings.length && { warning: `Sent. ${warnings[0]}` }) }
+    return { ok: true, ...(warnings.length && { warning: `Sent. ${warnings.join(' ')}` }) }
   })
 }
 
 /** Save the message to Drafts, replacing the version saved before. */
-export async function saveDraft(input: unknown): Promise<MailOutcome<{ draft: MessageRef | null }>> {
+export async function saveDraft(
+  input: unknown,
+): Promise<MailOutcome<{ draft: MessageRef | null; attachments: AttachmentInfo[] }>> {
   const parsed = ComposeSchema.safeParse(input)
   if (!parsed.success) return INVALID
   const account = loadAccount()
   if (!account) return NO_ACCOUNT
-  const drafts = mailboxFor('drafts')
-  if (!drafts) return fail('unavailable', 'This account has no Drafts mailbox.')
   const data = parsed.data
   return changing('saving a draft', async () => {
+    const drafts = await withImap((p) => specialMailbox(p, 'drafts'))
+    if (!drafts) return fail('unavailable', 'This account has no Drafts mailbox.')
     const built = await compose(data, account.email, false)
     if ('ok' in built) return built
     const { raw } = await buildMessage(built.message, { keepBcc: true })
-    return withImap(async (p) => {
-      const saved = await p.append(drafts, raw, ['\\Draft', '\\Seen'])
-      await removeOldDraft(p, data.draft).catch(() => {})
-      return { ok: true, draft: saved.uid ? { mailbox: drafts, uid: saved.uid } : null }
+    const saved = await withImap(async (p) => {
+      const s = await p.append(drafts, raw, ['\\Draft', '\\Seen'])
+      // Its attachments now live in the new draft: only then can the old one go.
+      if (s.uid) await removeOldDraft(p, data.draft).catch(() => {})
+      return s
     })
+    // Without a UID the window keeps its own copies of the files and the old draft stays.
+    if (!saved.uid) return { ok: true, draft: null, attachments: [] }
+    for (const id of data.attachments) picked.delete(id)
+    const draft = { mailbox: drafts, uid: saved.uid }
+    // The window carries the attachments on from the new draft, so a second save or a send finds them.
+    const content = await withImap((p) => p.fetchMessage(drafts, saved.uid!)).catch(() => null)
+    return { ok: true, draft, attachments: content?.attachments.filter((a) => !a.inline) ?? [] }
   })
 }
 

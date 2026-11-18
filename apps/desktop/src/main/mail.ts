@@ -171,9 +171,35 @@ export async function connect(input: ConnectInput): Promise<ConnectResult> {
   return { ok: true, email: result.email }
 }
 
+/** Scans and syncs still running, so disconnecting can wait for them before clearing the cache. */
+const inflight = new Set<Promise<unknown>>()
+const stoppers = new Set<() => void>()
+
+/**
+ * Track a piece of mail work that writes to the cache: `stop` is called when the account is
+ * disconnected, and disconnecting waits for the work to settle before clearing the cache.
+ */
+export function trackMailWork<T>(work: Promise<T>, stop?: () => void): Promise<T> {
+  inflight.add(work)
+  if (stop) stoppers.add(stop)
+  const done = () => {
+    inflight.delete(work)
+    if (stop) stoppers.delete(stop)
+  }
+  work.then(done, done)
+  return work
+}
+
+/** The longest disconnecting waits for running work before clearing anyway. */
+const DISCONNECT_WAIT_MS = 10_000
+
 export async function disconnect(): Promise<void> {
   running?.abort()
+  for (const stop of stoppers) stop()
   deleteAccount()
+  // A sync that was running would otherwise write old mail into the cache after it's cleared.
+  const pending = [...inflight].map((p) => p.catch(() => {}))
+  await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, DISCONNECT_WAIT_MS))])
   mailStore().clear()
 }
 
@@ -195,8 +221,8 @@ export async function scan(
   if (changing) return { ok: false, error: 'busy', message: 'Wait for the clean-up to finish.' }
   const ctrl = (running = new AbortController())
   try {
-    const result = await withWriteLock('scanning the inbox', () =>
-      fetchHeaders(a, ctrl.signal, onProgress, then),
+    const result = await trackMailWork(
+      withWriteLock('scanning the inbox', () => fetchHeaders(a, ctrl.signal, onProgress, then)),
     )
     return result instanceof Locked ? { ok: false, error: 'locked', message: result.message } : result
   } finally {

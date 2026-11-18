@@ -159,7 +159,10 @@ export interface MailApi {
   /** Send a message. The preload only passes this on from a click. */
   send(input: ComposeInput): Promise<MailOutcome<{ warning?: string }>>
   /** Save to Drafts, replacing the earlier version. */
-  saveDraft(input: ComposeInput): Promise<MailOutcome<{ draft: MessageRef | null }>>
+  /** Its attachments are those of the new draft, to carry on from (the old one is gone). */
+  saveDraft(
+    input: ComposeInput,
+  ): Promise<MailOutcome<{ draft: MessageRef | null; attachments: AttachmentInfo[] }>>
 }
 
 export const MAIL_IPC = {
