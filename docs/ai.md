@@ -126,16 +126,21 @@ Nothing else fills a placeholder: not categories, account names, reasons or note
 The model writes no numbers at all. After the placeholders are taken out, an answer is refused if it
 has any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`), a number in words next
 to a money word (`five hundred pounds`, `one pound`, `twenty quid`, `a grand`, `GBP seventy`), or a
-number word on its own (`seventy`, `three hundred`, `a dozen`, `k`). Only "one", "half", "few" and
+number or scale word on its own (`seventy`, `three hundred`, `a dozen`, `k`, `bn`, `lakh`,
+`crore`, `score`, `gross`). Only "one", "half", "few" and
 "couple" are allowed on their own, because plain English needs them.
 
-A placeholder must stand apart from the model's words: before it, only the start, a space or an
-opening bracket or quote; after it, the end, a space, sentence punctuation followed by a space, or a
-possessive `'s`. So `£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.a}}.5`, `{{r1.total}}k`,
-`{{r1.total}}-odd` and `x{{r1.total}}` are refused, as is a multiplier word right after one
-(`{{r1.total}} thousand`, `grand`, `million`). So is a placeholder that points at nothing. Then the
-filled-in answer is checked once more, with the amounts, counts and dates Ordo filled in blanked
-out, so names and the model's words together can't spell an amount either.
+A placeholder must stand apart from the model's words. Before it: only the start, a space or an
+opening bracket or quote. After an amount, count or date: only the end, sentence punctuation
+(`. , ; : ! ? ) —`) followed by a space, or a space and then a word from a short allowlist (on, in,
+for, from, to, and, or, back, out, net, each, per, so, after, of, at, since, by, payments, days and
+a few more). It is an allowlist because a list of scale words (thousand, bn, lakh, crore, score…)
+can never be complete. After a name: the end, a space, punctuation, or a possessive `'s`. So
+`£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.total}}k`, `{{r1.total}}-odd`, `x{{r1.total}}` and
+`{{r1.total}} thousand` are all refused, as is a placeholder that points at nothing. Whether a value
+is a number is decided by the value, not the key: `from` holding a name is a name. Then the
+filled-in answer is checked once more with only the amounts, counts and dates blanked out, so names
+and the model's words together can't spell an amount either.
 
 The same rules apply to a clarifying question and its options, which may not contain placeholders at
 all. A suggested fact's label is the model's words too: one with an amount or a placeholder is
