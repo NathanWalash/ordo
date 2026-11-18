@@ -34,12 +34,14 @@ const isMac = process.platform === 'darwin'
 const isWin = process.platform === 'win32'
 
 /**
- * Tests (unpackaged builds only): run as a background app whose window is never shown. On macOS
- * that means no Dock icon and never becoming the active app, so a test run doesn't pull the person
- * away from what they're doing. The window still loads and paints off-screen, so Playwright can
- * drive and screenshot it. `ORDO_E2E_SHOW=1` in the test runner turns this off to watch a run.
+ * Tests (unpackaged builds only): run without pulling the person away from what they're doing.
+ * On macOS Ordo is a background app (no Dock icon, never active) whose window is never shown; it
+ * still loads and paints, so Playwright can drive and screenshot it. Windows and Linux crash when
+ * Playwright drags over a hidden window, so there it's shown without taking focus instead.
+ * `ORDO_E2E_SHOW=1` in the test runner turns this off to watch a run.
  */
 const quietTest = !app.isPackaged && process.env['ORDO_TEST_BACKGROUND'] === '1'
+const hiddenWindow = quietTest && isMac
 /** No Dock icon and never the active app. Set before `ready`, so Ordo never takes focus at launch. */
 const keepInBackground = () => {
   if (isMac) app.setActivationPolicy('accessory')
@@ -73,7 +75,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     // A quiet test run keeps the window hidden for good, so it must paint and run timers anyway.
-    ...(quietTest && { paintWhenInitiallyHidden: true }),
+    ...(hiddenWindow && { paintWhenInitiallyHidden: true }),
     title: 'Ordo',
     // Transparent so the native material (macOS vibrancy / Windows Mica) shows through the sidebar.
     backgroundColor: '#00000000',
@@ -93,11 +95,11 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      ...(quietTest && { backgroundThrottling: false }),
+      ...(hiddenWindow && { backgroundThrottling: false }),
     },
   })
 
-  if (!quietTest) win.once('ready-to-show', () => win.show())
+  if (!hiddenWindow) win.once('ready-to-show', () => (quietTest ? win.showInactive() : win.show()))
 
   // Never let web content open windows or navigate the app away; send https links to the browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
