@@ -38,6 +38,22 @@ const more = (d: { total: number; offset: number; shown: number }, what: string)
     ? `\n…and ${d.total - d.offset - d.shown} more ${what}. Use --limit to see more.`
     : ''
 
+/** "2026-11-20 09:00 – 10:00 Europe/London, weekly" for a changed event. */
+function describe(e: {
+  allDay: boolean
+  start: string
+  end: string
+  timeZone: string | null
+  repeat: { frequency: string } | null
+}): string {
+  const span = e.allDay
+    ? e.start === e.end
+      ? `${e.start}, all day`
+      : `${e.start} to ${e.end}, all day`
+    : `${e.start.replace('T', ' ')} – ${e.end.slice(0, 10) === e.start.slice(0, 10) ? e.end.slice(11) : e.end.replace('T', ' ')}${e.timeZone ? ` ${clean(e.timeZone, 40)}` : ''}`
+  return e.repeat ? `${span}, ${e.repeat.frequency}` : span
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- the data shapes come from commands.ts */
 const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
   status: (d) =>
@@ -148,6 +164,29 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
             e.calendar ? `(${clean(e.calendar, 30)})` : '',
           ]),
         ) + more(d, 'events'),
+
+  'calendar list': (d) =>
+    d.calendars.length === 0
+      ? 'No calendars yet. Run `calendar sync` first.'
+      : table(
+          d.calendars.map((c: any) => [
+            clean(c.name, 40),
+            c.source === 'icloud' ? 'iCloud' : c.source === 'link' ? 'link' : 'file',
+            c.readOnly ? 'read-only' : 'writable',
+            c.visible ? '' : 'hidden',
+          ]),
+        ),
+
+  'calendar add': (d) =>
+    `Added “${clean(d.event.title, 60)}” to ${clean(d.calendar, 40)} (${describe(d.event)}).`,
+
+  'calendar edit': (d) =>
+    `Changed “${clean(d.event.title, 60)}”${d.scope === 'this' ? ' (this event only)' : ''}: ${describe(d.event)}.`,
+
+  'calendar delete': (d) =>
+    d.scope === 'this'
+      ? `Deleted one occurrence of “${clean(d.title, 60)}”.`
+      : `Deleted “${clean(d.title, 60)}”.`,
 
   'money bills': (d) =>
     d.bills.length === 0 && d.toReview.length === 0
@@ -268,6 +307,15 @@ Mail:
 Calendar:
   calendar sync                                 Fetch changed calendars
   calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]
+  calendar list                                 Calendars, and which can be changed
+  calendar add --calendar <name> --title <t> --start <when> [--end <when>] --confirm *
+          [--time-zone <zone>] [--location <l>] [--notes <n>] [--alert <minutes>]
+          [--repeat daily|weekly|monthly|yearly [--until YYYY-MM-DD | --count <n>]]
+  calendar edit --uid <uid> [--occurrence <id> | --all] <fields to change> --confirm *
+  calendar delete --uid <uid> [--occurrence <id> | --all] --confirm *
+                                                <when> is a day (2026-11-20, all day) or a
+                                                time (2026-11-20T09:30). Uids and occurrence
+                                                ids are in calendar events --json.
 
 Money:
   money bills                                   Bills and subscriptions

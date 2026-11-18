@@ -169,6 +169,18 @@ export function createMcpServer(
   )
 
   server.registerTool(
+    'ordo_calendar_list',
+    {
+      description:
+        'The user’s calendars: id, name, where each comes from (iCloud, a link or a file) and whether it is ' +
+        'read-only. Only writable iCloud calendars take new or changed events. ' +
+        UNTRUSTED,
+      annotations: readOnly,
+    },
+    () => call('calendar list', {}),
+  )
+
+  server.registerTool(
     'ordo_bills',
     {
       description:
@@ -305,6 +317,121 @@ export function createMcpServer(
       annotations: changes,
     },
     ({ confirm: yes }) => call('money sort', { confirm: yes }),
+  )
+
+  const day = 'A day YYYY-MM-DD (all-day event) or a local time YYYY-MM-DDTHH:MM in timeZone'
+  const eventFields = {
+    title: z.string().max(500).optional().describe('Title'),
+    start: z.string().max(16).optional().describe(`Start: ${day}`),
+    end: z
+      .string()
+      .max(16)
+      .optional()
+      .describe('End, in the same form as start (all-day: the last day). Default: an hour, or one day'),
+    timeZone: z
+      .string()
+      .max(64)
+      .optional()
+      .describe('IANA zone such as Europe/London (default: this computer’s)'),
+    location: z.string().max(1000).optional(),
+    notes: z.string().max(10_000).optional(),
+    until: z.string().max(10).optional().describe('Last day a repeat can happen, YYYY-MM-DD'),
+    count: z.number().int().min(1).max(1000).optional().describe('Or how many times it happens in all'),
+    alert: z
+      .number()
+      .int()
+      .nullable()
+      .optional()
+      .describe('Alert this many minutes before the start; null for none'),
+  }
+  const flags = (f: {
+    title?: string
+    start?: string
+    end?: string
+    timeZone?: string
+    location?: string
+    notes?: string
+    until?: string
+    count?: number
+    alert?: number | null
+  }) => ({
+    title: f.title,
+    start: f.start,
+    end: f.end,
+    'time-zone': f.timeZone,
+    location: f.location,
+    notes: f.notes,
+    until: f.until,
+    count: f.count,
+    alert: f.alert === null ? 'none' : f.alert,
+  })
+  const which = {
+    uid: z.string().min(1).max(1024).describe('The event’s uid, from ordo_calendar_events'),
+    occurrence: z
+      .string()
+      .max(40)
+      .optional()
+      .describe('For one occurrence of a repeating event: its occurrence id, from ordo_calendar_events'),
+    all: z.boolean().default(false).describe('For a repeating event: change every occurrence'),
+    calendar: z.string().max(2048).optional().describe('Calendar name or id, if the uid is in more than one'),
+  }
+
+  server.registerTool(
+    'ordo_calendar_add',
+    {
+      description:
+        'Add an event to one of the user’s writable iCloud calendars (see ordo_calendar_list). ' +
+        'Optionally repeating daily, weekly, monthly or yearly, until a day or for a number of times. ' +
+        CHANGE,
+      inputSchema: {
+        calendar: z.string().min(1).max(2048).describe('Calendar name or id, from ordo_calendar_list'),
+        ...eventFields,
+        title: z.string().max(500).describe('Title'),
+        start: z.string().max(16).describe(`Start: ${day}`),
+        repeat: z.enum(['daily', 'weekly', 'monthly', 'yearly']).optional(),
+        confirm,
+      },
+      annotations: changes,
+    },
+    ({ calendar, repeat, confirm: yes, ...f }) =>
+      call('calendar add', { ...flags(f), calendar, repeat, confirm: yes }),
+  )
+
+  server.registerTool(
+    'ordo_calendar_edit',
+    {
+      description:
+        'Change an event on a writable iCloud calendar. Give only the fields to change. For a repeating event, ' +
+        'give occurrence to change just that one (“this event only”), or all: true for every occurrence; the ' +
+        'series then moves by as much as that occurrence moved. If the event was changed elsewhere since Ordo ' +
+        'last synced, nothing is overwritten and the result is the error code "conflict". ' +
+        CHANGE +
+        ' ' +
+        UNTRUSTED,
+      inputSchema: {
+        ...which,
+        ...eventFields,
+        repeat: z.enum(['daily', 'weekly', 'monthly', 'yearly', 'none']).optional(),
+        confirm,
+      },
+      annotations: changes,
+    },
+    ({ uid, occurrence, all, calendar, repeat, confirm: yes, ...f }) =>
+      call('calendar edit', { ...flags(f), uid, occurrence, all, calendar, repeat, confirm: yes }),
+  )
+
+  server.registerTool(
+    'ordo_calendar_delete',
+    {
+      description:
+        'Delete an event from a writable iCloud calendar. For a repeating event, give occurrence to delete just ' +
+        'that one, or all: true to delete the whole series. This can’t be undone in Ordo. ' +
+        CHANGE,
+      inputSchema: { ...which, confirm },
+      annotations: changes,
+    },
+    ({ uid, occurrence, all, calendar, confirm: yes }) =>
+      call('calendar delete', { uid, occurrence, all, calendar, confirm: yes }),
   )
 
   server.registerTool(

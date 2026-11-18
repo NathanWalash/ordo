@@ -310,6 +310,18 @@ export class CalendarStore {
     })
   }
 
+  /** The calendars with a cached event `uid` (normally one), in list order. */
+  calendarsWithEvent(uid: string): string[] {
+    const rows = this.db
+      .prepare(
+        'SELECT c.id FROM calendars c WHERE EXISTS (SELECT 1 FROM events e WHERE e.calendar_id = c.id AND e.uid = ?) ' +
+          'OR EXISTS (SELECT 1 FROM resources r WHERE r.calendar_id = c.id AND r.uid = ?) ' +
+          `ORDER BY c.provider = '${FEEDS}', c.position`,
+      )
+      .all(uid, uid) as { id: string }[]
+    return rows.map((r) => r.id)
+  }
+
   /** The cached CalDAV resources holding event `uid` (normally one). */
   resources(calendarId: string, uid: string): CalendarResource[] {
     const rows = this.db

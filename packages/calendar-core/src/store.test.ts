@@ -267,6 +267,13 @@ describe('CalendarStore resources', () => {
     expect(store.resources('home', 'a')).toEqual([])
   })
 
+  it('finds which calendars hold an event', () => {
+    store.replaceEvents('home', [at('a', 2)], WINDOW, 'v1', [res('a')])
+    store.replaceEvents('work', [ev({ ...at('a', 2), calendarId: 'work' })], WINDOW, 'w1')
+    expect(store.calendarsWithEvent('a')).toEqual(['home', 'work'])
+    expect(store.calendarsWithEvent('zzz')).toEqual([])
+  })
+
   it('says which provider owns a calendar', () => {
     expect(store.calendar('home')).toMatchObject({ name: 'Home', provider: 'icloud', readOnly: false })
     expect(store.calendar('nope')).toBeNull()

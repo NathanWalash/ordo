@@ -142,6 +142,9 @@ describe('commandFrom', () => {
 it('marks exactly the commands that change data', () => {
   expect([...CHANGE_COMMANDS].sort()).toEqual([
     'ai sort',
+    'calendar add',
+    'calendar delete',
+    'calendar edit',
     'cleanup run',
     'money import',
     'money sort',

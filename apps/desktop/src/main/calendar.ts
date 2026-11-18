@@ -215,6 +215,12 @@ async function fetchCalendars(
 
 // ---- Creating, changing and deleting events -------------------------------------------------
 
+/** The calendars with a cached event `uid`, for headless commands that name an event by its UID. */
+export function locateEvent(uid: string): string[] {
+  account()
+  return openStore().calendarsWithEvent(uid)
+}
+
 /** An event's details for the editor, and whether Ordo can change it. */
 export function eventDetails(input: unknown): EventDetails | null {
   const parsed = EventRefSchema.safeParse(input)
