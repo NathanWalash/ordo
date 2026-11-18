@@ -7,6 +7,7 @@ import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
+import { registerAssistantIpc, stop as stopAssistant } from './assistant'
 import { closeMoney, registerMoneyIpc } from './money'
 import { releaseWriteLock, toRenderer } from './writes'
 import { headlessArgs } from './headless/args'
@@ -129,6 +130,8 @@ function startApp(): void {
     setupAppearance()
     initAi()
     registerAiIpc()
+    registerAssistantIpc()
+    app.on('before-quit', stopAssistant)
     createWindow()
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
