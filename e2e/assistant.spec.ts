@@ -193,9 +193,11 @@ test('opens from the toolbar and the keyboard, with prompts for the page', async
 test('sits beside wide content, and over narrow content', async () => {
   const contentRight = () =>
     page.evaluate(() => getComputedStyle(document.querySelector('main > div.absolute')!).right)
+  // CI runners' screens can be smaller than the default window, so set a wide one first.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1240, 860))
   await page.keyboard.press(`${mod}+k`)
   await expect(panel()).toBeVisible()
-  expect(await contentRight()).toBe('404px')
+  await expect.poll(contentRight).toBe('404px')
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(940, 860))
   await expect.poll(contentRight).toBe('0px')
   await page.screenshot({ path: 'test-results/assistant-overlay-light.png', animations: 'disabled' })
