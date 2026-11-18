@@ -12,19 +12,95 @@ export const CATEGORIES: readonly Category[] = [
   'uncategorised',
 ]
 
+/** An email address with an optional display name. */
+export interface Address {
+  address: string
+  name?: string
+}
+
 /** Header-only view of a message, as fetched during a scan. */
 export interface MessageHeader {
   uid: number
   mailbox: string
   date: Date
   seen: boolean
-  from: { address: string; name?: string }
+  from: Address
   subject: string
   listId?: string
   listUnsubscribe?: string
   listUnsubscribePost?: string
   precedence?: string
   autoSubmitted?: string
+  /** Flagged (\Flagged). Missing on headers cached before the mail client existed. */
+  flagged?: boolean
+  /** Replied to (\Answered). */
+  answered?: boolean
+  to?: Address[]
+  cc?: Address[]
+  messageId?: string
+  /** The message probably has attachments (multipart/mixed). A hint for the list, not a promise. */
+  hasAttachments?: boolean
+}
+
+/** What a mailbox is for, from its SPECIAL-USE flag (or its name, when the server has none). */
+export type MailboxRole = 'inbox' | 'drafts' | 'sent' | 'archive' | 'junk' | 'trash'
+
+export const MAILBOX_ROLES: readonly MailboxRole[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash']
+
+/** A folder on the server. */
+export interface MailboxInfo {
+  /** The full IMAP path, e.g. `INBOX` or `Projects/2026`. */
+  path: string
+  /** The last part of the path, for display. */
+  name: string
+  role: MailboxRole | null
+  delimiter: string
+  /** Messages and unread messages, from STATUS when the list was fetched. */
+  total: number
+  unread: number
+}
+
+/** A file attached to a message (or an inline image). */
+export interface AttachmentInfo {
+  /** IMAP body part number, e.g. `2` or `1.2`. */
+  part: string
+  filename: string
+  contentType: string
+  /** Encoded size reported by the server, in bytes (roughly a third more than the file). */
+  size: number
+  /** Content-ID, for inline images the HTML refers to as `cid:`. */
+  contentId?: string
+  /** Shown inside the message rather than listed as a file. */
+  inline: boolean
+}
+
+/** A message read from the server: headers, body text and attachment list. */
+export interface MessageContent {
+  mailbox: string
+  uid: number
+  date: Date
+  subject: string
+  from: Address | null
+  to: Address[]
+  cc: Address[]
+  replyTo: Address[]
+  messageId: string | null
+  /** In-Reply-To and References, oldest first, for threading a reply. */
+  references: string[]
+  seen: boolean
+  flagged: boolean
+  answered: boolean
+  draft: boolean
+  /** The plain-text body, if the message has one. */
+  text: string | null
+  /** The HTML body, untouched. Never show it without sanitising it first. */
+  html: string | null
+  /** The body was cut short at Ordo's size limit. */
+  truncated: boolean
+  /** Files and inline images. */
+  attachments: AttachmentInfo[]
+  /** Inline images the HTML refers to, as data: URIs by Content-ID (without angle brackets). */
+  inlineImages: Record<string, string>
 }
 
 export type UnsubscribeMethod =
@@ -60,7 +136,7 @@ export interface MailboxStatus {
   uidValidity: string
 }
 
-export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk'
+export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk' | '\\Drafts' | '\\Archive'
 
 /** Where moved messages ended up. */
 export interface MoveResult {

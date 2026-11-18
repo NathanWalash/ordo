@@ -77,7 +77,7 @@ export const MAILTO_BODY_MAX = 500
 /** At most this many unsubscribe emails go out in one clean-up. */
 export const MAILTO_PER_CLEANUP_MAX = 50
 
-const ADDRESS =
+export const EMAIL_ADDRESS =
   /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/
 /** Any C0 control character or DEL, including CR and LF. */
 export function hasControlChars(s: string): boolean {
@@ -105,7 +105,7 @@ export function parseMailto(url: string): ParsedMailto | null {
     }
   }
   const to = decode(m[1] ?? '')
-  if (!to || to.includes(',') || hasControlChars(to) || !ADDRESS.test(to)) return null
+  if (!to || to.includes(',') || hasControlChars(to) || !EMAIL_ADDRESS.test(to)) return null
   const out: ParsedMailto = { to: to.toLowerCase() }
   for (const pair of (m[2] ?? '').split('&')) {
     if (!pair) continue
