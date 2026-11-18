@@ -123,7 +123,11 @@ export async function view(): Promise<MemoryView> {
       text: q.text,
       ...(q.detail && { detail: q.detail }),
       ...(q.confidence && { confidence: q.confidence }),
-      answers: q.answers.map((a) => ({ id: a.id, label: a.label })),
+      answers: q.answers.map((a) => ({
+        id: a.id,
+        label: a.label,
+        ...(a.addPerson && { addsPerson: a.addPerson }),
+      })),
     })),
     held: heldBalances(d.transactions, d.ledger, d.facts),
     owed: owedToYou(d.transactions, d.facts, d.ledger),

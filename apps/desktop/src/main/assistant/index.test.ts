@@ -319,3 +319,100 @@ describe('cloud consent for the assistant', () => {
     expect(await ask({ text: 'hi', page: 'home' }, asWc(window()))).toMatchObject({ ok: true })
   })
 })
+
+describe('money details in history and mid-run', () => {
+  const cloud: AiSettings = {
+    ...local,
+    provider: 'claude-cli',
+    model: 'haiku',
+    cloudConsent: 'claude-cli',
+    moneyDetailsConsent: 'claude-cli',
+  }
+  /** Read loose ends, then answer with a marker that stands for names and amounts from it. */
+  const looseEndsThenAnswer = () => (req: CompleteRequest) =>
+    req.prompt.includes('<step n="1">')
+      ? { type: 'answer', text: 'You hold MONEY-SECRET for Patrick.' }
+      : { type: 'tool', tool: 'ordo_money_loose_ends', args: {} }
+
+  it('turns that used money tools under a local model never go to a cloud model', async () => {
+    model(looseEndsThenAnswer())
+    expect(await ask({ text: 'what am I holding?', page: 'home' }, asWc(window()))).toMatchObject({
+      ok: true,
+    })
+    expect(currentHistory()).toHaveLength(1)
+    state.settings = cloud
+    const requests = model(() => ({ type: 'answer', text: 'ok' }), 'cloud')
+    setCloudConsent({ allow: true })
+    await ask({ text: 'and now?', page: 'home' }, asWc(window()))
+    expect(requests.at(-1)!.prompt).not.toContain('MONEY-SECRET')
+    setCloudConsent({ allow: false })
+  })
+
+  it('turning the Money details consent off drops those turns before the next question', async () => {
+    state.settings = cloud
+    model(looseEndsThenAnswer(), 'cloud')
+    setCloudConsent({ allow: true })
+    await ask({ text: 'what am I holding?', page: 'home' }, asWc(window()))
+    expect(currentHistory()).toHaveLength(1)
+    state.settings = { ...cloud, moneyDetailsConsent: null }
+    const requests = model(() => ({ type: 'answer', text: 'ok' }), 'cloud')
+    await ask({ text: 'and now?', page: 'home' }, asWc(window()))
+    expect(requests.at(-1)!.prompt).not.toContain('MONEY-SECRET')
+    setCloudConsent({ allow: false })
+  })
+
+  it('history stays when nothing changed', async () => {
+    model(() => ({ type: 'answer', text: 'First answer.' }))
+    await ask({ text: 'one', page: 'home' }, asWc(window()))
+    const requests = model(() => ({ type: 'answer', text: 'ok' }))
+    await ask({ text: 'two', page: 'home' }, asWc(window()))
+    expect(requests.at(-1)!.prompt).toContain('First answer.')
+  })
+
+  it('consent taken back mid-run stops before a money tool runs and before its data goes anywhere', async () => {
+    state.settings = cloud
+    const requests = model(() => {
+      // While the model is answering, the user turns the Money details consent off.
+      state.settings = { ...cloud, moneyDetailsConsent: null }
+      return { type: 'tool', tool: 'ordo_money_loose_ends', args: {} }
+    }, 'cloud')
+    setCloudConsent({ allow: true })
+    const w = window()
+    expect(await ask({ text: 'what am I holding?', page: 'home' }, asWc(w))).toMatchObject({
+      ok: false,
+      reason: 'consent',
+    })
+    expect(requests).toHaveLength(1)
+    expect(w.events.some((e) => e.type === 'tool' && e.status === 'done')).toBe(false)
+    setCloudConsent({ allow: false })
+  })
+
+  it('the assistant consent taken back mid-run stops before any tool runs', async () => {
+    state.settings = cloud
+    const requests = model(() => {
+      setCloudConsent({ allow: false })
+      return { type: 'tool', tool: 'ordo_bills', args: {} }
+    }, 'cloud')
+    setCloudConsent({ allow: true })
+    expect(await ask({ text: 'bills?', page: 'home' }, asWc(window()))).toMatchObject({
+      ok: false,
+      reason: 'consent',
+    })
+    expect(requests).toHaveLength(1)
+  })
+
+  it('a change confirmed after the consent was taken back doesn’t run', async () => {
+    state.settings = cloud
+    model(() => ({ type: 'tool', tool: 'ordo_money_forget', args: { fact: 'f1' } }), 'cloud')
+    setCloudConsent({ allow: true })
+    const w = window()
+    const done = ask({ text: 'forget the Gabe fact', page: 'home' }, asWc(w))
+    const id = await cardOn(w)
+    state.settings = { ...cloud, moneyDetailsConsent: null }
+    confirm({ id, approve: true }, asWc(w))
+    expect(await done).toMatchObject({ ok: false, reason: 'consent' })
+    const { mainServices } = await import('../headless/services')
+    expect(mainServices().money.forget).not.toHaveBeenCalled()
+    setCloudConsent({ allow: false })
+  })
+})

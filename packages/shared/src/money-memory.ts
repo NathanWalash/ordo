@@ -95,7 +95,8 @@ export interface QuestionView {
   text: string
   detail?: string
   confidence?: MatchConfidence
-  answers: { id: string; label: string }[]
+  /** `addsPerson`: choosing it also adds this person to Bills (Ordo's own data, for the card). */
+  answers: { id: string; label: string; addsPerson?: string }[]
 }
 
 export interface MemoryView {

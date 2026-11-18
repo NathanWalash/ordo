@@ -883,6 +883,7 @@ export const TOOLS: readonly OrdoTool[] = [
           remembers
             ? 'Ordo saves what this answer means. You can forget it on Money → Ask Ordo.'
             : 'Ordo won’t ask this again. Nothing else changes.',
+          ...(choice.addsPerson ? [`Adds ${clean(choice.addsPerson, 40)} to Bills.`] : []),
         ],
       }
     },
@@ -903,7 +904,8 @@ export const TOOLS: readonly OrdoTool[] = [
     staleMessage: 'That fact has changed or been forgotten since. Nothing was changed.',
     // Ordo's own sentence for the fact.
     async preview(services, a) {
-      const f = (await services.money.memory()).facts.find((x) => x.id === a.fact)
+      const view = await services.money.memory()
+      const f = view.facts.find((x) => x.id === a.fact)
       if (!f)
         return {
           title: 'Forget something Ordo learned',
@@ -911,14 +913,23 @@ export const TOOLS: readonly OrdoTool[] = [
           notes: [],
           blocked: 'Ordo doesn’t know that fact any more.',
         }
+      let note = 'Ordo will work things out without it, and may ask about it again.'
+      if (f.kind === 'event') {
+        // The same rule as forgetting: a payback for the event that names no payments of its own is
+        // pointed at the event's payments, and only goes too when the event has none.
+        const payments = view.events.find((e) => e.id === f.id)?.outgoings.length ?? 0
+        const lost = view.facts.filter(
+          (x) => x.kind === 'payback' && x.eventId === f.id && x.outIds.length === 0,
+        ).length
+        note =
+          lost && !payments
+            ? `The event has no payments to link them to, so ${plural(lost, 'payback')} for it ${lost === 1 ? 'is' : 'are'} forgotten too.`
+            : 'Paybacks and money owed for this event are kept, linked to its payments instead.'
+      }
       return {
         title: 'Forget something Ordo learned',
         details: [clean(f.summary, 300)],
-        notes: [
-          f.kind === 'event'
-            ? 'Paybacks and money owed for this event are kept, linked to its payments instead.'
-            : 'Ordo will work things out without it, and may ask about it again.',
-        ],
+        notes: [note],
       }
     },
   }),

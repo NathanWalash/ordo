@@ -48,6 +48,8 @@ export const assistantTools = (withoutMoneyDetails: boolean) =>
   withoutMoneyDetails ? TOOLS.filter((t) => !t.moneyDetails) : TOOLS
 
 let history: Turn[] = []
+/** The provider and consents the stored turns were answered under; a change forgets them. */
+let historyFor = ''
 let running: AbortController | null = null
 /** The window that asked the current question: only it may answer its cards. */
 let owner: WebContents | null = null
@@ -153,6 +155,25 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
       message: `The assistant needs your OK before it sends anything to ${providerInfo(provider.id).vendor}.`,
     }
 
+  // Earlier turns only go to a model under the same provider and consents they were answered under.
+  const context = JSON.stringify([ai.provider, readConsent(), ai.moneyDetailsConsent])
+  if (context !== historyFor) {
+    history = []
+    historyFor = context
+  }
+  const noMoneyDetails = provider.kind === 'cloud' && !moneyDetailsAllowed(ai)
+  /** Checked before every tool runs: the provider and consents must still be what they were. */
+  const allowed = (tool: { moneyDetails?: boolean }): string | null => {
+    const now = aiSettings()
+    if (now.provider !== ai.provider || !usableProvider(now))
+      return 'The AI provider changed while answering, so Ordo stopped. Ask again.'
+    if (provider.kind === 'cloud' && readConsent() !== now.provider)
+      return `You took back the assistant’s OK for ${providerInfo(provider.id).vendor}, so Ordo stopped. Nothing more was sent.`
+    if (tool.moneyDetails && provider.kind === 'cloud' && !moneyDetailsAllowed(now))
+      return 'You turned off sending money details to this provider, so Ordo stopped. Nothing more was sent.'
+    return null
+  }
+
   const ctrl = (running = new AbortController())
   owner = sender
   const started = generation
@@ -186,12 +207,14 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
       }
     }
     const timeoutMs = options.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS
-    const { tainted, ...outcome } = await runAssistant({
+    const { tainted, moneyDetails, ...outcome } = await runAssistant({
       provider,
       model,
       services: mainServices(),
-      tools: assistantTools(provider.kind === 'cloud' && !moneyDetailsAllowed(ai)),
-      history,
+      tools: assistantTools(noMoneyDetails),
+      // Turns that used money memory tools never go to a cloud model without the Money details consent.
+      history: noMoneyDetails ? history.filter((t) => !t.moneyDetails) : history,
+      allowed,
       question: parsed.data.text,
       page,
       today: today(),
@@ -217,9 +240,10 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
         }).finally(() => pending.delete(id)),
     })
     if (outcome.ok && started === generation)
-      history = [...history, { user: cut(parsed.data.text), answer: cut(outcome.answer), tainted }].slice(
-        -MAX_HISTORY,
-      )
+      history = [
+        ...history,
+        { user: cut(parsed.data.text), answer: cut(outcome.answer), tainted, moneyDetails },
+      ].slice(-MAX_HISTORY)
     return outcome
   } finally {
     sender.removeListener('destroyed', gone)

@@ -158,6 +158,12 @@ export interface Turn {
   answer: string
   /** Untrusted data was read while answering, so the answer may repeat third-party text. */
   tainted: boolean
+  /**
+   * A tool returning what Ordo learned about money (exact amounts, dates, people's names) ran while
+   * answering, so the answer may repeat them. Such turns never go to a cloud model without the
+   * Money details consent.
+   */
+  moneyDetails?: boolean
 }
 
 export interface Step {

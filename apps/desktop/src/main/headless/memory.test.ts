@@ -5,7 +5,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { parseInvocation, UsageError } from './args'
 import { runCli, type CliIo } from './cli'
 import { runCommand } from './commands'
-import { fakeServices } from './fake-services'
+import { fakeServices, memoryView } from './fake-services'
 import { createMcpServer } from './mcp'
 import { previewTool, runTool, toolByName, TOOLS } from './tools'
 
@@ -261,5 +261,90 @@ describe('money memory in the shared tool registry', () => {
     expect(t('ordo_money_answer').intent!.test('yes, Gabe is my flatmate')).toBe(true)
     expect(t('ordo_money_forget').intent!.test('forget the Italy trip')).toBe(true)
     expect(t('ordo_money_forget').intent!.test('what do you know?')).toBe(false)
+  })
+
+  it('the answer card says when an answer adds someone to Bills', async () => {
+    const services = fakeServices()
+    const view = memoryView()
+    view.questions = [
+      {
+        id: 'person:genestj',
+        kind: 'person',
+        step: 'people',
+        text: 'You and Genest J have paid each other 5 times. Who is Genest J?',
+        answers: [
+          { id: 'flatmate', label: 'Flatmate', addsPerson: 'Genest J' },
+          { id: 'friend', label: 'Friend' },
+        ],
+      },
+    ]
+    services.money.memory = async () => view
+    const flatmate = await previewTool(services, t('ordo_money_answer'), {
+      question: 'person:genestj',
+      answer: 'flatmate',
+    })
+    expect(flatmate.notes).toEqual([
+      'Ordo saves what this answer means. You can forget it on Money → Ask Ordo.',
+      'Adds Genest J to Bills.',
+    ])
+    const friend = await previewTool(services, t('ordo_money_answer'), {
+      question: 'person:genestj',
+      answer: 'friend',
+    })
+    expect(friend.notes).not.toContain('Adds Genest J to Bills.')
+  })
+
+  it('the forget-event card says when a payback would be forgotten with it', async () => {
+    const services = fakeServices()
+    const view = memoryView()
+    const event = {
+      id: 'e1',
+      kind: 'event' as const,
+      name: 'Italy',
+      include: [],
+      exclude: [],
+      excludeMerchants: [],
+      from: '2026-08-28',
+      to: '2026-09-04',
+      createdAt: '2026-11-18T10:00:00.000Z',
+      source: 'you' as const,
+      summary: 'Italy from 28 Aug to 4 Sept.',
+    }
+    const payback = {
+      id: 'p1',
+      kind: 'payback' as const,
+      inId: 'luca',
+      outIds: [],
+      eventId: 'e1',
+      createdAt: '2026-11-18T10:00:00.000Z',
+      source: 'ask' as const,
+      summary: 'Luca B £5.00 on 5 Sept paid you back for Italy.',
+    }
+    view.facts = [event, payback]
+    // No payments in the event: the payback has nothing to point at, so it goes too.
+    view.events = [{ ...view.events[0]!, id: 'e1', outgoings: [] }]
+    services.money.memory = async () => view
+    expect((await previewTool(services, t('ordo_money_forget'), { fact: 'e1' })).notes).toEqual([
+      'The event has no payments to link them to, so 1 payback for it is forgotten too.',
+    ])
+    // With payments, it's kept and linked to them.
+    view.events = [
+      {
+        ...view.events[0]!,
+        outgoings: [
+          {
+            id: 'o1',
+            date: '2026-08-29',
+            account: 'Monzo',
+            name: 'Ristorante Roma',
+            amount: 8600,
+            category: 'Eating out',
+          },
+        ],
+      },
+    ]
+    expect((await previewTool(services, t('ordo_money_forget'), { fact: 'e1' })).notes).toEqual([
+      'Paybacks and money owed for this event are kept, linked to its payments instead.',
+    ])
   })
 })

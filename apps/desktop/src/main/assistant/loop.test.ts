@@ -110,6 +110,7 @@ describe('the assistant loop', () => {
       answer: 'Hello! Ask me about your mail, calendar or money.',
       steps: 0,
       tainted: false,
+      moneyDetails: false,
     })
     expect(m.requests).toHaveLength(1)
     expect(m.requests[0]!.schema).toBeDefined()
@@ -144,7 +145,13 @@ describe('the assistant loop', () => {
     })
     const s = setup(m, { services })
     const r = await s.run()
-    expect(r).toEqual({ ok: true, answer: 'Your bills come to £10.99 a month.', steps: 1, tainted: true })
+    expect(r).toEqual({
+      ok: true,
+      answer: 'Your bills come to £10.99 a month.',
+      steps: 1,
+      tainted: true,
+      moneyDetails: false,
+    })
     expect(toolEvents(s.events)).toEqual([
       expect.objectContaining({
         tool: 'ordo_bills',
@@ -313,6 +320,7 @@ describe('the assistant loop', () => {
       answer: 'Stopped. The change you confirmed was made: Added 3 transactions.',
       steps: 1,
       tainted: true,
+      moneyDetails: false,
     })
   })
 
