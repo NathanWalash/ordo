@@ -8,6 +8,7 @@ import { MailPage } from './pages/MailPage'
 import { UnclutterPage } from './pages/UnclutterPage'
 import { FinancesPage } from './pages/FinancesPage'
 import { BillsPage } from './pages/BillsPage'
+import { AskPage } from './pages/AskPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { BoardsPage } from './pages/BoardsPage'
 import { HistoryPage } from './pages/HistoryPage'
@@ -162,6 +163,7 @@ export function App() {
               <FinancesPage onOpenSettings={() => setRoute('settings')} initialMonth={financeMonth} />
             )}
             {route === 'money/bills' && <BillsPage onNavigate={setRoute} />}
+            {route === 'money/ask' && <AskPage onNavigate={setRoute} />}
             {route === 'settings' && (
               <SettingsPage
                 account={account}

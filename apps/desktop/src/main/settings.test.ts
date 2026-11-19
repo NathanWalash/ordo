@@ -92,6 +92,9 @@ describe('AI settings', () => {
       money: false,
       boards: false,
       cloudConsent: null,
+      moneyDetailsConsent: null,
+      askStyle: 'brief',
+      askClarify: true,
     })
   })
 
@@ -103,7 +106,17 @@ describe('AI settings', () => {
       cloudConsent: null,
     } as const
     writeFileSync(file, JSON.stringify({ theme: 'dark', ai: before }))
-    expect(readSettings(file)).toEqual({ theme: 'dark', ai: { ...before, money: false, boards: false } })
+    expect(readSettings(file)).toEqual({
+      theme: 'dark',
+      ai: {
+        ...before,
+        money: false,
+        boards: false,
+        moneyDetailsConsent: null,
+        askStyle: 'brief',
+        askClarify: true,
+      },
+    })
     expect(updateSettings(file, { ai: { ...before, money: true, boards: false } }).ai.money).toBe(true)
     expect(readSettings(file).ai.money).toBe(true)
   })
@@ -112,14 +125,39 @@ describe('AI settings', () => {
     const before = { ...lmStudio, money: true } as Record<string, unknown>
     delete before['boards']
     writeFileSync(file, JSON.stringify({ theme: 'dark', ai: before }))
-    expect(readSettings(file).ai).toEqual({ ...lmStudio, money: true, boards: false })
+    expect(readSettings(file).ai).toEqual({
+      ...lmStudio,
+      money: true,
+      boards: false,
+      moneyDetailsConsent: null,
+      askStyle: 'brief',
+      askClarify: true,
+    })
     expect(updateSettings(file, { ai: { ...lmStudio, boards: true } }).ai.boards).toBe(true)
     expect(readSettings(file).ai.boards).toBe(true)
   })
 
   it('saves a local provider without any consent', () => {
-    expect(updateSettings(file, { ai: lmStudio }).ai).toEqual(lmStudio)
-    expect(readSettings(file)).toEqual({ theme: 'system', ai: lmStudio })
+    const saved = { ...lmStudio, moneyDetailsConsent: null, askStyle: 'brief', askClarify: true }
+    expect(updateSettings(file, { ai: lmStudio }).ai).toEqual(saved)
+    expect(readSettings(file)).toEqual({ theme: 'system', ai: saved })
+  })
+
+  it('keeps Ask Ordo choices and the separate Money details consent', () => {
+    const claude = {
+      provider: 'claude-cli',
+      model: 'haiku',
+      sortSenders: false,
+      money: true,
+      boards: false,
+      cloudConsent: 'claude-cli',
+      moneyDetailsConsent: 'claude-cli',
+      askStyle: 'detailed',
+      askClarify: false,
+    } as const
+    expect(updateSettings(file, { ai: claude }).ai).toEqual(claude)
+    expect(readSettings(file).ai).toEqual(claude)
+    expect(() => updateSettings(file, { ai: { ...claude, askStyle: 'chatty' as never } })).toThrow()
   })
 
   it('refuses a cloud provider without consent for that provider', () => {

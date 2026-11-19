@@ -27,12 +27,12 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
 
 ## What it can do
 
-| Kind     | Tools                                                                                                                                                                     | How they run                                                      |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Read     | status, senders, clean-up plan, history, mailboxes, messages, search mail, read a message, calendars, calendar events, bills, transactions, balances, boards, board cards | Straight away. They change nothing.                               |
-| Refresh  | scan inbox, check for new mail, sync calendars                                                                                                                            | Straight away. They fetch into Ordo's cache and change no server. |
-| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card              | Only after you press **Confirm** on a card.                       |
-| Navigate | open a page (Finances can open on a month)                                                                                                                                | Straight away. It only moves the window.                          |
+| Kind     | Tools                                                                                                                                                                                                                                                                             | How they run                                                      |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Read     | status, senders, clean-up plan, history, mailboxes, messages, search mail, read a message, calendars, calendar events, bills, transactions, balances, boards, board cards, what Ordo knows about your money, its questions, loose ends, events and trips, this month against last | Straight away. They change nothing.                               |
+| Refresh  | scan inbox, check for new mail, sync calendars                                                                                                                                                                                                                                    | Straight away. They fetch into Ordo's cache and change no server. |
+| Change   | clean-up (unsubscribe and move to Trash), undo a clean-up, import a statement, sort with AI (×2), add, change or delete a calendar event, add or move a card, answer one of Ordo's money questions, forget a money fact                                                           | Only after you press **Confirm** on a card.                       |
+| Navigate | open a page (Finances can open on a month)                                                                                                                                                                                                                                        | Straight away. It only moves the window.                          |
 
 ## Privacy
 
@@ -46,6 +46,20 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
   there's nothing to type into; Ordo's main process refuses the question too. The OK is for that one
   provider (switching asks again), is kept in `assistant.json` in Ordo's data folder, and **Stop
   sharing** in the panel takes it back. Local models need no OK.
+- **What Ordo learned about your money needs one more OK.** The money memory tools (what Ordo knows,
+  its questions, loose ends, events and trips, this month against last, answering a question and
+  forgetting a fact) return people's names, exact amounts and dates you taught Ordo in Ask Ordo. A
+  cloud model is only offered them when you've also turned on **Send amounts, dates and names to
+  Anthropic (or OpenAI)** for Ask Ordo in Settings → AI; without it the assistant simply doesn't
+  have those tools. A local model always has them. The answer and forget cards show Ordo's own
+  question and answer, or Ordo's sentence for the fact, never the model's words.
+  Earlier questions and answers that used these tools are never sent to a cloud model without that
+  consent, and the conversation starts afresh whenever the provider, the assistant's OK or the
+  Money details consent changes. Ordo checks the provider and both consents again before every
+  call to the model, just before every tool runs, and after you confirm a change: if one changed
+  mid-question, it stops there, before anything more is read or sent. The
+  answer card says when an answer also adds someone to Bills, and the forget card says when
+  forgetting an event would also drop a payback that has no payments to link to.
 - The conversation is kept in memory for this session only. Tool results are sent for the question
   they answer and never kept; later questions only carry earlier questions and answers (the last
   eight). Nothing is written to disk. Quitting Ordo, reloading the window or pressing New conversation

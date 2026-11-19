@@ -64,10 +64,25 @@ export interface LoopOptions {
   timeoutMs?: number
   /** The tools on offer; tests can narrow it. */
   tools?: readonly OrdoTool[]
+  /**
+   * Checked again just before each tool runs, and after a confirm, in case the provider or a consent
+   * changed mid-question: why the tool may no longer run, or null. A refusal ends the question.
+   */
+  allowed?: (tool: OrdoTool) => string | null
+  /**
+   * Checked before every model call: why what's about to be sent may no longer go to this model
+   * (provider or consent changed), or null. `moneyDetails` says whether the history or the steps so
+   * far include a tool returning what Ordo learned about money. A refusal ends the question before
+   * sending.
+   */
+  canSend?: (moneyDetails: boolean) => string | null
 }
 
-/** The outcome, and whether untrusted data was read (so the turn is tainted in history). */
-export type LoopResult = AskOutcome & { tainted: boolean }
+/**
+ * The outcome, whether untrusted data was read (so the turn is tainted in history), and whether a
+ * tool returning what Ordo learned about money ran (so the turn stays away from cloud models).
+ */
+export type LoopResult = AskOutcome & { tainted: boolean; moneyDetails: boolean }
 
 /**
  * Whether a result can go to the model as Ordo's own data: nothing but numbers, booleans and
@@ -178,7 +193,8 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
 
   const end = (outcome: AskOutcome): LoopResult => {
     const tainted = steps.some((s) => !s.trusted)
-    if (outcome.ok || changed.length === 0) return { ...outcome, tainted }
+    const moneyDetails = steps.some((s) => tools.find((t) => t.name === s.tool)?.moneyDetails === true)
+    if (outcome.ok || changed.length === 0) return { ...outcome, tainted, moneyDetails }
     // A change that already ran must be reported, and remembered, whatever happened after it.
     const what = changed.join('. ')
     const lead = outcome.reason === 'stopped' ? 'Stopped.' : outcome.message
@@ -187,12 +203,19 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       answer: `${lead} The change you confirmed was made: ${what}.`,
       steps: toolCalls,
       tainted,
+      moneyDetails,
     }
   }
   const stopped = () => end({ ok: false, reason: 'stopped', message: 'Stopped.' })
 
   for (let call = 0; call < MAX_MODEL_CALLS; call++) {
     if (o.signal.aborted) return stopped()
+    // Earlier turns and the results gathered so far go out with this call: check they still may.
+    const gathered =
+      o.history.some((t) => t.moneyDetails) ||
+      steps.some((s) => tools.find((t) => t.name === s.tool)?.moneyDetails === true)
+    const why = o.canSend?.(gathered) ?? null
+    if (why) return end({ ok: false, reason: 'consent', message: why })
     o.onEvent({ type: 'thinking', step: call + 1 })
     let text: string
     let json: unknown
@@ -349,8 +372,16 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       continue
     }
 
+    /** Still allowed to run this tool now? If the provider or a consent changed, the question ends. */
+    const notAllowed = () => {
+      const why = o.allowed?.(tool) ?? null
+      return why ? end({ ok: false, reason: 'consent', message: why }) : null
+    }
+
     let result: CommandResult
     if (tool.kind === 'change') {
+      const before = notAllowed()
+      if (before) return before
       const preview = await previewTool(o.services, tool, data)
       const card: ConfirmCard = {
         tool: tool.name,
@@ -384,10 +415,14 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       // A no ends the turn without asking the model again, so data can't keep asking.
       if (!approved)
         return end({ ok: false, reason: 'cancelled', message: 'Cancelled. Nothing was changed.' })
+      const afterConfirm = notAllowed()
+      if (afterConfirm) return afterConfirm
       o.onEvent({ type: 'tool', id, tool: tool.name, label: tool.label, kind: tool.kind, status: 'running' })
       result = await runTool(o.services, tool, data, { allowChanges: true, confirm: true })
       if (result.ok) changed.push(tool.done(result.data))
     } else {
+      const now = notAllowed()
+      if (now) return now
       o.onEvent({ type: 'tool', id, tool: tool.name, label: tool.label, kind: tool.kind, status: 'running' })
       // Read and refresh tools never get permission to change anything.
       result = await runTool(o.services, tool, data, { allowChanges: false, confirm: false })

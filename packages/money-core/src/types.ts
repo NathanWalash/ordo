@@ -117,6 +117,19 @@ export interface DetectedBill {
   matchedBy?: 'ai'
   /** The model's confidence in that match, 0 to 1. */
   matchConfidence?: number
+  /**
+   * Set when what you taught Ordo says this bill is shared: who pays you what towards it. Confirming
+   * the bill also saves this split.
+   */
+  suggestedSplit?: SuggestedSplit
+}
+
+/** A split Ordo proposes from what you told it, by name: `Me` is you. */
+export interface SuggestedSplit {
+  /** Pence each person pays per cycle; they add up to the bill's amount. */
+  shares: { name: string; amount: number }[]
+  /** Ordo's own sentence saying why. */
+  reason: string
 }
 
 /** Someone you split bills with. "Me" always exists with id `me`. */

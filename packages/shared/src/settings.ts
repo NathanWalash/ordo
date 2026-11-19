@@ -17,7 +17,8 @@ export const DEFAULT_SETTINGS: Settings = { theme: 'system', ai: DEFAULT_AI_SETT
 
 /** What the renderer may change in one call. Unknown keys are rejected. */
 export const SettingsPatchSchema = SettingsSchema.partial().strict()
-export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
+/** Input type: AI fields added later (with defaults) may be left out. */
+export type SettingsPatch = z.input<typeof SettingsPatchSchema>
 
 /** How the window looks right now, beyond the theme the user picked. */
 export interface Appearance {
