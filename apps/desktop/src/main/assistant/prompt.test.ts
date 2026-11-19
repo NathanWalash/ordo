@@ -53,9 +53,20 @@ describe('the catalogue', () => {
 
   it('restricts the reply schema to the offered tool names', () => {
     const s = replySchema(['ordo_bills']) as unknown as {
-      anyOf: { properties: Record<string, { enum?: string[] }> }[]
+      properties: Record<string, { enum?: string[] }>
     }
-    expect(s.anyOf[1]!.properties['tool']!.enum).toEqual(['ordo_bills'])
+    expect(s.properties['tool']!.enum).toEqual(['ordo_bills'])
+    expect(s.properties['type']!.enum).toEqual(['answer', 'tool'])
+  })
+
+  // Claude's structured output (and OpenAI's) refuses a schema whose top level isn't a plain object:
+  // "input_schema.type: Field required", then "does not support oneOf, allOf, or anyOf at the top level".
+  it('keeps the reply schema a plain object at the top level', () => {
+    const s = replySchema(['ordo_bills']) as Record<string, unknown>
+    expect(s['type']).toBe('object')
+    for (const union of ['anyOf', 'oneOf', 'allOf']) expect(s).not.toHaveProperty(union)
+    expect(s['required']).toEqual(['type'])
+    expect(s['additionalProperties']).toBe(false)
   })
 
   it('accepts only an answer or a tool call', () => {
