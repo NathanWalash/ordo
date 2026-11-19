@@ -55,27 +55,22 @@ export function catalogue(tools: readonly OrdoTool[] = TOOLS): CatalogueEntry[] 
   ]
 }
 
-/** The JSON Schema for every reply: an answer, or one tool call. Providers with structured output enforce it. */
+/**
+ * The JSON Schema for every reply: an answer, or one tool call. Providers with structured output
+ * enforce it. It's one flat object, not a union of the two shapes: Claude (and OpenAI) refuse a
+ * schema with `anyOf` at the top level. `ReplySchema` below still checks the exact shape for each type.
+ */
 export function replySchema(names: readonly string[]) {
   return {
-    anyOf: [
-      {
-        type: 'object',
-        properties: { type: { const: 'answer' }, text: { type: 'string' } },
-        required: ['type', 'text'],
-        additionalProperties: false,
-      },
-      {
-        type: 'object',
-        properties: {
-          type: { const: 'tool' },
-          tool: { type: 'string', enum: [...names] },
-          args: { type: 'object' },
-        },
-        required: ['type', 'tool', 'args'],
-        additionalProperties: false,
-      },
-    ],
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['answer', 'tool'] },
+      text: { type: 'string', description: 'The answer, when type is "answer".' },
+      tool: { type: 'string', enum: [...names], description: 'The tool to call, when type is "tool".' },
+      args: { type: 'object', description: 'The tool’s arguments, when type is "tool".' },
+    },
+    required: ['type'],
+    additionalProperties: false,
   }
 }
 
