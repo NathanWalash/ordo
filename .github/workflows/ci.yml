@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [windows-latest] # TEMPORARY (fix/windows-headless-crash)
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,6 +59,16 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: TEMPORARY keep crash dumps (Windows Error Reporting)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Path $k -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpFolder -PropertyType ExpandString -Value 'D:\a\dumps' -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpCount -PropertyType DWord -Value 20 -Force | Out-Null
+          New-Item -ItemType Directory -Force D:\a\dumps | Out-Null
       # The windowed tests need the virtual display. The headless tests (e2e/headless.spec.ts) run
       # here too but don't need it: headless Ordo works with no display at all.
       - name: End-to-end tests (Linux, virtual display, with a local IMAP server)
@@ -72,6 +82,25 @@ jobs:
       - name: End-to-end tests
         if: runner.os != 'Linux'
         run: pnpm test:e2e
+      - name: TEMPORARY analyse crash dumps
+        if: always() && runner.os == 'Windows'
+        timeout-minutes: 25
+        shell: pwsh
+        run: |
+          Get-ChildItem D:\a\dumps -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime
+          $cdb = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
+          if (-not (Test-Path $cdb)) { Write-Host 'no cdb'; Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10' -ErrorAction SilentlyContinue; exit 0 }
+          $sym = 'srv*D:\a\sym*https://msdl.microsoft.com/download/symbols;srv*D:\a\sym*https://symbols.electronjs.org'
+          Get-ChildItem D:\a\dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object {
+            Write-Host "===== $($_.Name)"
+            & $cdb -z $_.FullName -y $sym -lines -c '.symopt+0x40; .ecxr; kn 60; ~*kn 12; !analyze -v; q' 2>&1 | Select-Object -Last 400
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && runner.os == 'Windows'
+        with:
+          name: crash-dumps
+          path: D:\a\dumps
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:

@@ -75,6 +75,22 @@ test('boards list and boards cards read without changing anything', async () => 
   expect(readFileSync(db).length).toBeGreaterThan(0)
 })
 
+// TEMPORARY (fix/windows-headless-crash): repeat the reads to catch the Windows crash.
+test('TEMP loop boards reads', async () => {
+  test.setTimeout(600_000)
+  const env = { ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' }
+  const codes: string[] = []
+  for (let i = 0; i < 25; i++) {
+    const list = await ordo(['boards', 'list', '--json'], profile, env)
+    const cards = await ordo(['boards', 'cards', '--board', 'home'], profile, env)
+    const help = await ordo(['--help'], profile, env)
+    codes.push(`${list.code}/${cards.code}/${help.code}`)
+    if (i === 0) console.error(`first run stderr:\n${cards.stderr}`)
+  }
+  console.error(`TEMP loop codes: ${codes.join(' ')}`)
+  expect(codes.every((c) => c === '0/0/0')).toBe(true)
+})
+
 test('add-card and move-card need --allow-changes and --confirm', async () => {
   const refused = await ordo(
     ['boards', 'add-card', '--board', 'Home', '--title', 'Book the MOT', '--confirm'],
