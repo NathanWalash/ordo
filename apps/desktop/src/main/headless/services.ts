@@ -4,6 +4,7 @@ import * as cleanup from '../cleanup'
 import * as mailClient from '../mail-client'
 import * as calendar from '../calendar'
 import * as money from '../money'
+import * as memory from '../money-memory'
 import * as boards from '../boards'
 import { aiSettings, categoriseSenders, sendersWithAi, status as aiStatus } from '../ai'
 import { lockHolder } from '../writes'
@@ -63,6 +64,10 @@ export function mainServices(options: { send?: boolean } = {}): OrdoServices {
       importFile: money.importStatementFile,
       counts: money.counts,
       aiSort: (onProgress) => money.aiSort(onProgress),
+      memory: memory.view,
+      answer: memory.answer,
+      forget: memory.deleteFact,
+      compare: memory.compare,
     },
     ai: {
       settings: aiSettings,

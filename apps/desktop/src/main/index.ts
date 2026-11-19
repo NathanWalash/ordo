@@ -19,6 +19,7 @@ import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
 import { registerAssistantIpc, stop as stopAssistant } from './assistant'
 import { closeMoney, registerMoneyIpc } from './money'
+import { registerMemoryIpc, stopAsk } from './money-memory'
 import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
 import { headlessArgs } from './headless/args'
@@ -169,12 +170,16 @@ function startApp(): void {
   registerCleanupIpc()
   registerMailIpc()
   registerMoneyIpc()
+  registerMemoryIpc()
   registerBoardsIpc()
 
   app.on('before-quit', () => mail.closeMail())
   app.on('before-quit', () => closeMailClient())
   app.on('before-quit', () => closeCalendar())
-  app.on('before-quit', () => closeMoney())
+  app.on('before-quit', () => {
+    stopAsk()
+    closeMoney()
+  })
   app.on('before-quit', () => closeBoards())
   app.whenReady().then(() => {
     applyTestOverrides()

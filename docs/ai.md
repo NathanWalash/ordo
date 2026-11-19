@@ -92,6 +92,116 @@ Answers are cached in `money.sqlite` per merchant (or pair), model and a fingerp
 sent, so running again only asks about new or changed merchants. Listing transactions and bills
 applies cached answers without calling the model; with AI for Money off, they aren't applied.
 
+## Ask Ordo
+
+**Ask Ordo** (Money → Ask Ordo) answers questions about your money, like "How much did Italy cost
+me?" or "What am I holding for other people?", and learns from what you tell it. It uses the
+provider and model chosen in Settings → AI.
+
+**Ordo does the maths.** The model can't see your statements. It answers by calling Ordo's query
+functions, one at a time, in a strict JSON loop:
+
+```json
+{ "type": "call", "tool": "event_cost", "args": { "name": "Italy" } }
+```
+
+Ordo runs the function on your data and sends back the result as data. When the model is ready it
+answers, writing every amount as a placeholder for a number a tool returned:
+
+```json
+{ "type": "answer", "text": "Italy cost you {{r1.netPence}} after {{r1.paidBackPence}} came back." }
+```
+
+which shows as "Italy cost you **Net cost of Italy · £418.99** after **Paid back for Italy · £5.00**
+came back.", each figure a chip of its own.
+
+Ordo fills the placeholders in itself, by the field they point at and the value it holds:
+
+- an amount (a whole number of pence in a field ending in `Pence`) or a count (`total`, `shown`,
+  `payments`, `leftOut`, `parts`, `days`) becomes a **figure**: a separate chip with Ordo's own
+  label, like **Net cost of Italy · £418.99** or **Luca B, 5 Sept · £5.00**, drawn apart from the
+  model's prose. The label is built by Ordo from where the number sits in the tool result, so words
+  the model writes next to a figure ("thousand", "per cent") can't change what it says;
+- a date (`date`, `from`, `to`, `lastIn`, `lastOut`, `lastDate`, `inDate`), only when the value
+  really is a date, goes into the prose as `3 Nov`;
+- a name (`name`, `inName`, `person`, `forPerson`, `from`) goes into the prose only if it has no
+  digits, currency signs or numbers in words, so a bank reference like "£4,000.00 YOU OWE ME" or a
+  payee called "five hundred pounds" can never stand in for an amount. Names in figure labels pass
+  the same check, or the label falls back to a plain one like "Amount".
+
+Nothing else fills a placeholder: not categories, account names, reasons or notes. In plain text
+(the conversation history the model sees next time) a figure reads `[Net cost of Italy: £418.99]`.
+
+The structure does the real work; these checks stay as defence in depth. Text is NFKC-normalised
+first, so full-width letters and digits fold to plain ones. After the placeholders are taken out,
+an answer is refused if it has:
+
+- any digit in any script (`1,250`, `５０`), any currency sign (`£ ₤ € $`) or `%`;
+- a number in words next to a money word (`five hundred pounds`, `one pound`, `twenty quid`,
+  `a grand`, `GBP seventy`);
+- a number or scale word on its own, plurals included (`seventy`, `hundreds`, `a dozen`, `k`,
+  `bn`, `lakhs`, `crore`, `scores`, `gross`). "one", "few" and "couple" are allowed on their own,
+  because plain English needs them;
+- a fraction or multiplier anywhere (`half`, `quarters`, `thirds`, `double`, `twice`, `triple`,
+  `times`, `x`, `squared`, `per cent`, `per-cent`, `percent`).
+
+A placeholder must stand apart from the model's words. Before it: only the start, a space or an
+opening bracket or quote. After a figure or a date there must be a gap of spaces and punctuation;
+after the whole gap comes the end of the answer, another placeholder, a new sentence (the gap
+holds `.`, `!` or `?`), or a whole word from a short allowlist (on, in, for, from, to, and, or,
+back, out, net, each, per, so, after, of, at, since, by, payments, days and a few more). It is an
+allowlist because a list of scale words can never be complete, and the word must be a whole token,
+so `per-cent` and `back'` aren't `per` and `back`. After a name: the end, a space, punctuation and
+a space, or a possessive `'s`. So `£{{r1.total}},000`, `{{r1.a}}{{r1.b}}`, `{{r1.total}}k`,
+`{{r1.total}}-odd`, `x{{r1.total}}`, `{{r1.total}} thousand` and `{{r1.total}}, squillion` are all
+refused, as is a placeholder that points at nothing. Then the filled-in answer is checked once more
+with only the figures and dates blanked out, so names and the model's words together can't spell an
+amount either.
+
+The same rules apply to a clarifying question and its options, which may not contain placeholders at
+all. A suggested fact's label is the model's words too: one with an amount or a placeholder is
+replaced with Ordo's own sentence for the fact. A refused reply is asked for again once. At most six
+tool calls, then the model must answer.
+
+The tools: `find_transactions`, `spending` (between two days, net of paybacks), `compare_months`,
+`events`, `event_cost`, `matches` (paybacks and pass-throughs, with how sure Ordo is), `share_of`
+(your share of one outgoing after paybacks), `loose_ends` (money held for others, money owed to you),
+`people`, `facts` (what you've told Ordo) and `caveats` (how each bank dates payments). Arguments are
+checked with zod; bad ones come back to the model as an error.
+
+**What is sent.** Unlike Sort with AI, Ask Ordo needs real detail: exact amounts, dates, account
+names, merchant and people's names from your statements, and the facts you've saved, as sentences.
+Only what the model asks a tool for is sent, plus your question and the last few questions and
+answers in the conversation. Never your whole statement, files or balances.
+
+- **On this computer (LM Studio, Ollama):** nothing leaves your computer, so nothing more is asked.
+- **Claude Code or Codex CLI:** Ask Ordo needs its own consent, **Send amounts, dates and names to
+  Anthropic (or OpenAI)** in Settings → AI, on top of the consent for sorting. It is off by
+  default, asked for in its own dialog, kept per provider, and cleared when you switch provider.
+  Without it, Ask Ordo is off and says why; Ordo's own questions, loose ends and events still work.
+
+**Remembering.** When you tell Ask Ordo something ("Genest's £30 was for Halloween"), it can suggest
+up to three facts to remember. Ordo checks each one against its schema, drops any that name payments
+or events the tools never showed (or an amount owed that Ordo didn't work out), and any payback or
+pass-through for money in that Ordo already knows about. It never suggests notes: lasting text is
+only ever yours. It shows the rest as Ordo's own sentence with Save and Not now. Nothing is saved
+until you press Save, and saving the same payback twice is refused, so a double click can't count it
+twice. Facts are sent back to the model as data: their kinds and the payments they link are what you
+confirmed, but their words are still treated as untrusted text. Clarifying
+questions ("Which trip do you mean?") come with short options that send your choice as the next
+question; turn them off with **Let Ask Ordo ask me back**. **Ask Ordo answers** chooses briefly or
+in detail.
+
+**What Ordo knows** is stored in `money.sqlite` as facts: people (flatmate, friend…), events and
+trips, paybacks, pass-throughs, money held for someone, money owed to you, payments to ignore,
+income sources, how an account dates payments, and notes. Each one is checked again when read; you
+can forget any of them on the Ask Ordo page or with `money forget`. Forgetting an event keeps the
+paybacks and money owed for it, linked to its payments instead; the app asks first and says what it
+kept. Ordo's own questions (who is this, was this a payback) are worked out without a model, from
+exact amounts and dates. "About half" means within 50p, and is only **likely** with a payback word
+(Splitwise, half, owe…) or someone you've told Ordo about; otherwise it's one **to check**. Names
+match as whole words, initials included: "Patrick O" is not any Patrick.
+
 ## Boards
 
 **Suggest** on a card (Boards) asks the same provider and model for a due date, a checklist, labels
@@ -191,6 +301,9 @@ while Ordo is open, press **Check again**.
 - `suggestForCard` in `packages/boards-core` does Boards' Suggest; `window.ordo.boards.suggest()` runs it.
 - `aiCategoriseTransactions` and `aiMatchBills` in `packages/money-core` do Money's;
   `window.ordo.money.aiSort()` runs both, and `money sort` / `ordo_money_sort` in headless mode.
+- `askMoney` and `moneyTools` in `packages/money-core` are Ask Ordo; the engines it calls (ledger,
+  `findMatches`, `eventCost`, `heldBalances`, `owedToYou`, `compareMonthToDate`, `proposeQuestions`)
+  are pure and need no model. `window.ordo.moneyMemory` exposes them to the renderer.
 - Unpackaged builds take `ORDO_LMSTUDIO_URL`, `ORDO_OLLAMA_URL` and `ORDO_AI_CLI_PATH` for tests.
 - `AI_LIVE=lmstudio pnpm vitest run ai.live` sorts made-up senders with a real local model (also
   `ollama` or `claude`). It's skipped by default.

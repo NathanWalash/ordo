@@ -164,6 +164,12 @@ export interface Turn {
   changes?: string[]
   /** Keys of the emails sent in that turn (see `emailKey`), so none is sent twice. */
   sent?: string[]
+  /**
+   * A tool returning what Ordo learned about money (exact amounts, dates, people's names) ran while
+   * answering, so the answer may repeat them. Such turns never go to a cloud model without the
+   * Money details consent.
+   */
+  moneyDetails?: boolean
 }
 
 export interface Step {

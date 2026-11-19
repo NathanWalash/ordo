@@ -85,3 +85,66 @@ export {
   type TransactionSummary,
 } from './summary'
 export { pairOwnTransfers } from './transfers'
+export * from './memory'
+export { buildLedger, totals, type Ledger, type LedgerEntry, type LedgerRole } from './ledger'
+export {
+  CONFIDENCE_ORDER,
+  candidateKey,
+  findMatches,
+  shareAfterPaybacks,
+  type MatchCandidate,
+  type MatchConfidence,
+} from './paybacks'
+export { allEventCosts, eventCost, type EventCost, type EventLine } from './events'
+export {
+  counterparts,
+  heldBalances,
+  onwardFor,
+  owedToYou,
+  personLike,
+  regularRuns,
+  type Counterpart,
+  type HeldBalance,
+  type OwedItem,
+  type RegularRun,
+} from './loose-ends'
+export {
+  compareMonthToDate,
+  spendBetween,
+  type MonthComparison,
+  type PeriodSpend,
+  type SpendFilter,
+} from './compare'
+export { accountCaveats, periodCaveats, type AccountCaveat, type DateKind } from './caveats'
+export {
+  proposeQuestions,
+  type MoneyQuestion,
+  type QuestionAnswer,
+  type QuestionKind,
+  type QuestionStep,
+} from './questions'
+export { heldSettlements, withMemoryBills } from './memory-bills'
+export { describeFact, describeFacts } from './describe'
+export {
+  TOOL_ARGS,
+  TOOL_HELP,
+  TOOL_LABEL,
+  TOOL_NAMES,
+  moneyTools,
+  type ToolContext,
+  type ToolName,
+} from './ask-tools'
+export {
+  answerText,
+  askMoney,
+  askSystemPrompt,
+  figureLabel,
+  fillAmounts,
+  writtenAmount,
+  type AnswerPart,
+  type AskOptions,
+  type AskProposal,
+  type AskResult,
+  type AskStep,
+  type AskTurn,
+} from './ask'

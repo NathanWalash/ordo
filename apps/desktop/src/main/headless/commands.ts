@@ -23,9 +23,13 @@ import type {
   CleanupProgress,
   CleanupRequest,
   CleanupSummary,
+  AnswerInput,
+  CompareInput,
   ImportOutcome,
   ComposeInput,
   LastMove,
+  MemoryResult,
+  MemoryView,
   MailboxInfo,
   MailMoveInput,
   MailOutcome,
@@ -34,6 +38,7 @@ import type {
   MessageListQuery,
   MessageSummary,
   MoneyAiOutcome,
+  MonthComparison,
   MoneyAiProgress,
   MoneyOverview,
   ScanOutcome,
@@ -114,6 +119,11 @@ export interface OrdoServices {
     counts(): { transactions: number; accounts: number; bills: number }
     /** Sort with AI: categories for merchants in Other, then bill matching. Needs AI for Money on. */
     aiSort(onProgress?: (p: MoneyAiProgress) => void): Promise<MoneyAiOutcome>
+    /** What Ordo has learned: facts, questions, loose ends, events. */
+    memory(): Promise<MemoryView>
+    answer(input: AnswerInput): Promise<MemoryResult>
+    forget(id: string): Promise<MemoryResult>
+    compare(input: CompareInput): Promise<MonthComparison>
   }
   ai: {
     settings(): AiSettings
@@ -1132,6 +1142,130 @@ export async function runCommand(
           errors: r.errors,
         },
       }
+    }
+
+    case 'money knows': {
+      const m = await services.money.memory()
+      return {
+        ok: true,
+        data: {
+          facts: m.facts.map((f) => ({
+            id: f.id,
+            kind: f.kind,
+            summary: f.summary,
+            source: f.source,
+            learned: f.createdAt,
+          })),
+          accounts: m.caveats.map((c) => ({ account: c.account, dates: c.dates, note: c.text })),
+        },
+      }
+    }
+
+    case 'money questions': {
+      const m = await services.money.memory()
+      return {
+        ok: true,
+        data: {
+          questions: m.questions.map((q) => ({
+            id: q.id,
+            kind: q.kind,
+            text: q.text,
+            confidence: q.confidence ?? null,
+            answers: q.answers,
+          })),
+        },
+      }
+    }
+
+    case 'money loose-ends': {
+      const m = await services.money.memory()
+      return {
+        ok: true,
+        data: {
+          currency: 'GBP',
+          held: m.held.map((h) => ({
+            from: h.from,
+            for: h.forPerson,
+            what: h.what || null,
+            receivedPence: h.received,
+            passedOnPence: h.passedOn,
+            holdingPence: h.holding,
+            lastIn: h.lastIn ?? null,
+            lastOut: h.lastOut ?? null,
+          })),
+          owed: [
+            ...m.owed.map((o) => ({
+              person: o.person,
+              amountPence: o.amount,
+              outstandingPence: o.outstanding,
+              note: o.note || null,
+              from: 'you told Ordo',
+            })),
+            ...m.billsOwed.map((o) => ({
+              person: o.person,
+              amountPence: o.amount,
+              outstandingPence: o.amount,
+              note: null,
+              from: 'shared bills',
+            })),
+          ],
+        },
+      }
+    }
+
+    case 'money events': {
+      const m = await services.money.memory()
+      return {
+        ok: true,
+        data: {
+          currency: 'GBP',
+          events: m.events.map((e) => ({
+            id: e.id,
+            name: e.name,
+            from: e.from ?? null,
+            to: e.to ?? null,
+            paidOutPence: e.paidOut,
+            paidBackPence: e.paidBack,
+            netPence: e.net,
+            byCategory: e.byCategory.map((c) => ({ category: c.category, amountPence: c.amount })),
+          })),
+        },
+      }
+    }
+
+    case 'money compare': {
+      const c = await services.money.compare({ category: command.category, account: command.account })
+      const side = (p: MonthComparison['thisMonth']) => ({
+        from: p.from,
+        to: p.to,
+        spentPence: p.spent,
+        paidBackPence: p.paidBack,
+        netPence: p.net,
+      })
+      return {
+        ok: true,
+        data: {
+          currency: 'GBP',
+          category: c.category,
+          account: c.account,
+          thisMonth: side(c.thisMonth),
+          lastMonth: side(c.lastMonth),
+          differencePence: c.difference,
+          caveats: c.caveats,
+        },
+      }
+    }
+
+    case 'money answer': {
+      const r = await services.money.answer({ questionId: command.question, answerId: command.answer })
+      if (!r.ok) return fromService(r)
+      return { ok: true, data: { question: command.question, answer: command.answer, saved: r.facts ?? 0 } }
+    }
+
+    case 'money forget': {
+      const r = await services.money.forget(command.fact)
+      if (!r.ok) return fromService(r)
+      return { ok: true, data: { forgotten: command.fact } }
     }
 
     case 'ai status': {

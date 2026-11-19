@@ -188,6 +188,9 @@ describe('change previews', () => {
       money: false,
       boards: false,
       cloudConsent: 'claude-cli',
+      moneyDetailsConsent: null,
+      askStyle: 'brief',
+      askClarify: true,
     })
     const cloud = await previewTool(services, t('ordo_ai_sort'), {})
     expect(cloud.title).toBe('Sort senders left in Other')
@@ -203,6 +206,9 @@ describe('change previews', () => {
       money: true,
       boards: false,
       cloudConsent: null,
+      moneyDetailsConsent: null,
+      askStyle: 'brief',
+      askClarify: true,
     })
     const local = await previewTool(services, t('ordo_money_sort'), {})
     expect(local).toMatchObject({

@@ -4,6 +4,7 @@ import {
   History,
   House,
   Inbox,
+  MessageCircleQuestion,
   Receipt,
   Sparkles,
   SquareKanban,
@@ -78,6 +79,12 @@ export function Sidebar({ route, onNavigate, platform }: Props) {
           label="Bills & Subscriptions"
           active={route === 'money/bills'}
           onClick={() => onNavigate('money/bills')}
+        />
+        <Item
+          icon={<MessageCircleQuestion size={15} />}
+          label="Ask Ordo"
+          active={route === 'money/ask'}
+          onClick={() => onNavigate('money/ask')}
         />
       </Section>
 

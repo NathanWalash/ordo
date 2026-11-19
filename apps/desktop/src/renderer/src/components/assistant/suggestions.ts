@@ -51,6 +51,11 @@ const BY_ROUTE: Record<Route, Suggestion[]> = {
     { text: 'How much do my subscriptions cost a month?', icon: 'bills' },
     { text: 'Who owes whom?', icon: 'bills' },
   ],
+  'money/ask': [
+    { text: 'What am I holding for other people?', icon: 'money' },
+    { text: 'Who still owes me money?', icon: 'money' },
+    { text: 'What questions does Ordo have about my money?', icon: 'money' },
+  ],
   settings: [
     { text: 'Which AI model am I using?', icon: 'sparkles' },
     { text: 'What does Ordo know about my account?', icon: 'sparkles' },

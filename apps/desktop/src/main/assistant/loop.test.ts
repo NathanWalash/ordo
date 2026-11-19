@@ -114,6 +114,7 @@ describe('the assistant loop', () => {
       tainted: false,
       changes: [],
       sent: [],
+      moneyDetails: false,
     })
     expect(m.requests).toHaveLength(1)
     expect(m.requests[0]!.schema).toBeDefined()
@@ -155,6 +156,7 @@ describe('the assistant loop', () => {
       tainted: true,
       changes: [],
       sent: [],
+      moneyDetails: false,
     })
     expect(toolEvents(s.events)).toEqual([
       expect.objectContaining({
@@ -326,6 +328,7 @@ describe('the assistant loop', () => {
       tainted: true,
       changes: ['Added 3 transactions'],
       sent: [],
+      moneyDetails: false,
     })
   })
 

@@ -24,6 +24,11 @@ export const ASSISTANT_PAGES = {
     title: 'Bills & Subscriptions',
     about: 'Money → Bills & Subscriptions: recurring payments, splits and who owes whom',
   },
+  'money/ask': {
+    title: 'Ask Ordo',
+    about:
+      'Money → Ask Ordo: what Ordo has learned about your money, its questions, loose ends, events and trips',
+  },
   settings: { title: 'Settings', about: 'Settings: appearance and AI provider' },
 } as const
 export type AssistantPage = keyof typeof ASSISTANT_PAGES

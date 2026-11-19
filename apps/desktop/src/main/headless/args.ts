@@ -310,6 +310,35 @@ const COMMANDS = {
     }),
   },
   'money sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
+  'money knows': { args: [], flags: z.object({}) },
+  'money questions': { args: [], flags: z.object({}) },
+  'money loose-ends': { args: [], flags: z.object({}) },
+  'money events': { args: [], flags: z.object({}) },
+  'money compare': {
+    args: [],
+    flags: z.object({
+      category: z.string().trim().min(1).max(40, '--category is too long').optional(),
+      account: z.string().trim().min(1).max(60, '--account is too long').optional(),
+    }),
+  },
+  'money answer': {
+    args: ['question'],
+    flags: z.object({
+      question: z
+        .string({ error: 'money answer needs a question id from `money questions`' })
+        .min(1)
+        .max(400),
+      answer: z.string({ error: 'money answer needs --answer <id>' }).min(1).max(40),
+      confirm: z.boolean().default(false),
+    }),
+  },
+  'money forget': {
+    args: ['fact'],
+    flags: z.object({
+      fact: z.string({ error: 'money forget needs a fact id from `money knows`' }).min(1).max(100),
+      confirm: z.boolean().default(false),
+    }),
+  },
   'ai status': { args: [], flags: z.object({}) },
   'ai sort': { args: [], flags: z.object({ confirm: z.boolean().default(false) }) },
   'boards list': { args: [], flags: z.object({}) },
@@ -375,6 +404,8 @@ export const CHANGE_COMMANDS: ReadonlySet<CommandName> = new Set([
   'undo',
   'money import',
   'money sort',
+  'money answer',
+  'money forget',
   'ai sort',
   'boards add-card',
   'boards move-card',
@@ -418,6 +449,7 @@ const FLAG_KINDS: Record<string, 'switch' | 'value' | 'list'> = {
   to: 'value',
   month: 'value',
   account: 'value',
+  answer: 'value',
   sender: 'list',
   mailbox: 'value',
   unread: 'switch',

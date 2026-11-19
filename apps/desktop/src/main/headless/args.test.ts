@@ -252,6 +252,8 @@ it('marks exactly the commands that change data', () => {
     'mail mark',
     'mail move',
     'mail undo',
+    'money answer',
+    'money forget',
     'money import',
     'money sort',
     'undo',
