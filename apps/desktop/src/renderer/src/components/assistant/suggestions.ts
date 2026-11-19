@@ -17,10 +17,11 @@ export interface Suggestion {
  */
 const BY_ROUTE: Record<Route, Suggestion[]> = {
   home: [
-    { text: 'What’s on this week?', icon: 'calendar' },
+    { text: 'What’s on my calendar this week?', icon: 'calendar' },
     { text: 'Which bills are due next?', icon: 'bills' },
-    { text: 'Help me plan my week', icon: 'idea' },
-    { text: 'Draft a polite note to my landlord', icon: 'write' },
+    // Planning your own week starts from your calendar: a data question, not a general one.
+    { text: 'Help me plan my week', icon: 'calendar' },
+    { text: 'Help me word a polite note to my landlord', icon: 'write' },
   ],
   'mail/inbox': [
     { text: 'What’s unread in my inbox?', icon: 'mail' },

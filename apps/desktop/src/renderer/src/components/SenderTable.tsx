@@ -1,6 +1,15 @@
 import { useState, type ReactNode } from 'react'
-import { CircleCheck, ExternalLink, Mail, ShieldCheck, Sparkles, Trash2, Zap } from 'lucide-react'
-import type { Category, CategorisedSender } from '@ordo/mail-core'
+import {
+  CircleCheck,
+  ExternalLink,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+  Zap,
+} from 'lucide-react'
+import { stillEmailing, type Category, type CategorisedSender } from '@ordo/mail-core'
 import { Button } from './Button'
 
 export const CATEGORY_LABELS: { id: Category; label: string }[] = [
@@ -214,41 +223,83 @@ function UnsubscribeCell({
   onUnsubscribe?: (sender: CategorisedSender) => void
 }) {
   const name = s.name ?? s.address
-  const done = s.unsubscribed
-  if (done && s.category !== 'people') {
-    const when = done.at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const done = s.category === 'people' ? undefined : s.unsubscribed
+  const canUnsubscribe = Boolean(onUnsubscribe) && s.unsubscribe.kind !== 'none' && s.category !== 'people'
+  const when = done?.at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const open = () => onUnsubscribe?.(s)
+
+  // Unsubscribed, but mail still came more than two days later: say so, and offer the button again.
+  if (done && stillEmailing(s))
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        {canUnsubscribe ? (
+          <UnsubscribeButton sender={s} onClick={open} />
+        ) : (
+          <UnsubLabel kind={s.unsubscribe.kind} />
+        )}
+        <span
+          className="flex items-center gap-1 text-[11px] font-medium text-warn"
+          title={`Ordo unsubscribed on ${when}, but ${name} has emailed since.`}
+        >
+          <TriangleAlert size={11} className="shrink-0" aria-hidden />
+          Still emailing
+        </span>
+      </div>
+    )
+
+  if (done) {
     const opened = done.status === 'opened'
     return (
-      <span
-        data-unsubscribe-for={s.address}
-        tabIndex={-1}
-        title={
-          opened
-            ? `Ordo opened the unsubscribe page on ${when}. Finish there if you haven’t.`
-            : `Unsubscribed on ${when}`
-        }
-        className="flex items-center gap-1 text-[12px] text-ink outline-none"
-      >
-        <CircleCheck size={13} className="shrink-0 text-success" aria-hidden />
-        {opened ? 'Page opened' : 'Unsubscribed'}
-      </span>
+      <div className="flex flex-col items-start gap-0.5">
+        <span
+          data-unsubscribe-for={s.address}
+          tabIndex={-1}
+          title={
+            opened
+              ? `Ordo opened the unsubscribe page on ${when}. Finish there if you haven’t.`
+              : `Unsubscribed on ${when}`
+          }
+          className="flex items-center gap-1 text-[12px] text-ink outline-none"
+        >
+          <CircleCheck size={13} className="shrink-0 text-success" aria-hidden />
+          {opened ? 'Page opened' : 'Unsubscribed'}
+        </span>
+        {canUnsubscribe && (
+          <button
+            type="button"
+            aria-label={`Unsubscribe from ${name} again`}
+            onClick={(e) => {
+              // Never selects the row.
+              e.stopPropagation()
+              open()
+            }}
+            className="rounded-sm text-[11px] font-medium text-accent hover:underline"
+          >
+            Try again
+          </button>
+        )}
+      </div>
     )
   }
-  if (!onUnsubscribe || s.unsubscribe.kind === 'none' || s.category === 'people')
-    return <UnsubLabel kind={s.unsubscribe.kind} />
+  if (!canUnsubscribe) return <UnsubLabel kind={s.unsubscribe.kind} />
+  return <UnsubscribeButton sender={s} onClick={open} />
+}
+
+function UnsubscribeButton({ sender: s, onClick }: { sender: CategorisedSender; onClick: () => void }) {
+  if (s.unsubscribe.kind === 'none') return null
   const method = METHOD[s.unsubscribe.kind]
   const Icon = method.icon
   return (
     <button
       type="button"
       data-unsubscribe-for={s.address}
-      aria-label={`Unsubscribe from ${name}`}
+      aria-label={`Unsubscribe from ${s.name ?? s.address}`}
       aria-description={method.about}
       title={method.about}
       onClick={(e) => {
         // The button sits in a selectable row: unsubscribing never selects it.
         e.stopPropagation()
-        onUnsubscribe(s)
+        onClick()
       }}
       className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border border-sep bg-field px-2 text-[12px] font-medium text-ink shadow-[0_1px_1px_rgb(0_0_0/0.06)] hover:bg-hover"
     >

@@ -22,6 +22,8 @@ const STORE = `Weekly Deals ${run}`
 const FROM = `weekly-${run}@deals.example`
 const BROKEN = `Flash Sale ${run}`
 const BROKEN_FROM = `flash-${run}@sale.example`
+const CLUB = `Club News ${run}`
+const DAY = 24 * 60 * 60 * 1000
 
 let app: ElectronApplication
 let page: Page
@@ -103,6 +105,13 @@ test.beforeAll(async () => {
     `List-Unsubscribe: <http://127.0.0.1:${port}/${path}/${run}>\r\nList-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n\r\nShop now\r\n`
   for (const n of [1, 2, 3]) await c.append('INBOX', email(STORE, FROM, 'weekly', n))
   for (const n of [1, 2]) await c.append('INBOX', email(BROKEN, BROKEN_FROM, 'broken', n))
+  // Unsubscribes by email to another domain: off until ticked, so the sheet's button starts disabled.
+  await c.append(
+    'INBOX',
+    `From: ${CLUB} <news-${run}@club.example>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: This week at the club\r\n` +
+      `Date: Mon, 16 Nov 2026 09:00:00 +0000\r\nList-Id: <news.club.example>\r\n` +
+      `List-Unsubscribe: <mailto:optout@lists.mailhost.example?subject=Remove%20me%20${run}>\r\n\r\nNews\r\n`,
+  )
   await c.logout()
 
   await launch()
@@ -114,7 +123,10 @@ test.afterAll(async () => {
 })
 
 const sheet = () => page.getByRole('dialog')
-const button = (name: string) => page.getByRole('button', { name: `Unsubscribe from ${name}` })
+const button = (name: string) => page.getByRole('button', { name: `Unsubscribe from ${name}`, exact: true })
+const tryAgain = (name: string) =>
+  page.getByRole('button', { name: `Unsubscribe from ${name} again`, exact: true })
+const primary = () => sheet().getByRole('button', { name: 'Unsubscribe', exact: true })
 const row = (name: string) => page.getByRole('row').filter({ hasText: name })
 
 test('connects and scans: one-click senders get a button, people never do', async () => {
@@ -153,7 +165,8 @@ test('Unsubscribe opens the sheet for that sender, with Move to Trash off; Cance
   await expect(
     sheet().getByText('Your emails stay in your inbox. Unsubscribing can’t be undone.'),
   ).toBeVisible()
-  await expect(sheet().getByRole('button', { name: 'Unsubscribe', exact: true })).toBeFocused()
+  // Cancel has focus, not Unsubscribe, so a stray Return can't unsubscribe.
+  await expect(sheet().getByRole('button', { name: 'Cancel' })).toBeFocused()
   await screenshot('unsubscribe-sheet')
 
   await sheet().getByRole('button', { name: 'Cancel' }).click()
@@ -173,9 +186,46 @@ test('the keyboard opens it too, and Escape closes it', async () => {
   expect(posts).toEqual([])
 })
 
+test('Return twice on the button, or a held Return, never unsubscribes', async () => {
+  // Return opens the sheet; Return again straight away lands on Cancel.
+  await button(STORE).focus()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Enter')
+  await expect(sheet()).toBeHidden()
+  expect(posts).toEqual([])
+
+  // Even with focus moved to Unsubscribe at once, it ignores presses for a moment after opening.
+  await button(STORE).focus()
+  await page.keyboard.press('Enter')
+  await expect(sheet()).toBeVisible()
+  await primary().focus()
+  await expect(primary()).toHaveAttribute('aria-disabled', 'true')
+  await page.keyboard.press('Enter')
+  await expect(sheet().getByRole('heading', { name: `Unsubscribe from ${STORE}` })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(sheet()).toBeHidden()
+
+  // Held down: the press opens the sheet, and its repeats never press Unsubscribe, even once it's ready.
+  await button(STORE).focus()
+  await page.keyboard.down('Enter')
+  await expect(sheet()).toBeVisible()
+  await expect(primary()).not.toHaveAttribute('aria-disabled')
+  await primary().focus()
+  await page.keyboard.down('Enter')
+  await page.keyboard.down('Enter')
+  await page.keyboard.up('Enter')
+  await expect(sheet().getByRole('heading', { name: `Unsubscribe from ${STORE}` })).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(posts).toEqual([])
+  await page.keyboard.press('Escape')
+  await expect(sheet()).toBeHidden()
+  expect(await countFrom('INBOX', FROM)).toBe(3)
+})
+
 test('confirming unsubscribes with one click and keeps the emails in the inbox', async () => {
   await button(STORE).click()
-  await sheet().getByRole('button', { name: 'Unsubscribe', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: `Select ${STORE}` })).not.toBeChecked()
+  await primary().click()
   await expect(sheet().getByRole('heading', { name: `Unsubscribed from ${STORE}` })).toBeVisible({
     timeout: 20_000,
   })
@@ -189,6 +239,14 @@ test('confirming unsubscribes with one click and keeps the emails in the inbox',
   await expect(status).toBeVisible()
   await expect(status).toBeFocused()
   await expect(button(STORE)).toHaveCount(0)
+  // It can still be tried again.
+  await expect(tryAgain(STORE)).toBeVisible()
+  await tryAgain(STORE).click()
+  await expect(page.getByRole('checkbox', { name: `Select ${STORE}` })).not.toBeChecked()
+  await expect(sheet().getByRole('heading', { name: `Unsubscribe from ${STORE}` })).toBeVisible()
+  await sheet().getByRole('button', { name: 'Cancel' }).click()
+  await expect(sheet()).toBeHidden()
+  expect(posts).toEqual([`/weekly/${run} List-Unsubscribe=One-Click`])
   expect(await countFrom('INBOX', FROM)).toBe(3)
   expect(await countFrom('Trash', FROM)).toBe(0)
   // The row is still there, with all its emails.
@@ -197,7 +255,7 @@ test('confirming unsubscribes with one click and keeps the emails in the inbox',
 
 test('a failed unsubscribe says why, and the button stays', async () => {
   await button(BROKEN).click()
-  await sheet().getByRole('button', { name: 'Unsubscribe', exact: true }).click()
+  await primary().click()
   await expect(sheet().getByRole('heading', { name: 'Couldn’t unsubscribe' })).toBeVisible({
     timeout: 20_000,
   })
@@ -205,9 +263,27 @@ test('a failed unsubscribe says why, and the button stays', async () => {
   await sheet().getByRole('button', { name: 'Done' }).click()
   await expect(button(BROKEN)).toBeVisible()
   await expect(button(BROKEN)).toBeFocused()
+  await expect(tryAgain(BROKEN)).toHaveCount(0)
   expect(await countFrom('INBOX', BROKEN_FROM)).toBe(2)
   await row(STORE).scrollIntoViewIfNeeded()
   await screenshot('unsubscribe-table')
+})
+
+test('when Unsubscribe starts off (an email to another domain), focus stays in the sheet', async () => {
+  const before = posts.length
+  await button(CLUB).click()
+  await expect(sheet().getByRole('heading', { name: `Unsubscribe from ${CLUB}` })).toBeVisible()
+  await expect(sheet().getByRole('switch', { name: `Unsubscribe from ${CLUB}` })).not.toBeChecked()
+  await expect(primary()).toBeDisabled()
+  await expect(sheet().getByRole('button', { name: 'Cancel' })).toBeFocused()
+  // Tab goes round the sheet and never out behind it.
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('Tab')
+    expect(await sheet().evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(sheet()).toBeHidden()
+  expect(posts).toHaveLength(before)
 })
 
 test('Unsubscribed is read back from clean-up history after a restart', async () => {
@@ -217,4 +293,22 @@ test('Unsubscribed is read back from clean-up history after a restart', async ()
   await expect(row(STORE).getByText('Unsubscribed', { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(button(STORE)).toHaveCount(0)
   await expect(button(BROKEN)).toBeVisible()
+})
+
+test('a sender still emailing two days after unsubscribing gets its button back', async () => {
+  const c = imap()
+  await c.connect()
+  const later = new Date(Date.now() + 3 * DAY).toUTCString().replace('GMT', '+0000')
+  await c.append(
+    'INBOX',
+    `From: ${STORE} <${FROM}>\r\nTo: ${TEST_ACCOUNT.email}\r\nSubject: We miss you\r\nDate: ${later}\r\n` +
+      `List-Id: <weekly.example>\r\n\r\nCome back\r\n`,
+  )
+  await c.logout()
+  await page.getByRole('button', { name: 'Scan again' }).click()
+  await expect(row(STORE).getByText('Still emailing', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(button(STORE)).toBeVisible()
+  await expect(row(STORE).getByText('Unsubscribed', { exact: true })).toHaveCount(0)
+  await row(STORE).scrollIntoViewIfNeeded()
+  await screenshot('unsubscribe-still-emailing')
 })

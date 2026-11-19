@@ -259,7 +259,7 @@ export function senders() {
   const s = mailStore()
   return withUnsubscribed(
     analyseSenders(s.headers(INBOX), s.repliedTo(), { allowLoopbackHttp: allowLoopbackHttp() }),
-    s.cleanups(),
+    s.cleanupSenders(),
   )
 }
 

@@ -26,8 +26,9 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
 "What did the bank email me about last week?", "Archive this week’s newsletters", "Draft a reply
 to the last email from Sam", "Reply to sam@friend.example saying Friday works", "What's overdue on my boards?", "Add a card to Home to book the MOT",
 "Show me August's spending" (opens Finances on August), "Undo clean-up 4", "Import
-/Users/me/Downloads/monzo.csv". General ones: "Help me plan my week", "Draft a polite note to my
-landlord", "How does the 50/30/20 budget work?", "What's 15% of £240?".
+/Users/me/Downloads/monzo.csv". General ones: "Help me word a polite note to my landlord", "Explain
+what an ISA is", "How does the 50/30/20 budget work?", "What's 15% of £240?". "Help me plan my
+week" is about your data: it looks at your calendar first.
 
 ## General questions and your data
 
@@ -36,13 +37,20 @@ landlord", "How does the 50/30/20 budget work?", "What's 15% of £240?".
   is general knowledge rather than from your data, it says so ("This is general advice, not from
   your Ordo data"), unless that's obvious, as with a sum.
 - **Your own mail, calendar, money, boards and Ordo itself** always come from Ordo's tools. The
-  assistant is told never to guess them, and never to pass general knowledge off as your data. If
-  the tools can't answer, it says so rather than guessing.
+  assistant is told never to guess them, and never to pass general knowledge off as your data.
+  Planning your own time counts: it looks at your calendar first. If the tools can't answer, it
+  says so rather than guessing.
+- **Ordo marks answers that looked nothing up.** When Ordo ran no tool for an answer (no chips),
+  it adds its own note under it: "General answer: nothing was looked up in your Ordo data." The
+  note comes from Ordo's count of tool calls, never from the model, so the model can't add or hide
+  it. It's plain text in the reply, so screen readers read it with the answer. A follow-up can still
+  build on what earlier answers looked up.
 - **Writing help** goes in the answer as text. A note, a message to copy or a rewording is never
   saved or sent; an email you ask it to write, draft, reply to or send follows the email rules
   below (a draft, or a Send card you confirm).
 - Every safety rule below applies unchanged. A general question can't change anything without a
-  card, and answering one reads none of your data.
+  card, and whether Ordo looked anything up is shown under each answer: as chips for each step, or
+  the general-answer note when there were none.
 
 ## What it can do
 
@@ -291,7 +299,8 @@ tool({
   never, Stop and Clear mid-question, a closed or reloaded window, history, page checks and cloud
   consent.
 - `e2e/assistant.spec.ts` runs the app against a fake LM Studio that reads tool results back out of
-  the prompt, and asks a general question from a suggestion (answered with no tool); `e2e/assistant-setup.spec.ts` checks the no-model state and the cloud OK.
+  the prompt; "Help me plan my week" reads the calendar, and "Explain what an ISA is" is answered
+  with no tool and shows the general-answer note; `e2e/assistant-setup.spec.ts` checks the no-model state and the cloud OK.
 
 ## Limits
 

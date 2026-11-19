@@ -22,6 +22,7 @@ import type {
 import { planMailto } from '@ordo/mail-core'
 import { Button } from './Button'
 import { CleanupSenderRows, plural, resultSentence, undoSentence } from './CleanupResults'
+import { useFocusTrap } from './focus'
 import { categoryColor } from './SenderTable'
 import { Switch } from './Switch'
 
@@ -52,6 +53,12 @@ const mailtoPlan = (s: CategorisedSender) =>
 /** Plain http links and emails to another domain stay off until the user has read them and ticked. */
 const needsTick = (s: CategorisedSender) => isInsecure(s) || Boolean(mailtoPlan(s)?.offDomain)
 
+/**
+ * How long the main button ignores presses after the sheet opens, so a second press of the key
+ * or click that opened it can't unsubscribe (which can't be undone).
+ */
+export const REVIEW_ARM_MS = 500
+
 /** Review sheet: per-sender choices, then progress, then the result with Undo. */
 export function ReviewSheet({
   senders: selected,
@@ -74,10 +81,26 @@ export function ReviewSheet({
   const [outcome, setOutcome] = useState<CleanupOutcome | null>(null)
   const [undo, setUndo] = useState<UndoOutcome | 'running' | null>(null)
   const clearButton = useRef<HTMLButtonElement>(null)
+  const cancelButton = useRef<HTMLButtonElement>(null)
+  const dialog = useRef<HTMLElement>(null)
+  const [armed, setArmed] = useState(false)
   const working = progress !== null || undo === 'running'
+  useFocusTrap(dialog)
 
+  // Focus goes into the sheet: Cancel for one sender's Unsubscribe (Return there is safe), the main
+  // button for a clean-up, and if that starts off (nothing on until a tick), the first switch, or
+  // the sheet itself. Never left behind it.
   useEffect(() => {
-    clearButton.current?.focus()
+    const root = dialog.current
+    const enabled = (b: HTMLButtonElement | null) => (b && !b.disabled ? b : null)
+    const first =
+      (single ? cancelButton.current : enabled(clearButton.current)) ??
+      root?.querySelector<HTMLElement>('[role="switch"]:not([disabled])') ??
+      root
+    first?.focus()
+    const t = setTimeout(() => setArmed(true), REVIEW_ARM_MS)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !working && onClose()
@@ -170,13 +193,17 @@ export function ReviewSheet({
             </p>
           )}
           <div className="flex items-center justify-end gap-2 pt-1">
-            <Button onClick={onClose}>Cancel</Button>
+            <Button ref={cancelButton} onClick={onClose}>
+              Cancel
+            </Button>
             <Button
               ref={clearButton}
               variant="primary"
               icon={sayUnsubscribe ? <MailX size={14} /> : <Trash2 size={14} />}
               disabled={!unsubscribing.length && !emails}
-              onClick={() => void clear()}
+              // Ignores presses for a moment after the sheet opens (see REVIEW_ARM_MS).
+              aria-disabled={armed ? undefined : true}
+              onClick={() => armed && void clear()}
             >
               {sayUnsubscribe ? 'Unsubscribe' : 'Clear'}
             </Button>
@@ -216,10 +243,16 @@ export function ReviewSheet({
   const sheet = (
     <div className="absolute inset-0 z-20 flex justify-center bg-black/20 pt-16 dark:bg-black/40">
       <section
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-labelledby="review-title"
-        className="glass-panel flex h-fit max-h-[calc(100%-96px)] w-[680px] max-w-[calc(100%-32px)] flex-col overflow-hidden rounded-xl"
+        tabIndex={-1}
+        // A held key repeats: never let a repeat press a button here.
+        onKeyDown={(e) => {
+          if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault()
+        }}
+        className="outline-none glass-panel flex h-fit max-h-[calc(100%-96px)] w-[680px] max-w-[calc(100%-32px)] flex-col overflow-hidden rounded-xl"
       >
         <header className="flex items-center gap-3.5 px-6 pt-5 pb-4">
           <span

@@ -7,7 +7,9 @@ import {
   cardOpen,
   elapsed,
   finish,
+  GENERAL_NOTE,
   groupTrace,
+  isGeneralAnswer,
   WAITING,
   workedFor,
   type Item,
@@ -98,6 +100,36 @@ describe('the conversation', () => {
     let no = applyEvent(start(), { type: 'confirm', id: 's1', card: send })
     no = applyEvent(no, { type: 'confirmed', id: 's1', approved: false })
     expect(reply(applyEvent(no, tool('done'))).trace[0]).not.toHaveProperty('result')
+  })
+
+  it('marks an answer Ordo looked nothing up for, by its own count of tool calls', () => {
+    const reply = (items: Item[]) => items.at(-1) as ReplyItem
+    const general = reply(
+      finish(start(), { ok: true, answer: 'An ISA is a tax-free savings account.', steps: 0 }, 10),
+    )
+    expect(general.steps).toBe(0)
+    expect(isGeneralAnswer(general)).toBe(true)
+    expect(GENERAL_NOTE).toBe('General answer: nothing was looked up in your Ordo data.')
+    // A tool ran: not general, whatever the answer says.
+    expect(isGeneralAnswer(reply(finish(start(), { ok: true, answer: 'In general, …', steps: 1 }, 10)))).toBe(
+      false,
+    )
+    // A step in the trace (a chip or a card) also rules it out.
+    const withChip = applyEvent(start(), {
+      type: 'tool',
+      id: 't1',
+      tool: 'ordo_bills',
+      label: 'Read 2 bills',
+      kind: 'read',
+      status: 'done',
+    })
+    expect(isGeneralAnswer(reply(finish(withChip, { ok: true, answer: 'Two bills.', steps: 0 }, 10)))).toBe(
+      false,
+    )
+    // No answer (stopped, failed): no note.
+    expect(
+      isGeneralAnswer(reply(finish(start(), { ok: false, reason: 'stopped', message: 'Stopped.' }, 10))),
+    ).toBe(false)
   })
 
   it('ignores events once the reply has finished', () => {

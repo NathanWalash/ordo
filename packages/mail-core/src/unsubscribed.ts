@@ -57,3 +57,16 @@ export function withUnsubscribed<T extends { address: string; unsubscribed?: Sen
     return u ? { ...s, unsubscribed: u } : s
   })
 }
+
+/** Mail can still be on its way for a day or two after unsubscribing; lists are allowed some time. */
+export const STILL_EMAILING_AFTER_MS = 2 * 24 * 60 * 60 * 1000
+
+/**
+ * Ordo unsubscribed from this sender, but its latest email arrived more than two days after that:
+ * the unsubscribe didn't take (or the page was never finished), so it's worth trying again.
+ */
+export function stillEmailing(s: { lastSeen: Date; unsubscribed?: SenderUnsubscribed }): boolean {
+  if (!s.unsubscribed) return false
+  const last = s.lastSeen instanceof Date ? s.lastSeen.getTime() : Number.NaN
+  return Number.isFinite(last) && last > s.unsubscribed.at.getTime() + STILL_EMAILING_AFTER_MS
+}

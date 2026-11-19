@@ -18,6 +18,7 @@ import {
   CircleX,
   Cloud,
   Inbox,
+  Info,
   Lightbulb,
   Loader2,
   MessageSquareText,
@@ -47,7 +48,9 @@ import { Button } from '../Button'
 import {
   answerBlocks,
   elapsed,
+  GENERAL_NOTE,
   groupTrace,
+  isGeneralAnswer,
   WAITING,
   workedFor,
   type Item,
@@ -520,6 +523,13 @@ function Reply({
       )}
       {item.status && <Working item={item} />}
       {item.answer && <Answer text={item.answer} />}
+      {isGeneralAnswer(item) && (
+        // Ordo's own words, from its count of tool calls: the model can't add or remove this.
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-2">
+          <Info size={12} className="mt-px shrink-0" aria-hidden />
+          {GENERAL_NOTE}
+        </p>
+      )}
       {showError && item.error && (
         <div className="flex flex-col items-start gap-2">
           <p className="flex items-start gap-1.5 text-[13px] leading-snug text-ink-2">

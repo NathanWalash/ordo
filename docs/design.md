@@ -199,14 +199,23 @@ output can only be a label; it can never trigger an action.
   {name}", with Move to Trash off and an **Unsubscribe** button, so the http
   link tick, the mailto preview and the other-domain tick all still apply, and
   it sends the same `cleanup:run` request through the same checks. There is
-  still that one confirm step, because an unsubscribe can't be undone.
+  still that one confirm step, because an unsubscribe can't be undone. That
+  sheet opens with focus on **Cancel**, and its **Unsubscribe** ignores
+  presses for half a second (`aria-disabled` meanwhile); in any review sheet a
+  held key's repeats never press a button, and Tab stays inside it. So a
+  double or held Return on the row's button can't unsubscribe.
   Afterwards the row says **Unsubscribed** (or **Page opened** for a link,
-  since Ordo can't see whether you finished in the browser). The main process
-  works this out from the `cleanups` history every time it lists senders
-  (`withUnsubscribed` in mail-core sets `unsubscribed` on the sender), so it
+  since Ordo can't see whether you finished in the browser), with a small
+  **Try again**. If the sender's latest email is more than two days newer
+  than the unsubscribe, the row says **Still emailing** (in the warning
+  colour) and the Unsubscribe button is back. The main process works this out
+  from the `cleanups` history every time it lists senders
+  (`MailStore.cleanupSenders` reads only each row's time and senders, and
+  skips a row whose JSON can't be read, so one corrupt row can't break the
+  list; `withUnsubscribed` in mail-core then sets `unsubscribed`), so it
   survives restarts. Only `done` and `opened` count; a failed or skipped
-  unsubscribe leaves the button, and malformed history entries are ignored.
-  Undoing a clean-up only puts emails back, so its unsubscribes still count.
+  unsubscribe leaves the button, and malformed entries are ignored. Undoing a
+  clean-up only puts emails back, so its unsubscribes still count.
 - Move: `UID MOVE` to the `\Trash` mailbox in batches of 250 (imapflow falls
   back to COPY + `\Deleted` + EXPUNGE without MOVE). The COPYUID map and
   Trash UIDVALIDITY go in the `cleanups` table with per-sender results. Undo

@@ -105,6 +105,9 @@ describe('the system prompt', () => {
     expect(system).toContain(
       "Writing help that isn't an email in their mailbox (a note, a message to copy, a rewording) goes in your answer as text. When they ask you to write, draft, reply to or send an email, follow the email rules below.",
     )
+    expect(system).toContain(
+      'Planning their own time (their week, a free evening, what to do first) is about their data: look at their calendar',
+    )
     expect(system).not.toContain('using only the tools below')
   })
 

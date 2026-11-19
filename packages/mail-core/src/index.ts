@@ -35,7 +35,13 @@ export { hostRefusal, isBlockedIp, type GuardOptions } from './url-guard'
 export { groupBySender, isAutomated, isBulk } from './senders'
 export { categorise } from './rules'
 export { analyseSenders, type CategorisedSender } from './analyse'
-export { unsubscribedFromHistory, withUnsubscribed, type SenderUnsubscribed } from './unsubscribed'
+export {
+  STILL_EMAILING_AFTER_MS,
+  stillEmailing,
+  unsubscribedFromHistory,
+  withUnsubscribed,
+  type SenderUnsubscribed,
+} from './unsubscribed'
 export {
   aiCategorise,
   AI_CATEGORIES,

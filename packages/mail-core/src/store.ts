@@ -5,6 +5,7 @@ import type {
   Category,
   CleanupRecord,
   CleanupSenderResult,
+  CleanupSummary,
   MailboxInfo,
   MailboxRole,
   MessageContent,
@@ -552,6 +553,28 @@ export class MailStore implements AiCategoryCache {
       .prepare('SELECT * FROM cleanups ORDER BY created_at DESC, id DESC')
       .all() as CleanupRow[]
     return rows.map(toCleanup)
+  }
+
+  /**
+   * Each clean-up's time and per-sender results only, newest first, for working out who Ordo has
+   * unsubscribed from. A row that can't be read (corrupt JSON) is skipped rather than failing the
+   * whole sender list; the entries themselves are checked by `unsubscribedFromHistory`.
+   */
+  cleanupSenders(): Pick<CleanupSummary, 'at' | 'senders'>[] {
+    const rows = this.db
+      .prepare('SELECT created_at, senders FROM cleanups ORDER BY created_at DESC, id DESC')
+      .all() as Pick<CleanupRow, 'created_at' | 'senders'>[]
+    const out: Pick<CleanupSummary, 'at' | 'senders'>[] = []
+    for (const r of rows) {
+      try {
+        const senders = JSON.parse(r.senders) as unknown
+        if (Array.isArray(senders))
+          out.push({ at: new Date(r.created_at), senders: senders as CleanupSenderResult[] })
+      } catch {
+        // Skipped: one unreadable row mustn't hide every sender.
+      }
+    }
+    return out
   }
 
   markUndone(id: number, restored: number, at: Date): void {

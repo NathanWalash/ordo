@@ -38,6 +38,8 @@ export interface ReplyItem {
   /** What it's doing now, while it works. */
   status: string | null
   answer?: string
+  /** Tool calls Ordo ran for the answer, from the main process (never the model's own say). */
+  steps?: number
   error?: { reason: Exclude<AskOutcome, { ok: true }>['reason']; message: string }
   startedAt: number
   endedAt?: number
@@ -110,6 +112,14 @@ export function applyEvent(items: Item[], e: AssistantEvent): Item[] {
   }
 }
 
+/** Ordo's own note under an answer that looked nothing up; never the model's words. */
+export const GENERAL_NOTE = 'General answer: nothing was looked up in your Ordo data.'
+
+/** An answer Ordo ran no tool for, by Ordo's own count: it came from the model alone. */
+export function isGeneralAnswer(item: Pick<ReplyItem, 'answer' | 'steps' | 'trace'>): boolean {
+  return item.answer !== undefined && item.steps === 0 && item.trace.length === 0
+}
+
 /** Finish the reply with the outcome of `ask`. Cards still open count as cancelled. */
 export function finish(items: Item[], outcome: AskOutcome, now: number): Item[] {
   const reply = lastReply(items)
@@ -123,7 +133,7 @@ export function finish(items: Item[], outcome: AskOutcome, now: number): Item[] 
     status: null,
     endedAt: now,
     ...(outcome.ok
-      ? { answer: outcome.answer }
+      ? { answer: outcome.answer, steps: outcome.steps }
       : { error: { reason: outcome.reason, message: outcome.message } }),
   })
 }
