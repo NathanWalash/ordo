@@ -23,6 +23,9 @@ writeFileSync(
     `\ntx_9001,20/08/2026,10:00:00,Card payment,${INJECTION},,general,-3.00,GBP,-3.00,GBP,,,,${INJECTION},,-3.00,\n`,
 )
 
+const GENERAL_ANSWER =
+  'This is general advice, not from your Ordo data:\n- Put fixed things in first\n- Pick three things that matter most\n- Leave one evening free'
+
 let lmStudio: Server
 const prompts: { system: string; prompt: string; format: unknown }[] = []
 let hold: (() => void) | null = null
@@ -67,6 +70,8 @@ function script(p: string): object | 'hold' {
     return tool('ordo_transactions', { month: '2026-08' })
   }
   if (q === 'Take your time') return 'hold'
+  // A general question: answered from the model's own knowledge, with no tool.
+  if (q === 'Help me plan my week') return answer(GENERAL_ANSWER)
   if (q === 'Break please') return answer('Fixed now:\n- **one** thing\n- another thing')
   return answer('I can help with your mail, calendar and money.')
 }
@@ -170,7 +175,14 @@ test('opens from the toolbar and the keyboard, with prompts for the page', async
   await expect(panel()).toBeVisible()
   await expect(composer()).toBeFocused()
   await expect(panel().getByText('LM Studio · gpt-oss-20b · Local')).toBeVisible()
-  await expect(panel().getByRole('button', { name: 'What’s on my calendar this week?' })).toBeVisible()
+  // Home mixes questions about your data with general ones.
+  for (const name of [
+    'What’s on this week?',
+    'Which bills are due next?',
+    'Help me plan my week',
+    'Draft a polite note to my landlord',
+  ])
+    await expect(panel().getByRole('button', { name })).toBeVisible()
   await page.screenshot({ path: 'test-results/assistant-welcome-light.png', animations: 'disabled' })
 
   await page.keyboard.press('Escape')
@@ -206,6 +218,37 @@ test('sits beside wide content, and over narrow content', async () => {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1240, 860))
   await expect.poll(contentRight).toBe('404px')
   await page.keyboard.press('Escape')
+})
+
+test('answers a general question directly, with no tool and nothing but the question sent', async () => {
+  await nav('Home').click()
+  await page.keyboard.press(`${mod}+k`)
+  await panel().getByRole('button', { name: 'Help me plan my week' }).click()
+  const reply = replies().last()
+  await expect(reply).toContainText('This is general advice, not from your Ordo data:')
+  // Only the answer's own list: no step chips, because nothing was looked up.
+  await expect(reply.getByRole('listitem')).toHaveText([
+    'Put fixed things in first',
+    'Pick three things that matter most',
+    'Leave one evening free',
+  ])
+  // Only the answer's own list: no step chips, because nothing was looked up.
+  const sent = prompts.filter((p) => question(p.prompt) === 'Help me plan my week')
+  expect(sent).toHaveLength(1)
+  expect(sent[0]!.prompt).toBe(
+    '<user_request>Help me plan my week</user_request>\n\nReply with one JSON object: your next tool call, or your answer.',
+  )
+  expect(sent[0]!.system).toContain('answer them directly from your own knowledge, without calling a tool')
+  await page.screenshot({ path: 'test-results/assistant-general-light.png', animations: 'disabled' })
+  await app.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = 'dark'
+  })
+  await expect.poll(() => page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(true)
+  await page.screenshot({ path: 'test-results/assistant-general-dark.png', animations: 'disabled' })
+  await app.evaluate(({ nativeTheme }) => {
+    nativeTheme.themeSource = 'light'
+  })
+  await expect.poll(() => page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(false)
 })
 
 test('a change waits for the card: Cancel changes nothing', async () => {

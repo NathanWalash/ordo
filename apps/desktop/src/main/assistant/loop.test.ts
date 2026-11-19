@@ -120,6 +120,47 @@ describe('the assistant loop', () => {
     expect(m.requests[0]!.schema).toBeDefined()
   })
 
+  it('answers a general question directly: no tool runs and only the question goes to the model', async () => {
+    const services = fakeServices()
+    const reads = [
+      vi.spyOn(services.money, 'overview'),
+      vi.spyOn(services.money, 'transactions'),
+      vi.spyOn(services, 'senders'),
+    ]
+    const m = fakeModel(
+      answer(
+        'In general, a polite note to a landlord says what the problem is, when it started and what you’d like done.',
+      ),
+    )
+    const s = setup(m, {
+      services,
+      page: 'home',
+      question: 'How do I write a polite note to my landlord?',
+      history: [{ user: 'What’s 15% of £240?', answer: '£36.', tainted: false }],
+    })
+    const r = await s.run()
+    expect(r).toMatchObject({
+      ok: true,
+      answer:
+        'In general, a polite note to a landlord says what the problem is, when it started and what you’d like done.',
+      steps: 0,
+      tainted: false,
+      changes: [],
+    })
+    expect(toolEvents(s.events)).toEqual([])
+    for (const read of reads) expect(read).not.toHaveBeenCalled()
+    expect(m.requests).toHaveLength(1)
+    // The question and the earlier conversation, and nothing read from the user's data.
+    expect(m.requests[0]!.prompt).toBe(
+      '<conversation>\n<user>What’s 15% of £240?</user>\n<assistant>£36.</assistant>\n</conversation>\n\n' +
+        '<user_request>How do I write a polite note to my landlord?</user_request>\n\n' +
+        'Reply with one JSON object: your next tool call, or your answer.',
+    )
+    expect(m.requests[0]!.system).toContain(
+      'answer them directly from your own knowledge, without calling a tool',
+    )
+  })
+
   it('picks a read tool, runs it, and answers from the result', async () => {
     const services = fakeServices()
     services.money.overview = async () => ({
