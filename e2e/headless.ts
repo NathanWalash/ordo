@@ -64,7 +64,15 @@ export function ordo(args: string[], userData: string, env: Record<string, strin
     child.on('error', reject)
     // Electron on Windows can add a blank line to stdout, before or after the output: compare
     // with \n line endings and no blank lines at either end, like a JSON or line reader would.
-    child.on('close', (code) => resolve({ code, stdout: normalise(stdout), stderr }))
+    child.on('close', (code, signal) => {
+      // A crash (a signal, or a Windows exception code such as 0xC0000005) is never what a test
+      // expects: show what the run printed, to tell a crash on the way out from one mid-command.
+      if (code === null || code > 255)
+        console.error(
+          `ordo ${args.join(' ')} crashed (code ${code}, signal ${signal})\n--- stdout:\n${stdout}\n--- stderr:\n${stderr}`,
+        )
+      resolve({ code, stdout: normalise(stdout), stderr })
+    })
   })
 }
 

@@ -75,6 +75,16 @@ test('boards list and boards cards read without changing anything', async () => 
   expect(readFileSync(db).length).toBeGreaterThan(0)
 })
 
+test('a quick read exits cleanly, every time', async () => {
+  // A read is done before Electron's message loop starts. Exiting from there crashed on Windows
+  // now and then (0xC0000005) while Chromium was still launching its helper processes.
+  for (let i = 0; i < 5; i++) {
+    const list = await ordo(['boards', 'list', '--json'], profile)
+    expect(list.code).toBe(0)
+    expect(json(list)).toEqual({ boards: [expect.objectContaining({ name: 'Home' })] })
+  }
+})
+
 test('add-card and move-card need --allow-changes and --confirm', async () => {
   const refused = await ordo(
     ['boards', 'add-card', '--board', 'Home', '--title', 'Book the MOT', '--confirm'],
