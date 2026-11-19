@@ -28,6 +28,7 @@ import {
   forwardSubject,
   isEmailAddress,
   ownAddresses,
+  recipientList as parseRecipients,
   replyBody,
   replyRecipients,
   replySubject,
@@ -726,23 +727,31 @@ export const EMAIL_SHOWN_MAX = 100_000
 export const MAIL_RECIPIENTS_MAX = 20
 
 /**
- * Characters that show as nothing, or as blank space, and so can hide text: every default-ignorable
- * code point (zero-width characters, Unicode tags U+E0000 to E007F, variation selectors U+FE00 to
- * FE0F, the soft hyphen, the Mongolian vowel separator and the Hangul fillers U+115F, U+1160,
- * U+3164 and U+FFA0 are all among them), plus the blank braille pattern U+2800, which draws as space.
+ * Characters that show as nothing, or as blank space, or as nothing a reader can check, and so can
+ * hide text: every default-ignorable code point (zero-width characters, Unicode tags U+E0000 to
+ * E007F, variation selectors U+FE00 to FE0F, the soft hyphen, the Mongolian vowel separator, the
+ * Hangul fillers), every other format character (Cf: interlinear annotation marks U+FFF9 to FFFB,
+ * Arabic number signs U+0600 to 0605, Egyptian hieroglyph format controls, Kaithi number signs),
+ * private-use and unassigned code points (Co, Cn), and the blank braille pattern U+2800.
  */
-const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\u2800]/gu
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Co}\p{Cn}\u2800]/gu
+
+/** The most combining marks kept on one character: more pile up into a smear that can hide text. */
+export const MARKS_MAX = 3
+const MARK_STACK = new RegExp(String.raw`(\p{M}{${MARKS_MAX}})\p{M}+`, 'gu')
 
 /**
  * Text as an email Ordo shows in full and then sends: line endings normalised; control, bidi and
- * invisible characters out; and the long runs of spaces and blank lines that could push text out
- * of sight collapsed (four or more spaces become one; three or more blank lines become two).
+ * invisible characters out; at most three combining marks on a character; and the long runs of
+ * spaces and blank lines that could push text out of sight collapsed (four or more spaces become
+ * one; three or more blank lines become two).
  */
 export function visibleText(text: string): string {
   return text
     .replace(/\r\n?/g, '\n')
     .replace(UNSAFE_KEEP_LINES, '')
     .replace(INVISIBLE, '')
+    .replace(MARK_STACK, '$1')
     .replace(/[^\S\n]{4,}/g, ' ')
     .replace(/[^\S\n]+$/gm, '')
     .replace(/\n{4,}/g, '\n\n\n')
@@ -848,6 +857,15 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     const m = original!
     const inSent = services.mail.mailboxes().find((b) => b.path === mailbox)?.role === 'sent'
     const r = replyRecipients(m, own, a.mode === 'reply-all', { inSent })
+    // Addresses from the email's own headers are the sender's to write. Each must be one plain
+    // address: a quoted local part with a comma in it (`"a@b.example,boss"@c.example`) would
+    // otherwise show as one recipient and be sent to two.
+    const odd = [...r.to, ...r.cc].find((x) => !isEmailAddress(x.address))
+    if (odd)
+      return {
+        ok: false,
+        message: `Ordo can’t reply to this email: one of its addresses (${clean(odd.address, 120)}) isn’t a plain email address.`,
+      }
     // The sender picks their own Reply-To, so it's told apart from the address the email came from.
     const sender = m.from?.address.toLowerCase()
     const replyTo = new Set(m.replyTo.map((x) => x.address.toLowerCase()))
@@ -872,7 +890,7 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     if (!subject) return { ok: false, message: 'Give the email a subject.' }
   }
   // One line, no control or bidi characters: the subject is a header.
-  subject = clean(subject, 300).replace(INVISIBLE, '').trim()
+  subject = clean(subject, 300).replace(INVISIBLE, '').replace(MARK_STACK, '$1').trim()
   const dedupe = new Set<string>()
   const keep = (list: string[]) =>
     list.filter((x) => {
@@ -888,6 +906,15 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     return { ok: false, message: `The assistant writes to at most ${MAIL_RECIPIENTS_MAX} people at once.` }
 
   const files = a.mode === 'forward' ? original!.attachments.filter((x) => !x.inline) : []
+  // The card shows each attachment's name in full, exactly as it's sent, so a name that could
+  // disguise what a file is (a reversed extension, a hidden character) or is too long to read
+  // isn't forwarded by the assistant at all.
+  const disguised = files.find((f) => !attachmentNameOk(f.filename))
+  if (disguised)
+    return {
+      ok: false,
+      message: `“${clean(disguised.filename, 80)}” has a name Ordo can’t show you exactly (hidden or reversing characters, or too long), so the assistant won’t forward it. Forward it from Mail instead.`,
+    }
   if (files.length > COMPOSE_LIMITS.attachments)
     return {
       ok: false,
@@ -911,9 +938,10 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     rest = visibleText(rest.slice(0, Math.max(0, room - ORIGINAL_CUT.length)) + ORIGINAL_CUT)
   const body = text + (rest ?? '')
   const compose: ComposeInput = {
-    to: recipients.to.join(', '),
-    cc: recipients.cc.join(', '),
-    bcc: '',
+    // As lists, one address each, so nothing is split or joined on the way to the server.
+    to: recipients.to,
+    cc: recipients.cc,
+    bcc: [],
     subject,
     body,
     attachments: [],
@@ -930,7 +958,7 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
       subject,
       text,
       ...(rest !== null && { original: { kind: a.mode === 'forward' ? 'forwarded' : 'quoted', text: rest } }),
-      attachments: files.map((f) => ({ name: clean(f.filename, 120), size: f.size })),
+      attachments: files.map((f) => ({ name: f.filename, size: f.size })),
       send,
     },
     mail: {
@@ -950,6 +978,46 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
       })),
     },
   }
+}
+
+/**
+ * The last check before an email goes to the mail client: the recipients it will parse are exactly
+ * the ones the card listed, in the same fields, and there's no Bcc. Anything else is refused.
+ */
+export function recipientsMismatch(built: Extract<Built, { ok: true }>): CommandResult | null {
+  const parsed = (field: ComposeInput['to']) => {
+    const list = parseRecipients(field)
+    return list.invalid.length ? null : list.addresses.map((x) => x.address.toLowerCase())
+  }
+  const shown = (list: string[]) => list.map((x) => x.toLowerCase())
+  const to = parsed(built.compose.to)
+  const cc = parsed(built.compose.cc)
+  const bcc = parsed(built.compose.bcc)
+  const same = (a: string[] | null, b: string[]) =>
+    a !== null && a.length === b.length && a.every((x, i) => x === b[i])
+  if (same(to, shown(built.email.to)) && same(cc, shown(built.email.cc)) && bcc?.length === 0) return null
+  return {
+    ok: false,
+    code: 'invalid',
+    message: 'The recipients don’t match the ones Ordo showed you, so nothing was sent or saved.',
+  }
+}
+
+/** The longest attachment name the assistant forwards (most systems allow 255). */
+export const ATTACHMENT_NAME_MAX = 255
+
+/**
+ * Whether an attachment's name can go on a card exactly as it is: no control, bidi, zero-width or
+ * other invisible characters (which can reverse an extension, `invoice\u202Efdp.exe`), and short
+ * enough to read in full.
+ */
+export function attachmentNameOk(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= ATTACHMENT_NAME_MAX &&
+    clean(name, ATTACHMENT_NAME_MAX + 1) === name &&
+    !new RegExp(INVISIBLE.source, 'u').test(name)
+  )
 }
 
 /** "Send “Re: Lunch?” to sam@friend.example and 2 more". */
@@ -1132,6 +1200,8 @@ const MAIL_CHANGE_TOOLS = [
     async run(services, a) {
       const built = await buildEmail(services, a as EmailArgs, false)
       if (!built.ok) return { ok: false, code: 'invalid', message: built.message }
+      const mismatch = recipientsMismatch(built)
+      if (mismatch) return mismatch
       const r = await services.mail.saveDraft(built.compose)
       if (!r.ok) return { ok: false, code: mailErrorCode(r.error), message: r.message }
       return { ok: true, data: { saved: true, draft: r.draft } }
@@ -1174,6 +1244,8 @@ const MAIL_CHANGE_TOOLS = [
         }
       const built = await buildEmail(services, a as EmailArgs, true)
       if (!built.ok) return { ok: false, code: 'invalid', message: built.message }
+      const mismatch = recipientsMismatch(built)
+      if (mismatch) return mismatch
       const r = await services.mail.send(built.compose)
       if (!r.ok) return { ok: false, code: mailErrorCode(r.error), message: r.message }
       return { ok: true, data: { sent: true, ...(r.warning && { warning: r.warning }) } }

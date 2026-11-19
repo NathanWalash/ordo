@@ -277,9 +277,9 @@ describe('MCP server', () => {
     expect(json(r)).toEqual({ saved: true, draft: { mailbox: 'Drafts', uid: 30 } })
     expect(services.mail.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
-        to: 'sam@friend.example',
+        to: ['sam@friend.example'],
         subject: 'Re: Lunch?',
-        bcc: '',
+        bcc: [],
         replyTo: { mailbox: 'INBOX', uid: 7 },
       }),
     )

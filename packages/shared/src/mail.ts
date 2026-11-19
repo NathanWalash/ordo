@@ -97,7 +97,11 @@ export interface PickedFile {
   size: number
 }
 
-const addressField = z.string().max(20_000)
+/** Typed text from the compose sheet, or a list of plain addresses (the assistant), one per entry. */
+const addressField = z.union([
+  z.string().max(20_000),
+  z.array(z.string().max(320)).max(COMPOSE_LIMITS.recipients),
+])
 
 /** A message from the compose sheet. Addresses are parsed and checked again in the main process. */
 export const ComposeSchema = z.object({

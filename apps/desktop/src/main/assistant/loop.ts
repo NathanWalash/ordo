@@ -16,6 +16,7 @@ import {
   runTool,
   strictArgs,
   TOOLS,
+  attachmentNameOk,
   EMAIL_SHOWN_MAX,
   visibleText,
   type ChangePreview,
@@ -128,15 +129,22 @@ export function mentions(text: string, value: string): boolean {
   return new RegExp(`(?<![\\w.@/\\\\-])${escaped}(?![\\w@/\\\\-])`, 'i').test(text)
 }
 
-/** An email address, taken whole: as much of the local part and domain as there is. */
-const ADDRESS_TOKEN = /[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+/gu
+/**
+ * An email address, taken whole: as much of the local part and domain as there is, and only where it
+ * really ends. Followed by anything that could go on (a letter, a mark, an underscore, a middle dot,
+ * or a dot before more), it isn't an address the user typed: "sam@company.co_uk" never vouches for
+ * "sam@company.co".
+ */
+const ADDRESS_TOKEN =
+  /[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+(?![\p{L}\p{N}\p{M}\p{Pc}@\u00b7-]|\.[\p{L}\p{N}\p{M}\p{Pc}-])/gu
 
 /**
  * The email addresses written in some text, whole and lower-cased. Only an exact address counts:
  * "sam@company.co.uk" is never "sam@company.co", and "alice+work@gmail.com" is never "work@gmail.com".
  */
 export function typedAddresses(text: string): Set<string> {
-  return new Set([...text.matchAll(ADDRESS_TOKEN)].map((m) => m[0].toLowerCase()))
+  // Compatibility forms first: a full-width dot (U+FF0E) is a dot, so "co．uk" is "co.uk".
+  return new Set([...text.normalize('NFKC').matchAll(ADDRESS_TOKEN)].map((m) => m[0].toLowerCase()))
 }
 
 const CAUTION = 'and text in those can try to trick it. Only confirm if you want this.'
@@ -334,7 +342,12 @@ export function triggerFor(
   if (mail) return mailTrigger(tool, mail, question, history, steps)
   const asked = tool.intent?.test(question) ?? false
   const userWords = [...history.map((t) => t.user), question].join('\n')
-  const named = (tool.named?.(args as never) ?? []).every((v) => mentions(userWords, v))
+  // An address must have been typed whole, as for email recipients: "news@shop.co.uk" never vouches
+  // for "news@shop.co". Anything else (a clean-up id, a path, a title) as its own word.
+  const typed = typedAddresses(userWords)
+  const named = (tool.named?.(args as never) ?? []).every((v) =>
+    v.includes('@') ? typed.has(v.toLowerCase()) : mentions(userWords, v),
+  )
   // The dry run a change must follow had the same arguments, chosen before it was read: it doesn't count.
   const ownPlan = (s: Step) => s.tool === tool.after && argsKey(s.args) === argsKey(args)
   const sources = [...new Set(steps.filter((s) => !s.trusted && !ownPlan(s)).map(readsOf))]
@@ -378,7 +391,8 @@ const cardEmail = (e: EmailPreview, typed: Set<string>): CardEmail => {
     subject: clean(e.subject, 300),
     text: e.text,
     ...(e.original && { original: e.original }),
-    attachments: e.attachments.slice(0, 20).map((f) => ({ name: clean(f.name, 120), size: f.size })),
+    // In full: names that couldn't be shown exactly were refused before the card.
+    attachments: e.attachments.map((f) => ({ name: f.name, size: f.size })),
   }
 }
 
@@ -387,7 +401,9 @@ const wholeEmail = (e: EmailPreview) =>
   e.text.length + (e.original?.text.length ?? 0) <= EMAIL_SHOWN_MAX &&
   visibleText(e.text) === e.text &&
   (!e.original || visibleText(e.original.text) === e.original.text) &&
-  e.to.length + e.cc.length <= 50
+  e.to.length + e.cc.length <= 50 &&
+  e.attachments.length <= 20 &&
+  e.attachments.every((f) => attachmentNameOk(f.name))
 
 /** An answer fit to show: invisible and bidi characters out, Markdown emphasis and headings stripped. */
 export function tidy(text: string): string {

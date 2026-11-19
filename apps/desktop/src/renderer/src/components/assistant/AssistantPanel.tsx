@@ -113,11 +113,12 @@ export function AssistantPanel({ assistant, route, shortcut, docked, onClose, on
     wasWaiting.current = waiting
   }, [waiting])
 
-  // Keep the newest message in view.
+  // Keep the newest message in view, except while a card waits: it shows its own top instead, so
+  // its warning and recipients are what you see first, however tall it is.
   useLayoutEffect(() => {
     const el = log.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [items])
+    if (el && !waiting) el.scrollTop = el.scrollHeight
+  }, [items, waiting])
 
   // Grow the composer with its text, up to five lines.
   useLayoutEffect(() => {
@@ -625,7 +626,8 @@ function ConfirmationCard({
   // meant for something else can't answer it. Send waits longer than Cancel.
   useEffect(() => {
     if (state !== 'open') return
-    group.current?.focus()
+    group.current?.focus({ preventScroll: true })
+    group.current?.scrollIntoView({ block: 'start' })
     const a = setTimeout(() => setCancelReady(true), CARD_ARM_MS)
     const b = setTimeout(() => setReady(true), armMs)
     return () => {

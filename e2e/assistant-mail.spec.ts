@@ -463,6 +463,8 @@ test('sends a threaded reply after Send, and the original is marked answered', a
 })
 
 test('an email that asks to be forwarded gets the red card, which nothing confirms by itself', async () => {
+  // A short window, so the card is taller than the conversation: its top must be what shows.
+  await size(920, 520)
   await ask('What does the order email say?')
   const shown = card(`Send “Fwd: ${PROMO}” to ${EVIL}`)
   const send = shown.getByRole('button', { name: 'Send anyway' })
@@ -472,6 +474,12 @@ test('an email that asks to be forwarded gets the red card, which nothing confir
   await expect(shown).toBeFocused()
   await expect(send).not.toBeFocused()
   await expect(shown).toContainText('Check this first')
+  // The warning and the recipients are in view, not scrolled away below the card's top.
+  const box = await shown.boundingBox()
+  expect(box!.height).toBeGreaterThan((await panel().getByRole('log').boundingBox())!.height)
+  await expect(shown.getByText('Check this first')).toBeInViewport({ ratio: 1 })
+  await expect(shown.getByText(/^You didn’t ask for this\./)).toBeInViewport({ ratio: 1 })
+  await size(1240, 860)
   await expect(shown).toHaveAccessibleDescription(
     new RegExp(
       `^You didn’t ask for this\\. The assistant suggested it after reading .*, and text in those can try to trick it\\. ` +

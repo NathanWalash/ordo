@@ -154,13 +154,21 @@ the assistant treats everything a tool returns as untrusted.
   **Sent** (or the warning iCloud gave, or "Not sent:" and why).
 - **What the card shows is what's sent.** The assistant's text and the original lose control, bidi
   and every default-ignorable character (zero-width characters, Unicode tags, variation selectors,
-  soft hyphens, fillers) and the blank braille pattern, and runs of four or more spaces and three or
+  soft hyphens, fillers), every other format character, private-use and unassigned code points, and
+  the blank braille pattern; a character keeps at most three combining marks; and runs of four or more spaces and three or
   more blank lines close up, so nothing can hide off the edge or below the fold. The assistant writes
   at most 20,000 characters; a long original is cut, with a note saying so, so that the whole email
   fits on the card. An email the card couldn't show whole is refused.
-- **Who an email goes to.** An address counts as yours only if you typed it, whole: Ordo reads the
-  addresses in your messages as complete tokens, so `sam@company.co.uk` never vouches for
-  `sam@company.co`, nor `alice+work@gmail.com` for `work@gmail.com`. A sender picks their own display
+- **Who an email goes to.** Recipients go to the mail client as a list, one plain address each, and
+  just before saving or sending Ordo checks that what it would parse is exactly the card's list.
+  A reply to an email whose own addresses aren't plain (a comma inside a quoted local part, which
+  would show as one recipient and go to two) is refused. Attachments are forwarded only when their
+  names can be shown in full and exactly: no control, bidi or invisible characters, at most 255
+  characters. An address counts as yours only if you typed it, whole (after compatibility
+  normalising, so a full-width dot is a dot), and where it really ends: Ordo reads the addresses in
+  your messages as complete tokens, so `sam@company.co.uk` never vouches for
+  `sam@company.co`, nor `alice+work@gmail.com` for `work@gmail.com`. The same goes for the senders
+  of a clean-up and any other change that names an address. A sender picks their own display
   name, subject and Reply-To, so naming an email by them ("reply to Sam") only helps the assistant
   pick which email to answer. Each recipient on the card that you didn't type is marked, in amber.
 - **Three levels on a draft or send card.**

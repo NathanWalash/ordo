@@ -71,6 +71,30 @@ export function parseAddressList(input: string): ParsedAddressList {
   return { addresses, invalid }
 }
 
+/**
+ * Recipients given as typed text (the compose sheet: commas, names, quotes) or as a list of plain
+ * addresses (the assistant). A list is taken entry by entry, and each entry must be exactly one
+ * valid address, so nothing inside one (a comma in a quoted local part, say) can make it two.
+ */
+export function recipientList(input: string | readonly string[]): ParsedAddressList {
+  if (typeof input === 'string') return parseAddressList(input)
+  const addresses: Address[] = []
+  const invalid: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input) {
+    const address = raw.trim()
+    if (!isEmailAddress(address)) {
+      invalid.push(raw)
+      continue
+    }
+    const key = address.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    addresses.push({ address })
+  }
+  return { addresses, invalid }
+}
+
 /** An address as people write it: `Name <a@b.example>`, quoting the name when it needs it. */
 export function formatAddress(a: Address): string {
   if (!a.name) return a.address

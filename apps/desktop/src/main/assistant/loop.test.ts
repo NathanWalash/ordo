@@ -723,8 +723,8 @@ describe('mail: acting on email, drafting and sending', () => {
     // Threaded through the existing send path, with exactly the text and original the card showed.
     expect(sent(services)).toEqual([
       expect.objectContaining({
-        to: 'sam@friend.example',
-        bcc: '',
+        to: ['sam@friend.example'],
+        bcc: [],
         subject: 'Re: Lunch?',
         body: card.email!.text + card.email!.original!.text,
         replyTo: { mailbox: 'INBOX', uid: 7 },
@@ -1219,5 +1219,72 @@ describe('naming a message', () => {
       { address: 'a@phish.example', name: 'Email Message', subject: 'Re: Re: update' },
     ])
       expect(namesMessage('reply to the last email from me with an update', m)).toBe(false)
+  })
+})
+
+describe('review round three', () => {
+  function replyFrom(from: { address: string; name?: string }) {
+    const services = fakeServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ from, text: 'Are you free?', html: null, attachments: [] }),
+    }))
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    return services
+  }
+
+  it('a sender address with a comma in a quoted local part is refused, never split into two recipients', async () => {
+    for (const address of ['sam@friend.example,boss@corp.example', 'Sam <attacker@evil.example>@x']) {
+      const services = replyFrom({ address, name: 'Sam' })
+      const s = setup(
+        fakeModel(call('ordo_mail_send', { mode: 'reply', uid: 7, body: 'Yes' }), answer('x')),
+        {
+          services,
+          question: 'Reply to Sam’s lunch email saying yes',
+          confirm: async () => true,
+        },
+      )
+      await s.run()
+      expect(s.cards[0]!.blocked).toMatch(
+        /^Ordo can’t reply to this email: one of its addresses .* isn’t a plain email address\.$/,
+      )
+      expect(services.mail.send).not.toHaveBeenCalled()
+    }
+  })
+
+  it('a look-alike address never vouches for a clean-up or any other change', () => {
+    const cleanup = toolByName('ordo_cleanup_run')!
+    for (const [typed, sender] of [
+      ['news@shop.co.uk', 'news@shop.co'],
+      ['alice+news@x.example', 'news@x.example'],
+      ['news@shop.co_uk', 'news@shop.co'],
+    ] as const) {
+      const args = { senders: [sender] }
+      expect(triggerFor(cleanup, args, `Unsubscribe me from ${typed}`, [], []).kind).toBe('data')
+    }
+    expect(
+      triggerFor(cleanup, { senders: ['News@Shop.co.uk'] }, 'Unsubscribe me from news@shop.co.uk', [], []),
+    ).toEqual({ kind: 'request', text: 'You asked for this.' })
+  })
+
+  it('reads typed addresses after compatibility normalising, and only where they really end', () => {
+    const fullWidthDot = String.fromCharCode(0xff0e)
+    const middleDot = String.fromCharCode(0xb7)
+    expect([...typedAddresses(`sam@company.co${fullWidthDot}uk`)]).toEqual(['sam@company.co.uk'])
+    for (const text of [
+      `sam@company.co${fullWidthDot}uk`,
+      `sam@company.co${middleDot}uk`,
+      'sam@company.co_uk',
+      'sam@company.co.uk_x',
+      'sam@company.co\u0301',
+    ])
+      expect(typedAddresses(text).has('sam@company.co')).toBe(false)
+    // A sentence can still end right after an address.
+    expect([...typedAddresses('Email sam@company.co. Then lunch.')]).toEqual(['sam@company.co'])
+    expect([...typedAddresses('Email sam@company.co, pat@x.example; and <lee@y.example>!')]).toEqual([
+      'sam@company.co',
+      'pat@x.example',
+      'lee@y.example',
+    ])
   })
 })

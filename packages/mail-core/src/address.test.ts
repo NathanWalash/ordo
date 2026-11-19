@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  recipientList,
   displayName,
   formatAddress,
   formatAddressList,
@@ -75,5 +76,27 @@ describe('formatAddress', () => {
       'Boss <attacker@evil.example>',
     )
     expect(personLabel({ address: 'a@x.example' })).toBe('a@x.example')
+  })
+})
+
+describe('recipientList', () => {
+  it('takes typed text as the compose sheet does', () => {
+    expect(recipientList('Sam <sam@friend.example>, pat@friend.example').addresses).toEqual([
+      { address: 'sam@friend.example', name: 'Sam' },
+      { address: 'pat@friend.example' },
+    ])
+  })
+
+  it('takes a list entry by entry: each must be one plain address, never split into two', () => {
+    expect(recipientList(['sam@friend.example', 'PAT@friend.example', 'pat@friend.example'])).toEqual({
+      addresses: [{ address: 'sam@friend.example' }, { address: 'PAT@friend.example' }],
+      invalid: [],
+    })
+    for (const entry of [
+      'sam@friend.example,boss@corp.example',
+      'Sam <sam@friend.example>',
+      'a@b.example; c@d.example',
+    ])
+      expect(recipientList([entry])).toEqual({ addresses: [], invalid: [entry] })
   })
 })

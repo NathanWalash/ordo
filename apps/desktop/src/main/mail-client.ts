@@ -7,7 +7,7 @@ import {
   checkLink,
   COMPOSE_LIMITS,
   hasControlChars,
-  parseAddressList,
+  recipientList,
   referencesFor,
   safeFilename,
   type AttachmentInfo,
@@ -599,9 +599,9 @@ type Built = { message: OutgoingMessage; original: MessageContent | null } | Mai
 /** Turn the compose sheet's fields into a checked message, fetching what the main process needs. */
 async function compose(input: ComposeInput, from: string, needRecipients: boolean): Promise<Built> {
   const fields = {
-    to: parseAddressList(input.to),
-    cc: parseAddressList(input.cc),
-    bcc: parseAddressList(input.bcc),
+    to: recipientList(input.to),
+    cc: recipientList(input.cc),
+    bcc: recipientList(input.bcc),
   }
   const bad = [...fields.to.invalid, ...fields.cc.invalid, ...fields.bcc.invalid]
   if (bad.length) return fail('invalid', `Check this address: ${bad[0]!.slice(0, 80)}`)

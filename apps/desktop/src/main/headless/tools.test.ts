@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHANGE_COMMANDS } from './args'
 import { content, fakeServices, summary } from './fake-services'
 import {
+  attachmentNameOk,
   DRAFT_NOTE,
+  MARKS_MAX,
+  recipientsMismatch,
   EMAIL_SHOWN_MAX,
   MAIL_BODY_MAX,
   ORIGINAL_CUT,
@@ -723,7 +726,7 @@ describe('sending is the assistant’s alone', () => {
     const ok = await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
     expect(ok).toEqual({ ok: true, data: { sent: true } })
     expect(services.mail.send).toHaveBeenCalledWith(
-      expect.objectContaining({ to: 'sam@friend.example', cc: '', bcc: '', subject: 'Hi', body: 'Hello' }),
+      expect.objectContaining({ to: ['sam@friend.example'], cc: [], bcc: [], subject: 'Hi', body: 'Hello' }),
     )
   })
 
@@ -740,5 +743,103 @@ describe('sending is the assistant’s alone', () => {
   it('has no headless command', () => {
     expect(t('ordo_mail_send').command).toBeUndefined()
     expect([...CHANGE_COMMANDS].some((c) => /send|reply|forward/.test(c))).toBe(false)
+  })
+})
+
+describe('review round three: tools', () => {
+  it('passes recipients as lists, one address each, and checks them against the card before sending', async () => {
+    const services = fakeServices()
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const args = {
+      mode: 'new',
+      to: ['pat@friend.example'],
+      cc: ['lee@friend.example'],
+      subject: 'Hi',
+      body: 'Hi',
+    }
+    await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    expect(vi.mocked(services.mail.send).mock.calls[0]![0]).toMatchObject({
+      to: ['pat@friend.example'],
+      cc: ['lee@friend.example'],
+      bcc: [],
+    })
+  })
+
+  it('refuses when what would be parsed isn’t exactly the card’s list', () => {
+    const built = (to: string[] | string, shown: string[], bcc: string[] | string = []) =>
+      ({
+        ok: true,
+        compose: { to, cc: [], bcc, subject: 'x', body: 'x', attachments: [] },
+        email: {
+          from: 'me@icloud.example',
+          to: shown,
+          cc: [],
+          subject: 'x',
+          text: 'x',
+          attachments: [],
+          send: true,
+        },
+        mail: { messages: [] },
+      }) as never
+    expect(recipientsMismatch(built(['sam@friend.example'], ['sam@friend.example']))).toBeNull()
+    for (const b of [
+      built('sam@friend.example,boss@corp.example', ['sam@friend.example,boss@corp.example']),
+      built(['sam@friend.example,boss@corp.example'], ['sam@friend.example,boss@corp.example']),
+      built(['sam@friend.example', 'boss@corp.example'], ['sam@friend.example']),
+      built(['sam@friend.example'], ['sam@friend.example'], ['spy@evil.example']),
+    ])
+      expect(recipientsMismatch(b)).toMatchObject({ ok: false, code: 'invalid' })
+  })
+
+  it('shows an attachment’s full name, and won’t forward one whose name could disguise it', async () => {
+    const services = fakeServices()
+    const rlo = String.fromCharCode(0x202e)
+    const file = (filename: string) => ({
+      part: '2',
+      filename,
+      contentType: 'application/pdf',
+      size: 10,
+      inline: false,
+    })
+    const forward = { mode: 'forward', uid: 7, to: ['pat@friend.example'], body: 'FYI' }
+    const long = `${'b'.repeat(200)}.pdf`
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ attachments: [file(long)] }),
+    }))
+    expect((await previewTool(services, t('ordo_mail_send'), forward)).email!.attachments).toEqual([
+      { name: long, size: 10 },
+    ])
+    for (const bad of [
+      `invoice${rlo}fdp.exe`,
+      `a${String.fromCharCode(0x200b)}.pdf`,
+      `${'c'.repeat(300)}.pdf`,
+      'tab\there.pdf',
+    ]) {
+      services.mail.open = vi.fn(async () => ({
+        ok: true as const,
+        message: content({ attachments: [file(bad)] }),
+      }))
+      expect((await previewTool(services, t('ordo_mail_send'), forward)).blocked).toMatch(
+        /has a name Ordo can’t show you exactly .* Forward it from Mail instead\.$/,
+      )
+    }
+    expect(attachmentNameOk('report.pdf')).toBe(true)
+  })
+
+  it('removes every other format, private-use and unassigned character, and caps stacked marks', () => {
+    const cps = [
+      0xfff9, 0xfffa, 0xfffb, 0x13430, 0x1343f, 0x600, 0x605, 0x6dd, 0x70f, 0x890, 0x891, 0x8e2, 0x110bd,
+      0x110cd, 0xe000, 0xf8ff, 0x10fffd, 0x0378,
+    ]
+    for (const cp of cps) expect(visibleText(`a${String.fromCodePoint(cp)}b`)).toBe('ab')
+    const acute = String.fromCharCode(0x301)
+    expect(visibleText(`a${acute.repeat(50)}b`)).toBe(`a${acute.repeat(MARKS_MAX)}b`)
+    // Ordinary accents and emoji with one mark stay.
+    expect(visibleText(`e${acute} caf${String.fromCharCode(0xe9)}`)).toBe(
+      `e${acute} caf${String.fromCharCode(0xe9)}`,
+    )
+    const once = visibleText(`x${acute.repeat(9)}${String.fromCodePoint(0xfff9)}y`)
+    expect(visibleText(once)).toBe(once)
   })
 })

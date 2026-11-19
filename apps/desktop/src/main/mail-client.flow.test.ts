@@ -304,6 +304,16 @@ describe('moving mail', () => {
 })
 
 describe('sending', () => {
+  it('takes recipients as a list, one address per entry, and refuses an entry that would split', async () => {
+    expect(await client.send(compose({ to: ['sam@friend.example'], cc: [], bcc: [] }))).toEqual({ ok: true })
+    expect(server.sent[0]).toMatchObject({ to: [{ address: 'sam@friend.example' }], cc: [], bcc: [] })
+    const split = await client.send(
+      compose({ to: ['sam@friend.example,boss@corp.example'], cc: [], bcc: [] }),
+    )
+    expect(split).toMatchObject({ ok: false, error: 'invalid' })
+    expect(server.sent).toHaveLength(1)
+  })
+
   it('sends, keeps a read copy in Sent and marks the original answered', async () => {
     const r = await client.send(compose({ replyTo: { mailbox: 'INBOX', uid: 1 } }))
     expect(r).toEqual({ ok: true })
