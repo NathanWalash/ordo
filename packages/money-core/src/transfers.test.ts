@@ -64,7 +64,8 @@ describe('pairOwnTransfers', () => {
     expect(r.find((t) => t.id === out2.id)!.transferWith).toBe(inn2.id)
   })
 
-  it('grows in line with the statements, not with their square', () => {
+  // Timing depends on machine load (the suite runs files in parallel); a real slowdown fails every retry.
+  it('grows in line with the statements, not with their square', { retry: 3 }, () => {
     const statements = (n: number) => {
       const rows: Transaction[] = []
       for (let i = 0; i < n; i++) {

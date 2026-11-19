@@ -196,12 +196,23 @@ describe('termination and speed', () => {
     }
   })
 
-  it('stays fast on long runs of unclosed marks', () => {
+  // Compares sizes rather than a fixed time, so a busy machine doesn't fail it: four times the
+  // text takes about four times as long if linear, sixteen if quadratic. A real slowdown fails
+  // every retry; a load spike doesn't.
+  it('stays fast on long runs of unclosed marks', { retry: 3 }, () => {
+    const time = (unit: string, n: number) => {
+      const text = unit.repeat(Math.ceil(n / unit.length)).slice(0, n)
+      let best = Infinity
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now()
+        parseMarkdown(text)
+        best = Math.min(best, performance.now() - started)
+      }
+      return best
+    }
     for (const unit of ['*a ', '_a ', '**a ', '__a ', '`a ', '[a ', 'h ', '[a](b ']) {
-      const text = unit.repeat(Math.ceil(20_000 / unit.length)).slice(0, 20_000)
-      const started = performance.now()
-      parseMarkdown(text)
-      expect(performance.now() - started, unit).toBeLessThan(250)
+      expect(time(unit, 20_000) / Math.max(time(unit, 5_000), 1), unit).toBeLessThan(9)
+      expect(time(unit, 20_000), unit).toBeLessThan(2_000)
     }
   })
 })

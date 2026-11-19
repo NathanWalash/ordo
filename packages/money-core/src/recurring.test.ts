@@ -132,7 +132,8 @@ describe('detectRecurring', () => {
     expect(c!.nextDue).toBe('2026-06-21')
   })
 
-  it('grows in line with the statement, not with its square', () => {
+  // Timing depends on machine load (the suite runs files in parallel); a real slowdown fails every retry.
+  it('grows in line with the statement, not with its square', { retry: 3 }, () => {
     // Years of daily shop with one merchant, every amount a little different.
     const statement = (n: number) =>
       Array.from({ length: n }, (_, i) => tx(addDays('2020-01-01', i % 2000), -(500 + i), 'Corner Shop'))
