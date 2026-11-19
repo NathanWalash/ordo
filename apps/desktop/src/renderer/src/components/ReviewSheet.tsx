@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { CircleCheck, ExternalLink, Mail, ShieldCheck, Trash2, TriangleAlert, Undo2, Zap } from 'lucide-react'
+import {
+  CircleCheck,
+  CircleX,
+  ExternalLink,
+  Mail,
+  MailX,
+  ShieldCheck,
+  Trash2,
+  TriangleAlert,
+  Undo2,
+  Zap,
+} from 'lucide-react'
 import type {
   CategorisedSender,
   CleanupOutcome,
@@ -20,6 +31,13 @@ interface Props {
   onClose: () => void
   /** A clean-up finished (or was undone): reload the sender analysis. */
   onChanged: () => void
+  /**
+   * `clear` (the default) reviews a bulk clean-up. `unsubscribe` is one sender's Unsubscribe button:
+   * the sheet is titled for that sender and its main button says Unsubscribe.
+   */
+  purpose?: 'clear' | 'unsubscribe'
+  /** Whether Move to Trash starts on for each sender. Defaults to on for a clean-up, off to unsubscribe. */
+  initialTrash?: boolean
 }
 
 type Choice = { unsubscribe: boolean; trash: boolean }
@@ -35,13 +53,20 @@ const mailtoPlan = (s: CategorisedSender) =>
 const needsTick = (s: CategorisedSender) => isInsecure(s) || Boolean(mailtoPlan(s)?.offDomain)
 
 /** Review sheet: per-sender choices, then progress, then the result with Undo. */
-export function ReviewSheet({ senders: selected, onClose, onChanged }: Props) {
+export function ReviewSheet({
+  senders: selected,
+  onClose,
+  onChanged,
+  purpose = 'clear',
+  initialTrash = purpose === 'clear',
+}: Props) {
   const senders = selected.filter((s) => s.category !== 'people')
+  const single = purpose === 'unsubscribe'
   const [choices, setChoices] = useState<Record<string, Choice>>(() =>
     Object.fromEntries(
       senders.map((s) => [
         s.address,
-        { unsubscribe: s.unsubscribe.kind !== 'none' && !needsTick(s), trash: true },
+        { unsubscribe: s.unsubscribe.kind !== 'none' && !needsTick(s), trash: initialTrash },
       ]),
     ),
   )
@@ -66,6 +91,8 @@ export function ReviewSheet({ senders: selected, onClose, onChanged }: Props) {
   const unsubscribing = senders.filter((s) => choices[s.address]?.unsubscribe)
   const trashing = senders.filter((s) => choices[s.address]?.trash)
   const emails = trashing.reduce((n, s) => n + s.count, 0)
+  // One sender's sheet says Unsubscribe, unless it's only been asked to move emails to Trash.
+  const sayUnsubscribe = single && !(emails && !unsubscribing.length)
 
   const clear = async () => {
     setProgress({ phase: 'unsubscribe', done: 0, total: unsubscribing.length })
@@ -133,8 +160,9 @@ export function ReviewSheet({ senders: selected, onClose, onChanged }: Props) {
           </p>
           <p className="flex gap-1.5 text-[12px] leading-snug text-ink-2">
             <ShieldCheck size={14} className="mt-px shrink-0" />
-            Emails go to Trash, not deleted, and you can undo the move from History. Unsubscribing can’t be
-            undone.
+            {single && !emails
+              ? 'Your emails stay in your inbox. Unsubscribing can’t be undone.'
+              : 'Emails go to Trash, not deleted, and you can undo the move from History. Unsubscribing can’t be undone.'}
           </p>
           {outcome && !outcome.ok && (
             <p role="alert" className="text-[12px] text-danger">
@@ -146,18 +174,44 @@ export function ReviewSheet({ senders: selected, onClose, onChanged }: Props) {
             <Button
               ref={clearButton}
               variant="primary"
-              icon={<Trash2 size={14} />}
+              icon={sayUnsubscribe ? <MailX size={14} /> : <Trash2 size={14} />}
               disabled={!unsubscribing.length && !emails}
               onClick={() => void clear()}
             >
-              Clear
+              {sayUnsubscribe ? 'Unsubscribe' : 'Clear'}
             </Button>
           </div>
         </div>
       </>
     )
 
-  const title = outcome?.ok ? 'Clean-up done' : progress ? 'Clearing…' : 'Review clean-up'
+  const only = senders.length === 1 ? senders[0]! : null
+  const name = only ? (only.name ?? only.address) : ''
+  // One sender's unsubscribe, once it's run: did it work?
+  const unsub = single && outcome?.ok ? outcome.cleanup.senders[0]?.unsubscribe : undefined
+  const failed = unsub?.status === 'failed'
+  const title = single
+    ? outcome?.ok
+      ? unsub?.status === 'done'
+        ? `Unsubscribed from ${name}`
+        : unsub?.status === 'opened'
+          ? 'Finish in your browser'
+          : failed
+            ? 'Couldn’t unsubscribe'
+            : 'Done'
+      : progress
+        ? 'Unsubscribing…'
+        : `Unsubscribe from ${name}`
+    : outcome?.ok
+      ? 'Clean-up done'
+      : progress
+        ? 'Clearing…'
+        : 'Review clean-up'
+  const subtitle = outcome?.ok
+    ? resultSentence(outcome.cleanup)
+    : single && only
+      ? `${only.address}. Your emails stay in your inbox unless you turn on Move to Trash.`
+      : `${plural(senders.length, 'sender')} selected. People you’ve written to are never included.`
   const main = document.querySelector('main')
   const sheet = (
     <div className="absolute inset-0 z-20 flex justify-center bg-black/20 pt-16 dark:bg-black/40">
@@ -169,19 +223,23 @@ export function ReviewSheet({ senders: selected, onClose, onChanged }: Props) {
       >
         <header className="flex items-center gap-3.5 px-6 pt-5 pb-4">
           <span
-            className={`flex size-11 shrink-0 items-center justify-center rounded-[10px] text-white ${outcome?.ok ? 'bg-success' : 'bg-accent'}`}
+            className={`flex size-11 shrink-0 items-center justify-center rounded-[10px] text-white ${failed ? 'bg-danger-strong' : outcome?.ok ? 'bg-success' : 'bg-accent'}`}
           >
-            {outcome?.ok ? <CircleCheck size={22} /> : <Trash2 size={22} />}
+            {failed ? (
+              <CircleX size={22} />
+            ) : outcome?.ok ? (
+              <CircleCheck size={22} />
+            ) : single ? (
+              <MailX size={22} />
+            ) : (
+              <Trash2 size={22} />
+            )}
           </span>
           <div className="min-w-0">
             <h2 id="review-title" className="text-[15px] font-semibold">
               {title}
             </h2>
-            <p className="text-[12px] leading-snug text-ink-2">
-              {outcome?.ok
-                ? resultSentence(outcome.cleanup)
-                : `${plural(senders.length, 'sender')} selected. People you’ve written to are never included.`}
-            </p>
+            <p className="text-[12px] leading-snug text-ink-2">{subtitle}</p>
           </div>
         </header>
         {body}

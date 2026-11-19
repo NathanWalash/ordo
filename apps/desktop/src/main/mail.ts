@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app } from 'electron'
-import { analyseSenders } from '@ordo/mail-core'
+import { analyseSenders, withUnsubscribed } from '@ordo/mail-core'
 import {
   ICLOUD_IMAP,
   ICLOUD_SMTP,
@@ -254,9 +254,13 @@ export function stopScan(): void {
   running?.abort()
 }
 
+/** The inbox's senders, each marked when clean-up history says Ordo has unsubscribed from it. */
 export function senders() {
   const s = mailStore()
-  return analyseSenders(s.headers(INBOX), s.repliedTo(), { allowLoopbackHttp: allowLoopbackHttp() })
+  return withUnsubscribed(
+    analyseSenders(s.headers(INBOX), s.repliedTo(), { allowLoopbackHttp: allowLoopbackHttp() }),
+    s.cleanups(),
+  )
 }
 
 /** Inbox headers already cached by a scan (no network), or null when Mail isn't connected. */

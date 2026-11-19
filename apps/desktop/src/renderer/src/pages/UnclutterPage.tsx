@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Cpu, RefreshCw, ScanSearch, Sparkles } from 'lucide-react'
 import { analyseSenders, type CategorisedSender } from '@ordo/mail-core'
 import {
@@ -66,7 +66,11 @@ function LiveUnclutter({
   const [ai, setAi] = useState<AiSettings | null>(null)
   const [sorting, setSorting] = useState<AiSortProgress | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [reviewing, setReviewing] = useState<CategorisedSender[] | null>(null)
+  const [reviewing, setReviewing] = useState<{
+    senders: CategorisedSender[]
+    /** `unsubscribe`: one sender's Unsubscribe button rather than Review and clear. */
+    purpose: 'clear' | 'unsubscribe'
+  } | null>(null)
   // Bumped after a clean-up so the table starts with nothing selected.
   const [generation, setGeneration] = useState(0)
 
@@ -124,13 +128,31 @@ function LiveUnclutter({
     }
   }
 
+  // The reload after a change, so focus waits for the row to show what happened.
+  const reloading = useRef<Promise<void> | null>(null)
+  const closeSheet = () => {
+    const unsubscribed = reviewing?.purpose === 'unsubscribe' ? reviewing.senders[0]?.address : undefined
+    setReviewing(null)
+    // Back to that sender's row: its Unsubscribe button, or what replaced it.
+    if (unsubscribed)
+      void (reloading.current ?? Promise.resolve()).then(() =>
+        requestAnimationFrame(() =>
+          document
+            .querySelector<HTMLElement>(`[data-unsubscribe-for="${CSS.escape(unsubscribed)}"]`)
+            ?.focus(),
+        ),
+      )
+  }
+
   const sheet = reviewing && (
     <ReviewSheet
-      senders={reviewing}
-      onClose={() => setReviewing(null)}
+      senders={reviewing.senders}
+      purpose={reviewing.purpose}
+      onClose={closeSheet}
       onChanged={() => {
-        setGeneration((g) => g + 1)
-        void load()
+        // A clean-up starts the table afresh; unsubscribing from one sender keeps what's selected.
+        if (reviewing.purpose === 'clear') setGeneration((g) => g + 1)
+        reloading.current = load()
       }}
     />
   )
@@ -159,7 +181,8 @@ function LiveUnclutter({
       <SenderTable
         key={generation}
         senders={senders}
-        onReview={setReviewing}
+        onReview={(chosen) => setReviewing({ senders: chosen, purpose: 'clear' })}
+        onUnsubscribe={(s) => setReviewing({ senders: [s], purpose: 'unsubscribe' })}
         banner={
           sorting ? (
             <div
