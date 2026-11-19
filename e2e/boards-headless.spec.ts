@@ -77,18 +77,26 @@ test('boards list and boards cards read without changing anything', async () => 
 
 // TEMPORARY (fix/windows-headless-crash): repeat the reads to catch the Windows crash.
 test('TEMP loop boards reads', async () => {
-  test.setTimeout(600_000)
-  const env = { ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' }
-  const codes: string[] = []
-  for (let i = 0; i < 25; i++) {
-    const list = await ordo(['boards', 'list', '--json'], profile, env)
-    const cards = await ordo(['boards', 'cards', '--board', 'home'], profile, env)
-    const help = await ordo(['--help'], profile, env)
-    codes.push(`${list.code}/${cards.code}/${help.code}`)
-    if (i === 0) console.error(`first run stderr:\n${cards.stderr}`)
-  }
-  console.error(`TEMP loop codes: ${codes.join(' ')}`)
-  expect(codes.every((c) => c === '0/0/0')).toBe(true)
+  test.setTimeout(900_000)
+  const env = process.env['ORDO_CRASH_DUMP_DIR']
+    ? { ORDO_TEST_CRASH_DUMPS: process.env['ORDO_CRASH_DUMP_DIR'] }
+    : {}
+  const commands = [
+    ['boards', 'cards', '--board', 'home'],
+    ['boards', 'list', '--json'],
+    ['status', '--json'],
+    ['--help'],
+  ]
+  const crashes = commands.map(() => 0)
+  for (let i = 0; i < 25; i++)
+    for (const [n, args] of commands.entries()) {
+      const r = await ordo(args, profile, env)
+      if (r.code !== 0 || /EXCEPTION/.test(r.stderr)) crashes[n]!++
+    }
+  console.error(
+    `TEMP crashes out of 25: ${commands.map((c, n) => `${c.join(' ')}=${crashes[n]}`).join(', ')}`,
+  )
+  expect(crashes.every((c) => c === 0)).toBe(true)
 })
 
 test('add-card and move-card need --allow-changes and --confirm', async () => {

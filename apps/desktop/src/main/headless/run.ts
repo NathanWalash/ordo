@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, crashReporter } from 'electron'
 import { closeMail } from '../mail'
 import { closeMailClient } from '../mail-client'
 import { closeCalendar } from '../calendar'
@@ -43,6 +43,12 @@ export async function runHeadless(args: string[], setup: () => void): Promise<vo
   if (process.platform === 'darwin') app.dock?.hide()
   // Nothing is drawn. Without this, Linux with no display logs a page of GPU errors to stderr.
   app.disableHardwareAcceleration()
+  // TEMPORARY (fix/windows-headless-crash): keep minidumps of a crash for the CI to analyse.
+  const dumps = !app.isPackaged ? process.env['ORDO_TEST_CRASH_DUMPS'] : undefined
+  if (dumps) {
+    app.setPath('crashDumps', dumps)
+    crashReporter.start({ uploadToServer: false })
+  }
 
   // Electron shows a dialog for an uncaught error in the main process: never in headless mode.
   process.on('uncaughtException', (err) => {
