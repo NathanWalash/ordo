@@ -248,10 +248,23 @@ export function mailTrigger(
       ...tainted,
     ]),
   ])
-  if (!asked) return { kind: 'data', text: `You didn’t ask for this. The assistant suggested it${after}` }
   const verb = tool.assistantOnly ? 'send' : 'save it'
   const typed = typedAddresses(words)
   const untyped = recipients.filter((r) => !typed.has(r.address.toLowerCase()))
+  if (!asked) {
+    const read = allReads ? ` after reading ${allReads}, and text in those can try to trick it.` : '.'
+    const addresses = untyped.map((r) => clean(r.address, 254))
+    return {
+      kind: 'data',
+      text:
+        `You didn’t ask for this. The assistant suggested it${read}` +
+        (addresses.length === 0
+          ? ` Only ${verb} if you want this.`
+          : addresses.length === 1
+            ? ` You didn’t type ${addresses[0]}. Only ${verb} if you know this address and meant to write to it.`
+            : ` You didn’t type these addresses: ${listed(addresses)}. Only ${verb} if you know these addresses and meant to write to them.`),
+    }
+  }
   const target = targets.messages[0]
   const who = target ? clean(target.name ?? '', 60).trim() || clean(target.address, 254) : 'the sender'
 
@@ -295,7 +308,7 @@ export function mailTrigger(
   if (unnamed.length)
     return {
       kind: 'data',
-      text: `You asked for this, but didn’t name the email it answers, so the assistant chose it. Only ${verb} if it’s the right one.`,
+      text: `You asked for this, but didn’t name the email it’s about, so the assistant chose it. Only ${verb} if it’s the right one.`,
     }
   return { kind: 'request', text: 'You asked for this.' }
 }

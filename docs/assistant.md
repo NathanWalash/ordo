@@ -21,7 +21,7 @@ tools as Ordo's MCP server.
 - **New conversation** (the pencil in the header) forgets the conversation.
 
 Examples: "Which bills are due next?", "How much did I spend last month?", "What's on this week?",
-"What did the bank email me about last week?", "Archive newsletters from this week", "Draft a reply
+"What did the bank email me about last week?", "Archive this week’s newsletters", "Draft a reply
 to the last email from Sam", "Reply to sam@friend.example saying Friday works", "What's overdue on my boards?", "Add a card to Home to book the MOT",
 "Show me August's spending" (opens Finances on August), "Undo clean-up 4", "Import
 /Users/me/Downloads/monzo.csv".
@@ -38,7 +38,7 @@ to the last email from Sam", "Reply to sam@friend.example saying Friday works", 
 
 ## Email
 
-- **Move, flag, mark and undo.** "Archive the newsletters from this week", "Flag Sam's email",
+- **Move, flag, mark and undo.** "Archive this week’s newsletters", "Flag Sam's email",
   "Undo that". The assistant finds the messages first, then a card lists each one with what will
   change.
 - **Drafts.** "Draft a reply to the last email from Sam" saves a reply (threaded, with the original
@@ -124,9 +124,13 @@ the assistant treats everything a tool returns as untrusted.
   look like something you said). Otherwise the card says "Check this first", explains that it may
   have come from what the assistant read (and which data), and its button is **Confirm anyway**.
 - **Cards can't be confirmed by accident.** A card takes focus itself, never a button, and its
-  buttons ignore presses for half a second after it appears. The question box is disabled while a
-  card is open, and focus goes back to it afterwards. With the panel closed, the toolbar button shows
-  that a card is waiting.
+  buttons ignore presses for half a second after it appears (Escape cancels the focused card). A
+  card that sends an email waits a second and a half before **Send** works: the button fills from
+  left to right meanwhile (it just becomes ready with reduced motion) and is marked
+  `aria-disabled`. The preload passes on a Confirm only straight after a click or key press in the
+  window, and the main process ignores a Send that arrives sooner after the card appeared than that
+  pause. The question box is disabled while a card is open, and focus goes back to it afterwards.
+  With the panel closed, the toolbar button shows that a card is waiting.
 - **Files.** A statement path must be an absolute local path; UNC and device paths (`\\server`,
   `//server`, `\\?\`, `\\.\`) are refused before any file-system call, for MCP and headless too.
   The assistant only accepts a path that appears word for word in your own message, and nothing
@@ -137,26 +141,42 @@ the assistant treats everything a tool returns as untrusted.
   against the server's list; Drafts is refused. A move can be undone while Ordo is open. For mail
   changes the card's trigger is about what the change acts on, not what was read (acting on mail
   means reading it): "You asked for this" needs an explicit phrase in your message and every email
-  it acts on named in your own words, by sender address, sender name or subject.
+  it acts on named in your own words, by sender address, sender name or subject. Only an explicit
+  phrase counts: "flag it", "mark … as read", "archive", "move", "put … in"; questions such as "Is
+  it spam?" or "What's unread?" ask for nothing.
 - **Sending.** `ordo_mail_send` is marked `assistantOnly` in the registry: it is never an MCP tool,
   has no headless command, `runTool` refuses it from any caller but the assistant, and only the
-  assistant's services have a send function at all. Its card shows From, every recipient's full
-  address (To and Cc; the assistant can't use Bcc), the subject, the whole body (scrollable), any
-  forwarded attachments and "This sends the email. You can't unsend it." Its **Send** button waits
-  a second and a half before it works. Once sent, the card says **Sent**.
-- **Who an email goes to.** The card says "You asked for this" only when your message asks to send,
-  reply or forward, the message being replied to or forwarded is one you named, and **every
-  recipient's exact address appears in your own words**. A sender picks their own display name,
-  subject and Reply-To, so naming a message by them ("reply to Sam") helps the assistant pick which
-  message to answer but never vouches for its addresses: the card then says **Check this first**
-  and names, in full, every recipient you didn't type. When a reply goes to a Reply-To other than
-  the sender, the card says so. Its button is then **Send anyway**, in red.
+  assistant's services have a send function at all. Its card is titled with the subject and the
+  first recipient, and shows From, every recipient's full address on its own line (To and Cc; the
+  assistant can't use Bcc), the subject, what the assistant wrote in full, the quoted or forwarded
+  original below it in its own labelled scroll box ("Scroll to read it all" when there's more), any
+  forwarded attachments, and "This sends the email. You can't unsend it." Once sent, the card says
+  **Sent** (or the warning iCloud gave, or "Not sent:" and why).
+- **What the card shows is what's sent.** The assistant's text and the original lose control, bidi
+  and every default-ignorable character (zero-width characters, Unicode tags, variation selectors,
+  soft hyphens, fillers) and the blank braille pattern, and runs of four or more spaces and three or
+  more blank lines close up, so nothing can hide off the edge or below the fold. The assistant writes
+  at most 20,000 characters; a long original is cut, with a note saying so, so that the whole email
+  fits on the card. An email the card couldn't show whole is refused.
+- **Who an email goes to.** An address counts as yours only if you typed it, whole: Ordo reads the
+  addresses in your messages as complete tokens, so `sam@company.co.uk` never vouches for
+  `sam@company.co`, nor `alice+work@gmail.com` for `work@gmail.com`. A sender picks their own display
+  name, subject and Reply-To, so naming an email by them ("reply to Sam") only helps the assistant
+  pick which email to answer. Each recipient on the card that you didn't type is marked, in amber.
+- **Three levels on a draft or send card.**
+  - **You asked for this** (blue Send): your message asks to send, reply, forward or draft; you named
+    the email it's about; you typed every recipient's address; and nothing untrusted was read in that
+    question except that email (or a search that found only it), with no earlier answer built on
+    untrusted data.
+  - **An amber note** (blue Send): a reply you asked for to an email you named, going only to the
+    address it came from, with no different Reply-To and nothing else read. "You didn't type this
+    address. It's the one Sam's email came from."
+  - **Check this first** (a plain red **Send anyway**): anything else. It names in full every address
+    you didn't type, says when a reply goes to a Reply-To rather than where the email came from, and
+    says what else the assistant read before writing it.
 - **One send per question, never twice.** After one email is sent, another send in the same
   question is refused without a card. The conversation remembers what was sent (a note the model
   sees with the earlier turn), and the exact same email is refused if asked again later.
-- **The email's text.** Ordo writes a reply's recipients, subject and quoted original itself; the
-  model only gives the body (and, for new mail, the subject). Its text is plain text, with control,
-  bidi and zero-width characters removed, at most 20,000 characters, and the subject is one line.
 - **Confirmed changes are always reported.** If you press Stop, or something fails, after a change
   ran, the reply still says what was changed.
 - **The window.** Only the window that asked can answer its cards. A card nobody answers counts as

@@ -749,7 +749,7 @@ function ConfirmationCard({
             // Only a Send the user asked for is filled; one the card warns about is plain, in red.
             <Button
               variant={fromData ? 'secondary' : 'primary'}
-              className={`relative overflow-hidden ${fromData ? 'text-danger-text' : ''}`}
+              className={`relative overflow-hidden ${fromData ? 'text-danger-text!' : ''}`}
               icon={<Send size={13} aria-hidden className="relative" />}
               aria-disabled={!ready || undefined}
               title={ready ? undefined : 'Ready in a moment'}

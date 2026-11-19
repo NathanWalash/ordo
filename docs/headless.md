@@ -72,7 +72,7 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `mail move <uid>... --to <where> [--mailbox <path>] --confirm`                | Move to archive, bin, junk, inbox or a folder \*                 |
 | `mail flag <uid>... [--unflag] [--mailbox <path>] --confirm`                  | Flag or unflag \*                                                |
 | `mail mark <uid>... --read\|--unread [--mailbox <path>] --confirm`            | Mark read or unread \*                                           |
-| `mail undo [<id>] --confirm`                                                  | Undo a move made by this Ordo run (the last, by default) \*      |
+| `mail undo [<id>] --confirm`                                                  | Undo a move made in the same process (in practice, MCP) \*       |
 | `calendar sync`                                                               | Fetch changed iCloud calendars and calendar links into the cache |
 | `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
 | `calendar list`                                                               | Calendars, where each comes from, and which can be changed       |
@@ -127,9 +127,9 @@ the window, so they take the write lock and every check applies.
 - **Where to:** `--to archive`, `bin` (or `trash`), `junk` (or `spam`), `inbox`, or one of the
   folders `mail mailboxes` lists, by path or by name. A folder the server didn't list fails with
   `not_found`; Drafts is refused. Nothing is ever deleted.
-- **Undo:** `mail move` prints an undo id. Undo is kept in memory, so `mail undo` only undoes a move
-  made by the same Ordo process: in practice, an MCP server's session. Without an id it undoes the
-  last one.
+- **Undo:** undo is kept in memory, so it only works within one MCP session (`ordo_mail_undo` undoes
+  the last move that session made). A one-off `mail move` can't be undone by a later command: move
+  the messages back with `mail move` instead, as its output says. Nothing is ever deleted.
 
 ```bash
 pnpm ordo -- mail list --json

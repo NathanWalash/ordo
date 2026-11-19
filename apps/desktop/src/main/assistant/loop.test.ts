@@ -779,6 +779,18 @@ describe('mail: acting on email, drafting and sending', () => {
     expect(sent(services)[0]!.body.startsWith(text)).toBe(true)
   })
 
+  it('a forward to a typed address of an email the user didn’t name says the assistant chose the email', async () => {
+    const m = fakeModel(
+      call('ordo_mail_send', { mode: 'forward', uid: 7, to: ['pat@friend.example'], body: 'FYI' }),
+    )
+    const s = setup(m, { services: mailServices(), question: 'Forward it to pat@friend.example' })
+    await s.run()
+    expect(s.cards[0]!.trigger).toEqual({
+      kind: 'data',
+      text: 'You asked for this, but didn’t name the email it’s about, so the assistant chose it. Only send if it’s the right one.',
+    })
+  })
+
   it('a new email to an address the user typed says “You asked”', async () => {
     const m = fakeModel(
       call('ordo_mail_send', {
@@ -968,8 +980,9 @@ describe('mail: acting on email, drafting and sending', () => {
     const r = await s.run()
     // The guard: a warning card, which nothing in the loop confirms by itself.
     expect(shown).toMatchObject({ action: 'send', trigger: { kind: 'data' } })
-    expect(shown!.trigger.text).toMatch(
-      /^You didn’t ask for this\. The assistant suggested it after reading an email/,
+    expect(shown!.trigger.text).toBe(
+      'You didn’t ask for this. The assistant suggested it after reading an email, and text in those can try ' +
+        'to trick it. You didn’t type x@evil.example. Only send if you know this address and meant to write to it.',
     )
     expect(r).toMatchObject({ ok: false, reason: 'cancelled' })
     expect(services.mail.send).not.toHaveBeenCalled()
