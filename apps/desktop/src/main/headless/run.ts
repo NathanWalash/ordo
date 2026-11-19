@@ -20,7 +20,15 @@ function writeOut(text: string): Promise<void> {
   })
 }
 
-/** Close the databases, drop the write lock and exit. */
+/**
+ * Close the databases, drop the write lock and exit.
+ *
+ * The exit itself waits for a task on the main message loop. A quick command (a boards read, say)
+ * is done before that loop has started, while Electron is still in its start-up, and `app.exit()`
+ * then calls the C runtime's `exit()` directly: static objects are torn down while Chromium is
+ * still launching its helper processes on other threads. On Windows that crashed now and then
+ * (0xC0000005, in the sandbox's process launcher). From the loop, Electron shuts down in order.
+ */
 function quit(code: number): void {
   closeMail()
   closeMailClient()
@@ -28,11 +36,7 @@ function quit(code: number): void {
   closeMoney()
   closeBoards()
   releaseWriteLock()
-  if (process.env['ORDO_TEST_CRASH_DUMPS'])
-    process.stderr.write(
-      `TEMP metrics ${Math.round(performance.now())}ms ${JSON.stringify(app.getAppMetrics().map((m) => [m.type, m.name ?? '', m.serviceName ?? '', m.creationTime]))}\n`,
-    )
-  app.exit(code)
+  setImmediate(() => app.exit(code))
 }
 
 /**
