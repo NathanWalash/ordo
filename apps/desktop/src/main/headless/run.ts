@@ -28,6 +28,10 @@ function quit(code: number): void {
   closeMoney()
   closeBoards()
   releaseWriteLock()
+  if (process.env['ORDO_TEST_CRASH_DUMPS'])
+    process.stderr.write(
+      `TEMP metrics ${Math.round(performance.now())}ms ${JSON.stringify(app.getAppMetrics().map((m) => [m.type, m.name ?? '', m.serviceName ?? '', m.creationTime]))}\n`,
+    )
   app.exit(code)
 }
 

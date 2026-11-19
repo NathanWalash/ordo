@@ -91,7 +91,10 @@ test('TEMP loop boards reads', async () => {
   for (let i = 0; i < 25; i++)
     for (const [n, args] of commands.entries()) {
       const r = await ordo(args, profile, env)
-      if (r.code !== 0 || /EXCEPTION/.test(r.stderr)) crashes[n]!++
+      const crashed = r.code !== 0 || /EXCEPTION/.test(r.stderr)
+      if (crashed) crashes[n]!++
+      if (crashed || i < 2)
+        console.error(`TEMP ${crashed ? 'CRASH' : 'ok'} ${args.join(' ')}: ${r.stderr.trim()}`)
     }
   console.error(
     `TEMP crashes out of 25: ${commands.map((c, n) => `${c.join(' ')}=${crashes[n]}`).join(', ')}`,

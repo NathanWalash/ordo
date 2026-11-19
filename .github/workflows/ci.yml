@@ -95,7 +95,7 @@ jobs:
           $sym = 'srv*D:\a\sym*https://msdl.microsoft.com/download/symbols;srv*D:\a\sym*https://symbols.electronjs.org'
           Get-ChildItem D:\a\dumps -Recurse -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object {
             Write-Host "===== $($_.Name)"
-            & $cdb -z $_.FullName -y $sym -lines -c '.symopt+0x40; .ecxr; kn 60; ~*kn 12; !analyze -v; q' 2>&1 | Select-Object -Last 400
+            & $cdb -z $_.FullName -y $sym -lines -c '.symopt+0x40; .ecxr; ~#kn 50; ~0kn 50; q' 2>&1 | Select-String -NotMatch 'SYMSRV|DBGHELP|Deferred'
           }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && runner.os == 'Windows'
