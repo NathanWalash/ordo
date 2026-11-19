@@ -57,8 +57,24 @@ export type SetFlagsInput = z.input<typeof SetFlagsSchema>
 export const MOVE_TARGETS = ['archive', 'trash', 'inbox', 'junk'] as const
 export type MoveTarget = (typeof MOVE_TARGETS)[number]
 
-export const MailMoveSchema = z.object({ mailbox: MailboxPathSchema, uids, to: z.enum(MOVE_TARGETS) })
+/** Archive, Bin, Inbox or Junk, or one of the user's own folders as the server lists it. */
+export const MailMoveSchema = z.object({
+  mailbox: MailboxPathSchema,
+  uids,
+  to: z.union([z.enum(MOVE_TARGETS), z.object({ folder: MailboxPathSchema }).strict()]),
+})
 export type MailMoveInput = z.input<typeof MailMoveSchema>
+
+/** The most recent move that can still be undone, for the assistant's and headless undo. */
+export interface LastMove {
+  undoId: number
+  /** Folder paths. */
+  from: string
+  to: string
+  count: number
+  /** The moved messages as they were in the cache, before the move (at most 20). */
+  messages: MessageSummary[]
+}
 
 export const UndoMoveSchema = z.number().int().positive()
 
@@ -81,7 +97,11 @@ export interface PickedFile {
   size: number
 }
 
-const addressField = z.string().max(20_000)
+/** Typed text from the compose sheet, or a list of plain addresses (the assistant), one per entry. */
+const addressField = z.union([
+  z.string().max(20_000),
+  z.array(z.string().max(320)).max(COMPOSE_LIMITS.recipients),
+])
 
 /** A message from the compose sheet. Addresses are parsed and checked again in the main process. */
 export const ComposeSchema = z.object({
@@ -145,7 +165,10 @@ export interface MailApi {
   /** Read a message (from the cache, or the server). Doesn't mark it read. */
   open(ref: MessageRef): Promise<MailOutcome<{ message: MessageContent }>>
   setFlags(input: SetFlagsInput): Promise<MailOutcome>
-  /** Move to Archive, Bin, Inbox or Junk. `undoId` is null when the server can't say where they went. */
+  /**
+   * Move to Archive, Bin, Inbox or Junk (or a folder the server listed). `undoId` is null when the
+   * server can't say where they went.
+   */
   move(input: MailMoveInput): Promise<MailOutcome<{ moved: number; undoId: number | null }>>
   undoMove(undoId: number): Promise<MailOutcome<{ restored: number }>>
   /** Fetch a message's remote images through Ordo, as data: URLs. */

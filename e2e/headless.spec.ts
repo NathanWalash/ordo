@@ -399,7 +399,14 @@ test.describe('with a connected account (GreenMail)', () => {
       expect(names).toEqual(
         expect.arrayContaining(['ordo_messages', 'ordo_read_message', 'ordo_search_mail']),
       )
-      expect(names.filter((n) => /_(send|draft|reply|forward|compose)(_|$)/.test(n))).toEqual([])
+      // It can save drafts and move mail with --allow-changes, but sending is the in-app assistant's alone.
+      expect(names).toEqual(expect.arrayContaining(['ordo_mail_draft', 'ordo_mail_move']))
+      expect(names.filter((n) => /_(send|reply|forward|compose)(_|$)/.test(n))).toEqual([])
+      const send = await client.callTool({
+        name: 'ordo_mail_send',
+        arguments: { mode: 'new', to: ['x@evil.example'], subject: 'Hi', body: 'Hi', confirm: true },
+      })
+      expect(send.isError).toBe(true)
       const list = toolText(await client.callTool({ name: 'ordo_messages', arguments: { limit: 5 } }))
       expect(list.messages.length).toBeGreaterThan(0)
     } finally {

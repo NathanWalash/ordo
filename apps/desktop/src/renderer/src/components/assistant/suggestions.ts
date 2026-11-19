@@ -5,6 +5,8 @@ export type SuggestionIcon = 'mail' | 'calendar' | 'money' | 'bills' | 'sparkles
 export interface Suggestion {
   text: string
   icon: SuggestionIcon
+  /** Ends with "…": put it in the question box to finish, rather than asking it straight away. */
+  fill?: true
 }
 
 const MAIL: Suggestion[] = [
@@ -21,8 +23,8 @@ const BY_ROUTE: Record<Route, Suggestion[]> = {
   ],
   'mail/inbox': [
     { text: 'What’s unread in my inbox?', icon: 'mail' },
-    { text: 'Who sends me the most email?', icon: 'mail' },
-    { text: 'Which newsletters could I unsubscribe from?', icon: 'mail' },
+    { text: 'Archive this week’s newsletters', icon: 'mail' },
+    { text: 'Draft a reply to the last email from …', icon: 'mail', fill: true },
   ],
   'mail/unclutter': MAIL,
   'mail/history': [

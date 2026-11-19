@@ -14,8 +14,11 @@ import type { OrdoServices } from './commands'
  * The real services: the same main-process functions the app's IPC handlers call, so headless
  * mode gets every check the window does and no shortcuts. Progress goes to a callback instead
  * of a window.
+ *
+ * Sending mail is only there for the app's own assistant (`{ send: true }`), which sends only
+ * after the user confirms a card. Headless runs and the MCP server never get it.
  */
-export function mainServices(): OrdoServices {
+export function mainServices(options: { send?: boolean } = {}): OrdoServices {
   return {
     version: app.getVersion(),
     account: mail.status,
@@ -27,7 +30,8 @@ export function mainServices(): OrdoServices {
       history: cleanup.history,
       undo: cleanup.undo,
     },
-    // Read-only: no send, draft, flag or move, here or in the MCP server.
+    // Changes go through the window's own functions (the write lock, folder checks, undo).
+    // No send here unless the assistant asked for it.
     mail: {
       mailboxes: mailClient.mailboxes,
       refresh: (input, onProgress) => mailClient.refresh(input, onProgress),
@@ -35,6 +39,13 @@ export function mainServices(): OrdoServices {
       search: mailClient.search,
       searchServer: mailClient.searchServer,
       open: mailClient.open,
+      cached: mailClient.cached,
+      setFlags: mailClient.setFlags,
+      move: mailClient.move,
+      lastMove: mailClient.lastMove,
+      undoMove: mailClient.undoMove,
+      saveDraft: mailClient.saveDraft,
+      ...(options.send === true && { send: mailClient.send }),
     },
     calendar: {
       status: calendar.status,

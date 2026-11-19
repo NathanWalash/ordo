@@ -35,6 +35,10 @@ describe('the change gate', () => {
     ['money', 'sort', '--confirm'],
     ['boards', 'add-card', '--board', 'Home', '--title', 'x', '--confirm'],
     ['boards', 'move-card', 'Fix the gate', '--column', 'Doing', '--confirm'],
+    ['mail', 'move', '7', '--to', 'archive', '--confirm'],
+    ['mail', 'flag', '7', '--confirm'],
+    ['mail', 'mark', '7', '--read', '--confirm'],
+    ['mail', 'undo', '--confirm'],
   ])('%s %s is refused without --allow-changes and nothing is called', async (...args) => {
     const services = fakeServices()
     const r = await cli(services, ...args)
@@ -47,6 +51,9 @@ describe('the change gate', () => {
     expect(services.money.aiSort).not.toHaveBeenCalled()
     expect(services.boards.addCard).not.toHaveBeenCalled()
     expect(services.boards.moveCard).not.toHaveBeenCalled()
+    expect(services.mail.move).not.toHaveBeenCalled()
+    expect(services.mail.setFlags).not.toHaveBeenCalled()
+    expect(services.mail.undoMove).not.toHaveBeenCalled()
   })
 
   it('is refused without --confirm even when changes are allowed', async () => {
@@ -174,6 +181,69 @@ describe('commands', () => {
     const gone = await cli(fakeServices(), 'mail', 'read', '8', '--json')
     expect(gone.code).toBe(1)
     expect(JSON.parse(gone.stdout).error.code).toBe('not_found')
+  })
+
+  it('mail move, flag and mark change cached messages, and say so', async () => {
+    const services = fakeServices()
+    const go = ['--allow-changes', '--confirm']
+    const moved = await cli(services, 'mail', 'move', '7', '8', '--to', 'bin', ...go, '--json')
+    expect(moved.code).toBe(0)
+    expect(JSON.parse(moved.stdout)).toEqual({
+      mailbox: 'INBOX',
+      to: 'Deleted Messages',
+      moved: 2,
+      undoId: 5,
+    })
+    expect(services.mail.move).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7, 8], to: 'trash' })
+    const human = await cli(services, 'mail', 'move', '7', '--to', 'Projects', ...go)
+    expect(human.stdout).toBe(
+      'Moved 1 message from INBOX to Projects. Nothing is deleted; move them back with `mail move` (undo only works within one MCP session).\n',
+    )
+    expect(services.mail.move).toHaveBeenLastCalledWith({
+      mailbox: 'INBOX',
+      uids: [7],
+      to: { folder: 'Projects' },
+    })
+    expect((await cli(services, 'mail', 'flag', '7', '--unflag', ...go)).stdout).toBe(
+      'Unflagged 1 message.\n',
+    )
+    expect(services.mail.setFlags).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7], flagged: false })
+    expect((await cli(services, 'mail', 'mark', '7', '8', '--read', ...go)).stdout).toBe(
+      'Marked 2 messages as read.\n',
+    )
+    expect(services.mail.setFlags).toHaveBeenLastCalledWith({ mailbox: 'INBOX', uids: [7, 8], seen: true })
+  })
+
+  it('mail changes refuse unknown folders, Drafts, and messages Ordo hasn’t cached', async () => {
+    const services = fakeServices()
+    const go = ['--allow-changes', '--confirm', '--json']
+    const nowhere = await cli(services, 'mail', 'move', '7', '--to', 'Elsewhere', ...go)
+    expect(nowhere.code).toBe(1)
+    expect(JSON.parse(nowhere.stdout).error.code).toBe('not_found')
+    const drafts = await cli(services, 'mail', 'move', '7', '--to', 'drafts', ...go)
+    expect(JSON.parse(drafts.stdout).error).toEqual({
+      code: 'invalid',
+      message: 'Messages can’t be moved into Drafts.',
+    })
+    const unknown = await cli(services, 'mail', 'flag', '7', '42', ...go)
+    expect(JSON.parse(unknown.stdout).error.message).toMatch(/doesn’t have message 42 in INBOX/)
+    expect(services.mail.move).not.toHaveBeenCalled()
+    expect(services.mail.setFlags).not.toHaveBeenCalled()
+  })
+
+  it('mail undo puts back the last move made by this Ordo run', async () => {
+    const services = fakeServices()
+    const go = ['--allow-changes', '--confirm', '--json']
+    const none = await cli(services, 'mail', 'undo', ...go)
+    expect(JSON.parse(none.stdout).error).toMatchObject({ code: 'not_found' })
+    services.mail.lastMove = () => ({ undoId: 9, from: 'INBOX', to: 'Archive', count: 1, messages: [] })
+    expect(JSON.parse((await cli(services, 'mail', 'undo', ...go)).stdout)).toEqual({
+      undoId: 9,
+      restored: 1,
+    })
+    expect(services.mail.undoMove).toHaveBeenCalledWith(9)
+    await cli(services, 'mail', 'undo', '3', ...go)
+    expect(services.mail.undoMove).toHaveBeenLastCalledWith(3)
   })
 
   it('mail sync refreshes one folder and is not a change', async () => {
@@ -387,6 +457,10 @@ describe('output', () => {
       'calendar sync',
       'mail read <uid>',
       'mail search <words>',
+      'mail move <uid>...',
+      'mail flag <uid>...',
+      'mail mark <uid>...',
+      'mail undo',
       'boards list',
       'boards cards',
       'boards add-card',

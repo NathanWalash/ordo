@@ -26,9 +26,12 @@ import type {
   AnswerInput,
   CompareInput,
   ImportOutcome,
+  ComposeInput,
+  LastMove,
   MemoryResult,
   MemoryView,
   MailboxInfo,
+  MailMoveInput,
   MailOutcome,
   MailRefreshProgress,
   MessageContent,
@@ -42,6 +45,7 @@ import type {
   ScanProgress,
   SearchQueryInput,
   ServerSearchInput,
+  SetFlagsInput,
   TransactionPage,
   TransactionQuery,
   UndoOutcome,
@@ -69,7 +73,10 @@ export interface OrdoServices {
     history(): CleanupSummary[]
     undo(id: number): Promise<UndoOutcome>
   }
-  /** The mail client, read-only. Headless mode can never send mail or change messages. */
+  /**
+   * The mail client. Headless mode and MCP can read, and with --allow-changes plus confirm, move,
+   * flag, mark and save drafts. They can never send: `send` exists only in the app's assistant.
+   */
   mail: {
     mailboxes(): MailboxInfo[]
     refresh(
@@ -80,6 +87,18 @@ export interface OrdoServices {
     search(query: SearchQueryInput): MessageSummary[]
     searchServer(query: ServerSearchInput): Promise<MailOutcome<{ messages: MessageSummary[] }>>
     open(ref: { mailbox: string; uid: number }): Promise<MailOutcome<{ message: MessageContent }>>
+    /** One message's headers from the cache, or null. No network. */
+    cached(ref: { mailbox: string; uid: number }): MessageSummary | null
+    setFlags(input: SetFlagsInput): Promise<MailOutcome>
+    move(input: MailMoveInput): Promise<MailOutcome<{ moved: number; undoId: number | null }>>
+    /** The newest move that can still be undone in this process, or null. */
+    lastMove(): LastMove | null
+    undoMove(undoId: number): Promise<MailOutcome<{ restored: number }>>
+    saveDraft(
+      input: ComposeInput,
+    ): Promise<MailOutcome<{ draft: { mailbox: string; uid: number } | null; attachments: unknown[] }>>
+    /** Only in the app's assistant, after the user confirmed the card. Never in headless or MCP. */
+    send?(input: ComposeInput): Promise<MailOutcome<{ warning?: string }>>
   }
   calendar: {
     status(): CalendarStatus
@@ -566,6 +585,76 @@ function cleanupRequest(c: {
   }
 }
 
+// ---- Mail changes ------------------------------------------------------------------------------
+
+type MoveTo = 'archive' | 'trash' | 'inbox' | 'junk' | { folder: string }
+
+/** Words for the special folders, as people say them. */
+const ROLE_WORDS: Record<string, 'archive' | 'trash' | 'inbox' | 'junk'> = {
+  archive: 'archive',
+  bin: 'trash',
+  trash: 'trash',
+  deleted: 'trash',
+  junk: 'junk',
+  spam: 'junk',
+  inbox: 'inbox',
+}
+const ROLE_NAMES = { archive: 'Archive', trash: 'Bin', inbox: 'Inbox', junk: 'Junk' } as const
+
+/**
+ * Where a move goes: Archive, Bin, Junk or Inbox by name, or one of the folders the server listed
+ * (by path, or by name when only one folder has it). Never Drafts. The mail client checks again.
+ */
+export function moveTarget(
+  services: OrdoServices,
+  to: string,
+): { ok: true; to: MoveTo; path: string; name: string } | { ok: false; code: ErrorCode; message: string } {
+  const boxes = services.mail.mailboxes()
+  const word = ROLE_WORDS[to.trim().toLowerCase()]
+  if (word) {
+    const path = word === 'inbox' ? 'INBOX' : boxes.find((b) => b.role === word)?.path
+    if (!path)
+      return { ok: false, code: 'unavailable', message: `This account has no ${ROLE_NAMES[word]} mailbox.` }
+    return { ok: true, to: word, path, name: ROLE_NAMES[word] }
+  }
+  const lower = to.toLowerCase()
+  const byName = boxes.filter((b) => b.name.toLowerCase() === lower || b.path.toLowerCase() === lower)
+  const box = boxes.find((b) => b.path === to) ?? (byName.length === 1 ? byName[0] : undefined)
+  if (!box)
+    return {
+      ok: false,
+      code: 'not_found',
+      message: `There’s no folder called “${to.slice(0, 80)}”. Use archive, bin, junk, inbox or a folder from \`mail mailboxes\`.`,
+    }
+  if (box.role === 'drafts')
+    return { ok: false, code: 'invalid', message: 'Messages can’t be moved into Drafts.' }
+  const role = box.role && box.role in ROLE_NAMES ? (box.role as keyof typeof ROLE_NAMES) : null
+  return { ok: true, to: { folder: box.path }, path: box.path, name: role ? ROLE_NAMES[role] : box.name }
+}
+
+/**
+ * The messages a change acts on, from Ordo's cache. A change only touches messages Ordo has seen,
+ * so what a preview shows is what changes.
+ */
+export function cachedMessages(
+  services: OrdoServices,
+  mailbox: string,
+  uids: readonly number[],
+): { ok: true; messages: MessageSummary[] } | { ok: false; code: ErrorCode; message: string } {
+  const messages: MessageSummary[] = []
+  for (const uid of uids) {
+    const m = services.mail.cached({ mailbox, uid })
+    if (!m)
+      return {
+        ok: false,
+        code: 'not_found',
+        message: `Ordo doesn’t have message ${uid} in ${mailbox.slice(0, 80)}. Check for new mail, then use a uid from the message list.`,
+      }
+    messages.push(m)
+  }
+  return { ok: true, messages }
+}
+
 /** Run one command against the services. Never throws for expected failures. */
 export async function runCommand(
   services: OrdoServices,
@@ -787,6 +876,52 @@ export async function runCommand(
             .map((a) => ({ filename: a.filename, contentType: a.contentType, size: a.size })),
         },
       }
+    }
+
+    case 'mail move': {
+      if (!connected()) return NOT_CONNECTED
+      const target = moveTarget(services, command.to)
+      if (!target.ok) return fail(target.code, target.message)
+      const found = cachedMessages(services, command.mailbox, command.uids)
+      if (!found.ok) return fail(found.code, found.message)
+      const r = await services.mail.move({ mailbox: command.mailbox, uids: command.uids, to: target.to })
+      if (!r.ok) return fromMail(r)
+      return {
+        ok: true,
+        data: { mailbox: command.mailbox, to: target.path, moved: r.moved, undoId: r.undoId },
+      }
+    }
+
+    case 'mail flag':
+    case 'mail mark': {
+      if (!connected()) return NOT_CONNECTED
+      const found = cachedMessages(services, command.mailbox, command.uids)
+      if (!found.ok) return fail(found.code, found.message)
+      const flags = command.name === 'mail flag' ? { flagged: !command.unflag } : { seen: command.read }
+      const r = await services.mail.setFlags({ mailbox: command.mailbox, uids: command.uids, ...flags })
+      if (!r.ok) return fromMail(r)
+      return {
+        ok: true,
+        data: {
+          mailbox: command.mailbox,
+          uids: command.uids,
+          ...(command.name === 'mail flag' ? { flagged: !command.unflag } : { read: command.read }),
+        },
+      }
+    }
+
+    case 'mail undo': {
+      if (!connected()) return NOT_CONNECTED
+      const last = services.mail.lastMove()
+      const id = command.id ?? last?.undoId
+      if (id === undefined)
+        return fail(
+          'not_found',
+          'There’s no move to undo. A move can only be undone in the Ordo session that made it.',
+        )
+      const r = await services.mail.undoMove(id)
+      if (!r.ok) return fromMail(r)
+      return { ok: true, data: { undoId: id, restored: r.restored } }
     }
 
     case 'calendar sync': {

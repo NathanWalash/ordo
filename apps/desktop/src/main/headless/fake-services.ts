@@ -209,6 +209,16 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
     mail: {
       mailboxes: () => [
         { path: 'INBOX', name: 'Inbox', role: 'inbox', delimiter: '/', total: 2, unread: 1 },
+        { path: 'Archive', name: 'Archive', role: 'archive', delimiter: '/', total: 0, unread: 0 },
+        {
+          path: 'Deleted Messages',
+          name: 'Deleted Messages',
+          role: 'trash',
+          delimiter: '/',
+          total: 0,
+          unread: 0,
+        },
+        { path: 'Drafts', name: 'Drafts', role: 'drafts', delimiter: '/', total: 0, unread: 0 },
         { path: 'Projects', name: 'Projects', role: null, delimiter: '/', total: 0, unread: 0 },
       ],
       refresh: vi.fn(async () => ({ ok: true as const, added: 1, removed: 0, changed: 2 })),
@@ -224,6 +234,32 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
               message: 'This message isn’t there any more.',
             },
       ),
+      // Messages 7 and 8 are cached in the inbox; 7 is Sam's lunch email.
+      cached: vi.fn((ref: { mailbox: string; uid: number }) =>
+        ref.mailbox === 'INBOX' && ref.uid === 7
+          ? summary(7)
+          : ref.mailbox === 'INBOX' && ref.uid === 8
+            ? summary(8, {
+                from: { address: 'digest@news.example', name: 'Daily Digest' },
+                subject: 'Issue 12',
+                seen: true,
+                flagged: false,
+              })
+            : null,
+      ),
+      setFlags: vi.fn(async () => ({ ok: true as const })),
+      move: vi.fn(async (input: { uids: number[] }) => ({
+        ok: true as const,
+        moved: input.uids.length,
+        undoId: 5,
+      })),
+      lastMove: vi.fn(() => null),
+      undoMove: vi.fn(async () => ({ ok: true as const, restored: 1 })),
+      saveDraft: vi.fn(async () => ({
+        ok: true as const,
+        draft: { mailbox: 'Drafts', uid: 30 },
+        attachments: [],
+      })),
     },
     calendar: {
       status: () => ({ connected: false, lastSync: null, syncing: false, subscriptions: 0 }),

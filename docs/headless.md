@@ -69,6 +69,10 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `mail list [--mailbox <path>] [--unread] [--limit <n>]`                       | Cached messages, newest first, with the uid to read              |
 | `mail search <words> [--mailbox <path>] [--server] [--limit <n>]`             | Search the cache (every folder), or the server (one folder)      |
 | `mail read <uid> [--mailbox <path>]`                                          | A message as plain text, headers and attachment names            |
+| `mail move <uid>... --to <where> [--mailbox <path>] --confirm`                | Move to archive, bin, junk, inbox or a folder \*                 |
+| `mail flag <uid>... [--unflag] [--mailbox <path>] --confirm`                  | Flag or unflag \*                                                |
+| `mail mark <uid>... --read\|--unread [--mailbox <path>] --confirm`            | Mark read or unread \*                                           |
+| `mail undo [<id>] --confirm`                                                  | Undo a move made in the same process (in practice, MCP) \*       |
 | `calendar sync`                                                               | Fetch changed iCloud calendars and calendar links into the cache |
 | `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
 | `calendar list`                                                               | Calendars, where each comes from, and which can be changed       |
@@ -105,12 +109,40 @@ plain-http unsubscribe link or an unsubscribe email to a different domain has to
 the review sheet, so headless refuses those senders unless you add `--no-unsubscribe` (move to
 Trash only). A sender whose unsubscribe is a web page is opened in your browser, as in the app.
 
-The `mail` commands are read-only, like the mail client's reading side: there is no way to send,
-save a draft, flag or move mail from headless mode or MCP, even with `--allow-changes`. `mail read`
+Headless mode and MCP can never send mail, even with `--allow-changes`: sending is the in-app
+assistant's alone, after you press Send on a card showing the whole email. `mail read`
 fetches the message with `BODY.PEEK` from a mailbox opened read-only, so it stays unread; HTML is
 turned into text, with link addresses after their text (`Read more <https://…>`), and printed with
 control characters and bidi overrides removed. `mail sync` refreshes the cache like `scan` (it takes
 the write lock but changes nothing on the server); for the inbox it is the same scan.
+
+### Changing mail
+
+`mail move`, `mail flag`, `mail mark` and `mail undo` change messages through the same functions as
+the window, so they take the write lock and every check applies.
+
+- **Which messages:** uids from `mail list` or `mail search`, all in one `--mailbox` (default
+  INBOX), at most 20 at a time. Only messages already in Ordo's cache can be changed (run
+  `mail sync` first); any other uid fails with `not_found` and nothing changes.
+- **Where to:** `--to archive`, `bin` (or `trash`), `junk` (or `spam`), `inbox`, or one of the
+  folders `mail mailboxes` lists, by path or by name. A folder the server didn't list fails with
+  `not_found`; Drafts is refused. Nothing is ever deleted.
+- **Undo:** undo is kept in memory, so it only works within one MCP session (`ordo_mail_undo` undoes
+  the last move that session made). A one-off `mail move` can't be undone by a later command: move
+  the messages back with `mail move` instead, as its output says. Nothing is ever deleted.
+
+```bash
+pnpm ordo -- mail list --json
+pnpm ordo -- mail move 9071 9072 --to archive --allow-changes --confirm
+pnpm ordo -- mail flag 9071 --unflag --allow-changes --confirm
+pnpm ordo -- mail mark 9071 --read --allow-changes --confirm
+```
+
+```jsonc
+// mail move --json (flag gives { mailbox, uids, flagged }, mark { mailbox, uids, read },
+// undo { undoId, restored })
+{ "mailbox": "INBOX", "to": "Archive", "moved": 2, "undoId": 3 }
+```
 
 `money import` accepts a regular `.csv` file under 5 MB (symlinks are resolved first), then reads
 it with the same statement parser and limits as an import in the app.
@@ -285,13 +317,23 @@ and can be undone.
 `offset` with small defaults, so an agent isn't flooded. `ordo_scan`, `ordo_mail_sync` and
 `ordo_calendar_sync` refresh Ordo's local cache; they change nothing on the server.
 `ordo_read_message` returns a message as plain text and never marks it read. There is no tool to
-send, draft, flag or move mail, with or without `--allow-changes`.
+send mail, with or without `--allow-changes`: `ordo_mail_send` is marked `assistantOnly` in the
+registry, so it is never registered here, has no headless command, and Ordo refuses it from any
+caller but the in-app assistant.
 
 **Change tools** (only with `--allow-changes`): `ordo_cleanup_run`, `ordo_undo`,
 `ordo_import_statement`, `ordo_ai_sort`, `ordo_money_sort`, `ordo_calendar_add`,
-`ordo_calendar_edit`, `ordo_calendar_delete`, `ordo_board_add_card`, `ordo_board_move_card`. Each
-also needs `confirm: true` in its arguments, or it
-is refused with `confirm_required` and nothing happens.
+`ordo_calendar_edit`, `ordo_calendar_delete`, `ordo_board_add_card`, `ordo_board_move_card`,
+`ordo_mail_move`, `ordo_mail_flag`, `ordo_mail_mark`, `ordo_mail_undo` and `ordo_mail_draft`.
+Each also needs `confirm: true` in its arguments, or it is refused with `confirm_required` and
+nothing happens.
+
+The mail tools take `uids` (at most 20, from one `mailbox`) as the CLI does. `ordo_mail_draft`
+saves a new message, a reply, a reply-all or a forward to Drafts: `mode`, `uid` for the message
+being answered or forwarded, `to` and `cc` as plain addresses (no Bcc), `subject` and a plain-text
+`body`. A reply's recipients and subject come from the original, which is quoted, and the draft
+stays in its thread. Nothing is sent. Flagging, marking, undo and drafts are marked
+non-destructive.
 
 The calendar tools take the same fields as the CLI, in camelCase (`timeZone`, `alert: null` for
 no alert), plus `uid`, `occurrence` and `all: true` to say which event. They go through the same
@@ -346,7 +388,7 @@ On Windows use the path to `Ordo.exe`, e.g. `C:\\Users\\you\\AppData\\Local\\Pro
 ### Letting an agent make changes
 
 Add `"--allow-changes"` to `args` to register the change tools. **Only do this if you want the
-agent to be able to unsubscribe you from mail, move mail to Trash, import statements, add, change
+agent to be able to unsubscribe you from mail, move, flag and mark mail and save drafts, import statements, add, change
 and delete calendar events (deleted events can't be undone in Ordo), add and move cards on your
 boards, and send sender details to your AI provider**, and keep your client's per-tool approval on,
 so you see each call before it runs. Even then, People are never cleared, moved mail can be put back with Undo,
@@ -380,8 +422,9 @@ exists) and taken over; so is one older than six hours, in case the process ID h
 - **No secrets out.** `status` shows the account email only; the password and tokens are never
   printed or returned. Connecting an account is only possible in the window.
 - **No network listener.** The MCP server is stdio only.
-- **No sending.** Headless mode and MCP can read mail but never send it, save drafts, flag it or
-  move it. Sending only happens from a click on Send in the window.
+- **No sending.** Headless mode and MCP can never send mail. With `--allow-changes` and a confirm
+  they can move, flag and mark cached messages and save drafts. Sending only happens from a click
+  on Send in the window, or on the in-app assistant's send card.
 - **Untrusted text is data.** Email-, statement- and calendar-derived text is never put into
   shell commands, file paths or prompts beyond what the app already does (AI sorting sends sender
   names and subjects to the model you chose, as documented in [ai.md](ai.md)).

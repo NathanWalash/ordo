@@ -7,7 +7,7 @@ interface Props extends ComponentPropsWithRef<'button'> {
 }
 
 const LOOKS = {
-  primary: 'bg-accent text-white enabled:hover:brightness-110 enabled:active:brightness-95',
+  primary: 'bg-accent-strong text-white enabled:hover:brightness-110 enabled:active:brightness-95',
   destructive: 'bg-danger-strong text-white enabled:hover:brightness-110 enabled:active:brightness-95',
   secondary: 'bg-field text-ink border border-sep shadow-[0_1px_1px_rgb(0_0_0/0.06)] enabled:hover:bg-hover',
 }

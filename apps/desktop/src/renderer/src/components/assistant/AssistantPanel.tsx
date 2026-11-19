@@ -1,9 +1,11 @@
 import {
+  Fragment,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
@@ -18,10 +20,12 @@ import {
   Inbox,
   Loader2,
   MessageSquareText,
+  Paperclip,
   Receipt,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  Send,
   Sparkles,
   SquareKanban,
   SquarePen,
@@ -29,7 +33,13 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import type { AssistantInfo } from '@ordo/shared'
+import {
+  CARD_ARM_MS,
+  SEND_ARM_MS,
+  type AssistantInfo,
+  type CardEmail,
+  type CardRecipient,
+} from '@ordo/shared'
 import type { Route } from '../../routes'
 import { Button } from '../Button'
 import {
@@ -68,9 +78,6 @@ const SUGGESTION_ICONS: Record<SuggestionIcon, ReactNode> = {
   boards: <SquareKanban size={14} />,
 }
 
-/** Clicks on a card this soon after it appears are ignored, so a double press can't confirm it. */
-const CARD_ARM_MS = 500
-
 /**
  * The assistant: a panel on the right of the content, over or beside whatever page is open. Opened
  * with ⌘K or ⌘J (Ctrl on Windows and Linux) or the toolbar button; Escape closes it.
@@ -106,11 +113,12 @@ export function AssistantPanel({ assistant, route, shortcut, docked, onClose, on
     wasWaiting.current = waiting
   }, [waiting])
 
-  // Keep the newest message in view.
+  // Keep the newest message in view, except while a card waits: it shows its own top instead, so
+  // its warning and recipients are what you see first, however tall it is.
   useLayoutEffect(() => {
     const el = log.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [items])
+    if (el && !waiting) el.scrollTop = el.scrollHeight
+  }, [items, waiting])
 
   // Grow the composer with its text, up to five lines.
   useLayoutEffect(() => {
@@ -190,6 +198,15 @@ export function AssistantPanel({ assistant, route, shortcut, docked, onClose, on
           route={route}
           info={info}
           onPick={send}
+          onFill={(text) => {
+            setDraft(text)
+            requestAnimationFrame(() => {
+              const el = input.current
+              if (!el) return
+              el.focus()
+              el.setSelectionRange(text.length, text.length)
+            })
+          }}
           disabled={busy}
           onStopSharing={() => void assistant.setCloudConsent(false)}
         />
@@ -390,12 +407,15 @@ function Welcome({
   route,
   info,
   onPick,
+  onFill,
   disabled,
   onStopSharing,
 }: {
   route: Route
   info: AssistantInfo
   onPick: (q: string) => void
+  /** Put an unfinished prompt in the question box. */
+  onFill: (q: string) => void
   disabled: boolean
   onStopSharing: () => void
 }) {
@@ -413,8 +433,9 @@ function Welcome({
           <li key={s.text} className="assistant-rise" style={{ animationDelay: `${60 + i * 40}ms` }}>
             <button
               type="button"
+              aria-description={s.fill ? 'Finish this in the box' : undefined}
               disabled={disabled}
-              onClick={() => onPick(s.text)}
+              onClick={() => (s.fill ? onFill(s.text.replace(/\s*…$/, ' ')) : onPick(s.text))}
               className="group flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-[13px] text-ink shadow-[0_0_0_1px_var(--sep)] enabled:hover:bg-hover disabled:opacity-50"
             >
               <span className="text-ink-3 group-hover:text-accent" aria-hidden>
@@ -587,36 +608,61 @@ function ConfirmationCard({
   onOpenSettings: () => void
 }) {
   const { card, state } = entry
+  const eyebrowId = useId()
   const titleId = useId()
   const triggerId = useId()
+  const noteId = useId()
   const group = useRef<HTMLElement>(null)
   const blocked = state === 'blocked'
-  const fromData = !blocked && card.trigger.kind === 'data'
-  const [armed, setArmed] = useState(false)
+  const kind = blocked ? null : card.trigger.kind
+  const fromData = kind === 'data'
+  const sends = card.action === 'send'
+  const drafts = card.tool === 'ordo_mail_draft'
+  const armMs = sends ? SEND_ARM_MS : CARD_ARM_MS
+  const [cancelReady, setCancelReady] = useState(false)
+  const [ready, setReady] = useState(false)
 
-  // Take focus (the card itself, never a button) and ignore clicks for a moment, so a key or click
-  // meant for something else can't confirm it.
+  // Take focus (the card itself, never a button) and ignore presses for a moment, so a key or click
+  // meant for something else can't answer it. Send waits longer than Cancel.
   useEffect(() => {
     if (state !== 'open') return
-    group.current?.focus()
-    const t = setTimeout(() => setArmed(true), CARD_ARM_MS)
-    return () => clearTimeout(t)
+    group.current?.focus({ preventScroll: true })
+    group.current?.scrollIntoView({ block: 'start' })
+    const a = setTimeout(() => setCancelReady(true), CARD_ARM_MS)
+    const b = setTimeout(() => setReady(true), armMs)
+    return () => {
+      clearTimeout(a)
+      clearTimeout(b)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const answer = (approve: boolean) => {
-    if (armed) onAnswer(entry.id, approve)
+  const confirm = () => {
+    if (ready && state === 'open') onAnswer(entry.id, true)
+  }
+  const cancel = () => {
+    if (cancelReady && state === 'open') onAnswer(entry.id, false)
+  }
+  // Escape on an open card cancels it, rather than closing the panel with the card still waiting.
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || state !== 'open') return
+    e.preventDefault()
+    e.stopPropagation()
+    cancel()
   }
 
   const eyebrow = blocked ? 'Can’t do this yet' : fromData ? 'Check this first' : 'Needs your OK'
+  const noteIds = card.notes.map((_, i) => `${noteId}-${i}`)
+  const describedBy = blocked ? undefined : [triggerId, ...(sends ? noteIds : [])].join(' ')
 
   return (
     <section
       ref={group}
       tabIndex={-1}
       role="group"
-      aria-labelledby={titleId}
-      aria-describedby={blocked ? undefined : triggerId}
+      aria-labelledby={`${eyebrowId} ${titleId}`}
+      aria-describedby={describedBy}
+      onKeyDown={onKeyDown}
       className="assistant-rise flex flex-col gap-2.5 rounded-[10px] bg-field p-3 shadow-[var(--card-shadow)] outline-none focus-visible:shadow-[0_0_0_1px_var(--accent),0_0_0_4px_var(--accent-tint),var(--card-shadow)]"
     >
       <div className="flex items-start gap-2.5">
@@ -638,40 +684,48 @@ function ConfirmationCard({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className={`text-[11px] font-medium ${fromData ? 'text-warn' : 'text-ink-2'}`}>{eyebrow}</p>
-          <h3 id={titleId} className="text-[13px] leading-snug font-semibold">
+          <p id={eyebrowId} className={`text-[11px] font-medium ${fromData ? 'text-warn' : 'text-ink-2'}`}>
+            {eyebrow}
+          </p>
+          <h3 id={titleId} className="text-[13px] leading-snug font-semibold [overflow-wrap:anywhere]">
             {card.title}
           </h3>
         </div>
       </div>
 
-      {fromData && (
+      {(kind === 'data' || kind === 'sender') && (
         <p
           id={triggerId}
           className="flex gap-2 rounded-lg bg-warn-tint px-2.5 py-2 text-[11px] leading-snug text-ink"
         >
-          <ShieldAlert size={13} className="mt-px shrink-0 text-warn" aria-hidden />
+          {kind === 'data' ? (
+            <ShieldAlert size={13} className="mt-px shrink-0 text-warn" aria-hidden />
+          ) : (
+            <CircleAlert size={13} className="mt-px shrink-0 text-warn" aria-hidden />
+          )}
           <span className="min-w-0 [overflow-wrap:anywhere]">{card.trigger.text}</span>
         </p>
       )}
+
+      {card.email && <EmailPreview email={card.email} />}
 
       {card.details.length > 0 && (
         <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto rounded-lg bg-hover px-2.5 py-2 text-[11px] leading-snug text-ink select-text">
           {card.details.map((d, i) => (
             <li key={i} title={d.title} className="[overflow-wrap:anywhere]">
-              {d.text}
+              <Arrows text={d.text} />
             </li>
           ))}
         </ul>
       )}
       {!blocked &&
         card.notes.map((n, i) => (
-          <p key={i} className="text-[11px] leading-snug text-ink-2">
+          <p key={i} id={noteIds[i]} className="text-[11px] leading-snug text-ink-2">
             {n}
           </p>
         ))}
 
-      {!blocked && !fromData && (
+      {kind === 'request' && (
         <p id={triggerId} className="flex items-center gap-2 text-[11px] text-ink-2">
           <MessageSquareText size={13} className="shrink-0 text-ink-3" aria-hidden />
           {card.trigger.text}
@@ -690,22 +744,242 @@ function ConfirmationCard({
 
       {state === 'open' ? (
         <div className="flex justify-end gap-2 pt-0.5">
-          <Button disabled={!armed} onClick={() => answer(false)}>
+          <Button aria-disabled={!cancelReady || undefined} onClick={cancel}>
             Cancel
           </Button>
-          <Button variant={fromData ? 'secondary' : 'primary'} disabled={!armed} onClick={() => answer(true)}>
-            {fromData ? 'Confirm anyway' : 'Confirm'}
-          </Button>
+          {sends ? (
+            // Only a Send the user asked for is filled; one the card warns about is plain, in red.
+            <Button
+              variant={fromData ? 'secondary' : 'primary'}
+              className={`relative overflow-hidden ${fromData ? 'text-danger-text!' : ''}`}
+              icon={<Send size={13} aria-hidden className="relative" />}
+              aria-disabled={!ready || undefined}
+              title={ready ? undefined : 'Ready in a moment'}
+              onClick={confirm}
+            >
+              {!ready && (
+                <span
+                  aria-hidden
+                  className={`arm-fill pointer-events-none absolute inset-0 ${fromData ? 'bg-danger-text/15' : 'bg-white/30'}`}
+                  style={{ '--arm-ms': `${armMs}ms` } as CSSProperties}
+                />
+              )}
+              <span className="relative">{fromData ? 'Send anyway' : 'Send'}</span>
+            </Button>
+          ) : (
+            <Button
+              variant={fromData ? 'secondary' : 'primary'}
+              aria-disabled={!ready || undefined}
+              onClick={confirm}
+            >
+              {drafts ? 'Save draft' : fromData ? 'Confirm anyway' : 'Confirm'}
+            </Button>
+          )}
         </div>
+      ) : state === 'approved' && (sends || drafts) ? (
+        <Outcome
+          result={entry.result}
+          text={entry.resultText}
+          done={sends ? 'Sent' : 'Saved to Drafts'}
+          failed={sends ? 'Not sent' : 'Not saved'}
+          working={sends ? 'Sending…' : 'Saving…'}
+        />
       ) : state === 'approved' ? (
         <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
           <CircleCheck size={14} className="text-success" aria-hidden /> Confirmed
         </p>
       ) : state === 'cancelled' ? (
         <p className="flex items-center gap-1.5 text-[11px] font-medium text-ink-2">
-          <CircleX size={14} className="text-ink-3" aria-hidden /> Cancelled. Nothing was changed.
+          <CircleX size={14} className="text-ink-3" aria-hidden />
+          {sends ? 'Cancelled. Nothing was sent.' : 'Cancelled. Nothing was changed.'}
         </p>
       ) : null}
+    </section>
+  )
+}
+
+/** How a confirmed send or draft went: done (with any warning), failed with why, or still going. */
+function Outcome(props: {
+  result?: 'done' | 'failed'
+  text?: string
+  done: string
+  failed: string
+  working: string
+}) {
+  const { result, text } = props
+  return (
+    <p role="status" className="flex items-start gap-1.5 text-[11px] leading-snug font-medium">
+      {result === 'done' && text ? (
+        <>
+          <CircleAlert size={14} className="shrink-0 text-warn" aria-hidden />
+          <span className="text-ink">{text}</span>
+        </>
+      ) : result === 'done' ? (
+        <>
+          <CircleCheck size={14} className="shrink-0 text-success" aria-hidden />
+          <span className="text-ink-2">{props.done}</span>
+        </>
+      ) : result === 'failed' ? (
+        <>
+          <CircleAlert size={14} className="shrink-0 text-danger" aria-hidden />
+          <span className="text-danger-text">
+            {props.failed}
+            {text ? `: ${text}` : ''}
+          </span>
+        </>
+      ) : (
+        <>
+          <Loader2 size={14} className="shrink-0 animate-spin text-ink-3" aria-hidden />
+          <span className="text-ink-2">{props.working}</span>
+        </>
+      )}
+    </p>
+  )
+}
+
+/** A card line with " → " drawn as an arrow, read out as "to". */
+function Arrows({ text }: { text: string }) {
+  const parts = text.split(' → ')
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {i > 0 && (
+            <>
+              <span aria-hidden> → </span>
+              <span className="sr-only"> to </span>
+            </>
+          )}
+          {p}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+const kb = (n: number) =>
+  n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** An address that can wrap after its @ and its dots, rather than anywhere. */
+function Breakable({ address }: { address: string }) {
+  const parts = address.split(/(?<=[@.])/)
+  return (
+    <>
+      {parts.map((p, i) => (
+        <Fragment key={i}>
+          {p}
+          {i < parts.length - 1 && <wbr />}
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+/** To or Cc: one address per line, each the user didn't type marked as such. */
+function Recipients({ label, list }: { label: string; list: CardRecipient[] }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-14 shrink-0 font-medium text-ink">
+        {list.length > 1 ? `${label} (${list.length})` : label}
+      </dt>
+      <dd className="min-w-0 flex-1">
+        {list.length === 0 ? (
+          'No one yet'
+        ) : (
+          <ul className="flex flex-col gap-0.5">
+            {list.map((r) => (
+              <li key={r.address} className={`flex items-start gap-1 ${r.untyped ? 'text-warn' : ''}`}>
+                {r.untyped && <ShieldAlert size={11} className="mt-px shrink-0" aria-hidden />}
+                <span className="min-w-0">
+                  <Breakable address={r.address} />
+                  {r.untyped && <span className="sr-only">, you didn’t type this address</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </dd>
+    </div>
+  )
+}
+
+/**
+ * An email on a card, in full: who it's from and to (addresses, never names), the subject, what the
+ * assistant wrote (never cut or scrolled away), and below it the quoted or forwarded original in a
+ * box of its own.
+ */
+function EmailPreview({ email }: { email: CardEmail }) {
+  return (
+    <div
+      aria-live="off"
+      className="flex flex-col overflow-hidden rounded-lg bg-hover text-[11px] leading-snug text-ink"
+    >
+      <dl className="flex flex-col gap-1 border-b border-sep px-2.5 py-2 select-text">
+        <div className="flex gap-2">
+          <dt className="w-14 shrink-0 font-medium text-ink">From</dt>
+          <dd className="min-w-0 flex-1">
+            <Breakable address={email.from} />
+          </dd>
+        </div>
+        <Recipients label="To" list={email.to} />
+        {email.cc.length > 0 && <Recipients label="Cc" list={email.cc} />}
+        <div className="flex gap-2">
+          <dt className="w-14 shrink-0 font-medium text-ink">Subject</dt>
+          <dd className="min-w-0 flex-1 font-medium [overflow-wrap:anywhere]">
+            {email.subject || '(no subject)'}
+          </dd>
+        </div>
+      </dl>
+      <div role="group" aria-label="Email text" className="flex flex-col">
+        <p className="px-2.5 py-2 whitespace-pre-wrap select-text [overflow-wrap:anywhere]">
+          {email.text.trim() ? email.text : <span className="text-ink-2">(no text)</span>}
+        </p>
+        {email.original && <Original original={email.original} />}
+      </div>
+      {email.attachments.length > 0 && (
+        <ul aria-label="Attachments" className="flex flex-col gap-0.5 border-t border-sep px-2.5 py-2">
+          {email.attachments.map((a, i) => (
+            <li key={i} className="flex items-center gap-1.5 [overflow-wrap:anywhere]">
+              <Paperclip size={11} className="shrink-0 text-ink-3" aria-hidden />
+              {a.name} <span className="text-ink-2">({kb(a.size)})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** The quoted or forwarded original: its own labelled box, scrolled, saying when there's more. */
+function Original({ original }: { original: NonNullable<CardEmail['original']> }) {
+  const labelId = useId()
+  const box = useRef<HTMLPreElement>(null)
+  const [more, setMore] = useState(false)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (el) setMore(el.scrollHeight > el.clientHeight + 1)
+  }, [original.text])
+  return (
+    <section aria-labelledby={labelId} className="mx-2.5 mb-2 overflow-hidden rounded-md bg-field">
+      <h4 id={labelId} className="px-2.5 pt-1.5 text-[11px] font-medium text-ink">
+        {original.kind === 'quoted' ? 'Quoted email' : 'Forwarded email'}
+      </h4>
+      <div className="relative">
+        <pre
+          ref={box}
+          tabIndex={0}
+          className="max-h-48 overflow-y-auto px-2.5 pt-0.5 pb-2 font-sans whitespace-pre-wrap text-ink select-text [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {original.text.replace(/^\n+/, '')}
+        </pre>
+        {more && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-linear-to-t from-field to-transparent"
+          />
+        )}
+      </div>
+      {more && <p className="px-2.5 pb-1.5 text-[11px] text-ink-2">Scroll to read it all</p>}
     </section>
   )
 }

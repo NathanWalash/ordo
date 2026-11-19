@@ -6,6 +6,7 @@ import {
   type AssistantEvent,
   type AssistantPage,
   type CardDetail,
+  type CardEmail,
   type ConfirmCard,
 } from '@ordo/shared'
 import type { CommandResult, OrdoServices } from '../headless/commands'
@@ -15,7 +16,12 @@ import {
   runTool,
   strictArgs,
   TOOLS,
+  attachmentNameOk,
+  EMAIL_SHOWN_MAX,
+  visibleText,
   type ChangePreview,
+  type EmailPreview,
+  type MailTargets,
   type OrdoTool,
   type PreviewDetail,
 } from '../headless/tools'
@@ -79,10 +85,29 @@ export interface LoopOptions {
 }
 
 /**
- * The outcome, whether untrusted data was read (so the turn is tainted in history), and whether a
- * tool returning what Ordo learned about money ran (so the turn stays away from cloud models).
+ * The outcome; whether untrusted data was read (so the turn is tainted in history); whether a tool
+ * returning what Ordo learned about money ran (so the turn stays away from cloud models); what
+ * confirmed changes did, from Ordo's own labels; and a key for each email sent, so it's never sent
+ * twice.
  */
-export type LoopResult = AskOutcome & { tainted: boolean; moneyDetails: boolean }
+export type LoopResult = AskOutcome & {
+  tainted: boolean
+  moneyDetails: boolean
+  changes: string[]
+  sent: string[]
+}
+
+/** Emails the assistant may send in one question. */
+export const MAX_SENDS = 1
+
+/** The same email, whatever order its recipients came in: to spot one sent already. */
+export const emailKey = (e: Pick<EmailPreview, 'to' | 'cc' | 'subject' | 'text' | 'original'>) =>
+  JSON.stringify([
+    [...e.to, ...e.cc].map((a) => a.toLowerCase()).sort(),
+    e.subject.trim().toLowerCase(),
+    e.text.trim(),
+    e.original?.text.trim() ?? '',
+  ])
 
 /**
  * Whether a result can go to the model as Ordo's own data: nothing but numbers, booleans and
@@ -97,14 +122,204 @@ export function isPlainData(value: unknown, depth = 0): boolean {
   return false
 }
 
-/** Whether `value` appears as its own word in `text` (an address, an id, a path), ignoring case. */
+/** Whether `value` appears as its own word in `text` (an id, a path, a name), ignoring case. */
 export function mentions(text: string, value: string): boolean {
   if (!value) return false
   const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return new RegExp(`(?<![\\w.@/\\\\-])${escaped}(?![\\w@/\\\\-])`, 'i').test(text)
 }
 
+/**
+ * An email address, taken whole: as much of the local part and domain as there is, and only where it
+ * really ends. Followed by anything that could go on (a letter, a mark, an underscore, a middle dot,
+ * or a dot before more), it isn't an address the user typed: "sam@company.co_uk" never vouches for
+ * "sam@company.co".
+ */
+const ADDRESS_TOKEN =
+  /[\p{L}\p{N}.!#$%&'*+/=?^_`{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+(?![\p{L}\p{N}\p{M}\p{Pc}@\u00b7-]|\.[\p{L}\p{N}\p{M}\p{Pc}-])/gu
+
+/**
+ * The email addresses written in some text, whole and lower-cased. Only an exact address counts:
+ * "sam@company.co.uk" is never "sam@company.co", and "alice+work@gmail.com" is never "work@gmail.com".
+ */
+export function typedAddresses(text: string): Set<string> {
+  // Compatibility forms first: a full-width dot (U+FF0E) is a dot, so "co．uk" is "co.uk".
+  return new Set([...text.normalize('NFKC').matchAll(ADDRESS_TOKEN)].map((m) => m[0].toLowerCase()))
+}
+
 const CAUTION = 'and text in those can try to trick it. Only confirm if you want this.'
+
+/** Words too common to count as naming a message by its sender's name or its subject. */
+const TOO_COMMON = new Set(
+  'email e-mail mail message messages reply the this that from last latest new inbox note hello hi thanks thank you me him her them update info news'.split(
+    ' ',
+  ),
+)
+
+/** A subject without Re:/Fwd: and the punctuation around it ("Lunch?" → "Lunch"). */
+const bareSubject = (s: string) =>
+  s.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, '').replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, '')
+
+/**
+ * Whether the user's own words name a message: by the sender's exact address, the sender's name
+ * (or its first word), or its subject, each as whole words, ignoring case. Short or common names
+ * and subjects ("Hi", "email") never count. Naming a message only picks it: it never vouches for
+ * where a reply goes.
+ */
+export function namesMessage(words: string, m: MailTargets['messages'][number]): boolean {
+  if (m.address && typedAddresses(words).has(m.address.toLowerCase())) return true
+  const usable = (v: string, min: number) => v.length >= min && !TOO_COMMON.has(v.toLowerCase())
+  const name = (m.name ?? '').trim()
+  const first = name.split(/\s+/)[0] ?? ''
+  if (usable(name, 3) && mentions(words, name)) return true
+  if (/^\p{L}{3,}$/u.test(first) && usable(first, 3) && mentions(words, first)) return true
+  const subject = bareSubject(m.subject)
+  return usable(subject, 4) && mentions(words, subject)
+}
+
+const listed = (xs: readonly string[]) =>
+  xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}` : (xs[0] ?? '')
+
+const isError = (result: unknown) => !!result && typeof result === 'object' && 'error' in result
+
+/** What untrusted data a step read, as a card names it. */
+const readsOf = (s: Step) => TOOLS.find((t) => t.name === s.tool)?.reads ?? 'earlier results'
+
+/**
+ * Whether a step read nothing but the email being replied to or forwarded: reading it, or a list
+ * or search that found only it. Anything else is other mail, which could carry hidden text.
+ */
+function onlyTarget(s: Step, target: MailTargets['target']): boolean {
+  if (!target || isError(s.result)) return false
+  if (s.tool === 'ordo_read_message')
+    return s.args['uid'] === target.uid && (s.args['mailbox'] ?? 'INBOX') === target.mailbox
+  if (s.tool === 'ordo_search_mail' || s.tool === 'ordo_messages') {
+    const found = (s.result as { messages?: unknown }).messages
+    return (
+      Array.isArray(found) &&
+      found.length > 0 &&
+      found.every(
+        (m: { uid?: unknown; mailbox?: unknown }) => m.uid === target.uid && m.mailbox === target.mailbox,
+      )
+    )
+  }
+  return false
+}
+
+/**
+ * Why a mail change's card appeared.
+ *
+ * Moves, flags and marks act on mail the assistant had to read to find, so their rule is about what
+ * they act on: "You asked for this" needs an explicit phrase in the user's message and every email
+ * named in the user's own words.
+ *
+ * Drafts and emails to send carry the model's text, which any email it read could have shaped. So
+ * "You asked for this" also needs that nothing untrusted was read in the question but the email
+ * being answered (and no earlier answer was built on untrusted data), and that every recipient's
+ * exact address is in the user's own words. A sender picks their display name, subject and
+ * Reply-To, so naming an email by them never vouches for an address. One exception, `sender`: a
+ * reply the user asked for to an email they named, going only to the address it came from, with no
+ * other Reply-To and nothing else read, gets an amber note instead of the full warning.
+ */
+export function mailTrigger(
+  tool: OrdoTool,
+  targets: MailTargets,
+  question: string,
+  history: readonly Turn[],
+  steps: readonly Step[],
+): ConfirmCard['trigger'] {
+  const asked = tool.intent?.test(question) ?? false
+  const words = [...history.map((t) => t.user), question].join('\n')
+  const unnamed = targets.messages.filter((m) => !namesMessage(words, m))
+  const recipients = targets.recipients
+  const tainted = history.some((t) => t.tainted) ? ['earlier results'] : []
+  const allReads = listed([...new Set([...steps.filter((s) => !s.trusted).map(readsOf), ...tainted])])
+  const after = allReads ? ` after reading ${allReads}, ${CAUTION}` : '. Only confirm if you want this.'
+
+  if (!recipients) {
+    if (asked && unnamed.length === 0) return { kind: 'request', text: 'You asked for this.' }
+    if (asked)
+      return {
+        kind: 'data',
+        text:
+          unnamed.length === 1 && targets.messages.length === 1
+            ? `You asked for this, but didn’t name this email, so the assistant chose it${after}`
+            : `You asked for this, but didn’t name every email, so the assistant chose them${after}`,
+      }
+    return { kind: 'data', text: `You didn’t ask for this. The assistant suggested it${after}` }
+  }
+
+  // An email: only the target email may have been read.
+  const others = listed([
+    ...new Set([
+      ...steps.filter((s) => !s.trusted && !onlyTarget(s, targets.target)).map(readsOf),
+      ...tainted,
+    ]),
+  ])
+  const verb = tool.assistantOnly ? 'send' : 'save it'
+  const typed = typedAddresses(words)
+  const untyped = recipients.filter((r) => !typed.has(r.address.toLowerCase()))
+  if (!asked) {
+    const read = allReads ? ` after reading ${allReads}, and text in those can try to trick it.` : '.'
+    const addresses = untyped.map((r) => clean(r.address, 254))
+    return {
+      kind: 'data',
+      text:
+        `You didn’t ask for this. The assistant suggested it${read}` +
+        (addresses.length === 0
+          ? ` Only ${verb} if you want this.`
+          : addresses.length === 1
+            ? ` You didn’t type ${addresses[0]}. Only ${verb} if you know this address and meant to write to it.`
+            : ` You didn’t type these addresses: ${listed(addresses)}. Only ${verb} if you know these addresses and meant to write to them.`),
+    }
+  }
+  const target = targets.messages[0]
+  const who = target ? clean(target.name ?? '', 60).trim() || clean(target.address, 254) : 'the sender'
+
+  if (untyped.length) {
+    if (!others && unnamed.length === 0 && recipients.length === 1 && untyped[0]!.source === 'sender')
+      return { kind: 'sender', text: `You didn’t type this address. It’s the one ${who}’s email came from.` }
+    const from = target ? ` (${clean(target.address, 254)})` : ''
+    const alsoRead = others ? ` It also read ${others} before writing this.` : ''
+    const addresses = untyped.map((r) => clean(r.address, 254))
+    if (addresses.length === 1) {
+      const where =
+        untyped[0]!.source === 'reply-to'
+          ? ` It’s where ${who}’s email asks for replies to go, not the address it came from${from}.`
+          : ''
+      return {
+        kind: 'data',
+        text:
+          `You didn’t type ${addresses[0]}.${where} The assistant got it from an email it read, and emails can ` +
+          `hide text meant to trick it.${alsoRead} Only ${verb} if you know this address and meant to write to it.`,
+      }
+    }
+    const replyTo = untyped.filter((r) => r.source === 'reply-to').map((r) => clean(r.address, 254))
+    const where = replyTo.length
+      ? ` ${listed(replyTo)} ${replyTo.length === 1 ? 'is' : 'are'} where ${who}’s email asks for replies to go, not the address it came from${from}.`
+      : ''
+    return {
+      kind: 'data',
+      text:
+        `You didn’t type these addresses: ${listed(addresses)}.${where} The assistant got them from emails ` +
+        `it read, and emails can hide text meant to trick it.${alsoRead} Only ${verb} if you know these ` +
+        'addresses and meant to write to them.',
+    }
+  }
+  if (others)
+    return {
+      kind: 'data',
+      text:
+        `You asked for this, but the assistant wrote it after reading ${others}, and text in those can try to ` +
+        `trick it. Read the whole email before you ${verb === 'send' ? 'send it' : 'save it'}.`,
+    }
+  if (unnamed.length)
+    return {
+      kind: 'data',
+      text: `You asked for this, but didn’t name the email it’s about, so the assistant chose it. Only ${verb} if it’s the right one.`,
+    }
+  return { kind: 'request', text: 'You asked for this.' }
+}
 
 /**
  * Why a change card appeared. It says "You asked for this" only when all of these hold:
@@ -113,6 +328,7 @@ const CAUTION = 'and text in those can try to trick it. Only confirm if you want
  *   messages;
  * - nothing untrusted was read in this question, and no earlier answer was built on untrusted data
  *   (it could carry third-party text back in as "history").
+ * Mail changes have their own rules: see `mailTrigger`.
  */
 export function triggerFor(
   tool: OrdoTool,
@@ -120,23 +336,24 @@ export function triggerFor(
   question: string,
   history: readonly Turn[],
   steps: readonly Step[],
+  /** A mail change's targets (from its preview). */
+  mail?: MailTargets,
 ): ConfirmCard['trigger'] {
+  if (mail) return mailTrigger(tool, mail, question, history, steps)
   const asked = tool.intent?.test(question) ?? false
   const userWords = [...history.map((t) => t.user), question].join('\n')
-  const named = (tool.named?.(args as never) ?? []).every((v) => mentions(userWords, v))
+  // An address must have been typed whole, as for email recipients: "news@shop.co.uk" never vouches
+  // for "news@shop.co". Anything else (a clean-up id, a path, a title) as its own word.
+  const typed = typedAddresses(userWords)
+  const named = (tool.named?.(args as never) ?? []).every((v) =>
+    v.includes('@') ? typed.has(v.toLowerCase()) : mentions(userWords, v),
+  )
   // The dry run a change must follow had the same arguments, chosen before it was read: it doesn't count.
   const ownPlan = (s: Step) => s.tool === tool.after && argsKey(s.args) === argsKey(args)
-  const sources = [
-    ...new Set(
-      steps
-        .filter((s) => !s.trusted && !ownPlan(s))
-        .map((s) => TOOLS.find((t) => t.name === s.tool)?.reads ?? 'earlier results'),
-    ),
-  ]
+  const sources = [...new Set(steps.filter((s) => !s.trusted && !ownPlan(s)).map(readsOf))]
   if (history.some((t) => t.tainted)) sources.push('earlier results')
+  const list = listed([...new Set(sources)])
   if (asked && named && sources.length === 0) return { kind: 'request', text: 'You asked for this.' }
-  const unique = [...new Set(sources)]
-  const list = unique.length > 1 ? `${unique.slice(0, -1).join(', ')} and ${unique.at(-1)}` : unique[0]
   const reading = list ? ` after reading ${list}, ${CAUTION}` : ''
   if (asked && reading)
     return { kind: 'data', text: `You asked for this, but the assistant chose what to change${reading}` }
@@ -156,6 +373,37 @@ export function triggerFor(
 const cardText = (s: string) => clean(s, 240)
 const cardDetail = (d: PreviewDetail): CardDetail =>
   typeof d === 'string' ? { text: cardText(d) } : { text: cardText(d.text), title: clean(d.title, 4096) }
+
+/**
+ * An email for the card: addresses (marked when the user didn't type them) and subject on one line
+ * each, and the text and original exactly as they'd be sent. Never cut: an email that wouldn't fit
+ * whole, or isn't already clean, is refused instead (see `wholeEmail`).
+ */
+const cardEmail = (e: EmailPreview, typed: Set<string>): CardEmail => {
+  const who = (a: string) => ({
+    address: clean(a, 254),
+    ...(!typed.has(a.toLowerCase()) && { untyped: true as const }),
+  })
+  return {
+    from: clean(e.from, 254),
+    to: e.to.map(who),
+    cc: e.cc.map(who),
+    subject: clean(e.subject, 300),
+    text: e.text,
+    ...(e.original && { original: e.original }),
+    // In full: names that couldn't be shown exactly were refused before the card.
+    attachments: e.attachments.map((f) => ({ name: f.name, size: f.size })),
+  }
+}
+
+/** Whether the card can show every character of an email that would be sent or saved. */
+const wholeEmail = (e: EmailPreview) =>
+  e.text.length + (e.original?.text.length ?? 0) <= EMAIL_SHOWN_MAX &&
+  visibleText(e.text) === e.text &&
+  (!e.original || visibleText(e.original.text) === e.original.text) &&
+  e.to.length + e.cc.length <= 50 &&
+  e.attachments.length <= 20 &&
+  e.attachments.every((f) => attachmentNameOk(f.name))
 
 /** An answer fit to show: invisible and bidi characters out, Markdown emphasis and headings stripped. */
 export function tidy(text: string): string {
@@ -191,10 +439,17 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
   let problem: string | undefined
   let toolCalls = 0
 
+  /** Keys of the emails sent in this question. */
+  const sent: string[] = []
+  /** Earlier sends in this conversation, so the same email is never sent twice. */
+  const sentBefore = new Set(o.history.flatMap((t) => t.sent ?? []))
+  let sends = 0
+
   const end = (outcome: AskOutcome): LoopResult => {
     const tainted = steps.some((s) => !s.trusted)
     const moneyDetails = steps.some((s) => tools.find((t) => t.name === s.tool)?.moneyDetails === true)
-    if (outcome.ok || changed.length === 0) return { ...outcome, tainted, moneyDetails }
+    const extra = { tainted, moneyDetails, changes: [...changed], sent: [...sent] }
+    if (outcome.ok || changed.length === 0) return { ...outcome, ...extra }
     // A change that already ran must be reported, and remembered, whatever happened after it.
     const what = changed.join('. ')
     const lead = outcome.reason === 'stopped' ? 'Stopped.' : outcome.message
@@ -202,8 +457,7 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       ok: true,
       answer: `${lead} The change you confirmed was made: ${what}.`,
       steps: toolCalls,
-      tainted,
-      moneyDetails,
+      ...extra,
     }
   }
   const stopped = () => end({ ok: false, reason: 'stopped', message: 'Stopped.' })
@@ -372,6 +626,15 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       continue
     }
 
+    // At most one email per question, and never the same one twice in a conversation.
+    if (tool.assistantOnly && sends >= MAX_SENDS) {
+      refuse(
+        'Ordo sends at most one email per question, and one was already sent. Tell the user what was sent.',
+        'One email per question',
+      )
+      continue
+    }
+
     /** Still allowed to run this tool now? If the provider or a consent changed, the question ends. */
     const notAllowed = () => {
       const why = o.allowed?.(tool) ?? null
@@ -383,6 +646,17 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       const before = notAllowed()
       if (before) return before
       const preview = await previewTool(o.services, tool, data)
+      if (tool.assistantOnly && preview.email && sentBefore.has(emailKey(preview.email))) {
+        refuse(
+          'This exact email was already sent earlier in this conversation. Don’t send it again; tell the user.',
+          'Already sent',
+        )
+        continue
+      }
+      // The card must show every character an email would carry, or there's no card to confirm.
+      if (preview.email && !preview.blocked && !wholeEmail(preview.email))
+        preview.blocked = 'Ordo can’t show this whole email on the card, so it won’t save or send it.'
+      const typed = typedAddresses([...o.history.map((t) => t.user), o.question].join('\n'))
       const card: ConfirmCard = {
         tool: tool.name,
         label: tool.label,
@@ -390,7 +664,9 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
         details: preview.details.slice(0, 50).map(cardDetail),
         notes: preview.notes.slice(0, 10).map(cardText),
         ...(preview.blocked && { blocked: cardText(preview.blocked) }),
-        trigger: triggerFor(tool, data, o.question, o.history, steps),
+        ...(preview.email && { email: cardEmail(preview.email, typed) }),
+        ...(tool.assistantOnly && preview.email?.send && { action: 'send' as const }),
+        trigger: triggerFor(tool, data, o.question, o.history, steps, preview.mail),
       }
       o.onEvent({ type: 'confirm', id, card })
       // A change that can't happen ends here: its card explains why, and there's nothing to answer.
@@ -414,12 +690,22 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
         })
       // A no ends the turn without asking the model again, so data can't keep asking.
       if (!approved)
-        return end({ ok: false, reason: 'cancelled', message: 'Cancelled. Nothing was changed.' })
+        return end({
+          ok: false,
+          reason: 'cancelled',
+          message: tool.assistantOnly ? 'Cancelled. Nothing was sent.' : 'Cancelled. Nothing was changed.',
+        })
       const afterConfirm = notAllowed()
       if (afterConfirm) return afterConfirm
       o.onEvent({ type: 'tool', id, tool: tool.name, label: tool.label, kind: tool.kind, status: 'running' })
-      result = await runTool(o.services, tool, data, { allowChanges: true, confirm: true })
+      if (tool.assistantOnly) sends++
+      result = await runTool(o.services, tool, data, {
+        allowChanges: true,
+        confirm: true,
+        caller: 'assistant',
+      })
       if (result.ok) changed.push(tool.done(result.data))
+      if (result.ok && tool.assistantOnly && preview.email) sent.push(emailKey(preview.email))
     } else {
       const now = notAllowed()
       if (now) return now
@@ -435,6 +721,8 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
       kind: tool.kind,
       status: result.ok ? 'done' : 'failed',
       ...(!result.ok && { summary: clean(result.message, 160) }),
+      // A send that went out with a problem (a refused recipient, no copy in Sent) says so.
+      ...(result.ok && warningOf(result.data) && { summary: clean(warningOf(result.data), 240) }),
     })
     steps.push({
       tool: tool.name,
@@ -452,7 +740,11 @@ export async function runAssistant(o: LoopOptions): Promise<LoopResult> {
   })
 }
 
-const isError = (result: unknown) => !!result && typeof result === 'object' && 'error' in result
+/** A change's warning, when its result has one (only Ordo's own `warning` field). */
+const warningOf = (data: unknown): string =>
+  data && typeof data === 'object' && typeof (data as { warning?: unknown }).warning === 'string'
+    ? (data as { warning: string }).warning
+    : ''
 
 const samePreview = (a: ChangePreview, b: ChangePreview) =>
   argsKey({ ...a, blocked: a.blocked ?? null }) === argsKey({ ...b, blocked: b.blocked ?? null })

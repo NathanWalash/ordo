@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CHANGE_COMMANDS } from './args'
-import { fakeServices } from './fake-services'
-import { previewTool, runTool, strictArgs, toolByName, TOOLS } from './tools'
+import { content, fakeServices, summary } from './fake-services'
+import {
+  attachmentNameOk,
+  DRAFT_NOTE,
+  MARKS_MAX,
+  recipientsMismatch,
+  EMAIL_SHOWN_MAX,
+  MAIL_BODY_MAX,
+  ORIGINAL_CUT,
+  plainBody,
+  visibleText,
+  previewTool,
+  runTool,
+  SEND_NOTE,
+  strictArgs,
+  toolByName,
+  TOOLS,
+} from './tools'
 
 const t = (name: string) => toolByName(name)!
 const allow = { allowChanges: true, confirm: true }
@@ -25,8 +41,14 @@ describe('the tool registry', () => {
         expect(x.intent).toBeInstanceOf(RegExp)
       }
     }
-    const covered = TOOLS.filter((x) => x.kind === 'change').map((x) => x.command)
+    const covered = TOOLS.filter((x) => x.kind === 'change' && x.command).map((x) => x.command)
     expect(new Set(covered)).toEqual(CHANGE_COMMANDS)
+    // Drafts and sending have no headless command; sending is the assistant's alone.
+    expect(TOOLS.filter((x) => x.kind === 'change' && !x.command).map((x) => x.name)).toEqual([
+      'ordo_mail_draft',
+      'ordo_mail_send',
+    ])
+    expect(TOOLS.filter((x) => x.assistantOnly).map((x) => x.name)).toEqual(['ordo_mail_send'])
   })
 
   it('never lets a model pass confirm: it is not an argument of any tool', () => {
@@ -306,8 +328,8 @@ describe('board tools', () => {
 describe('mail tools', () => {
   const read = { allowChanges: false, confirm: false }
 
-  it('only read and refresh, with what came from email marked untrusted', () => {
-    const mail = TOOLS.filter((x) => x.command?.startsWith('mail '))
+  it('reads and refreshes, with what came from email marked untrusted', () => {
+    const mail = TOOLS.filter((x) => x.command?.startsWith('mail ') && x.kind !== 'change')
     expect(mail.map((x) => x.name).sort()).toEqual([
       'ordo_mail_sync',
       'ordo_mailboxes',
@@ -315,7 +337,6 @@ describe('mail tools', () => {
       'ordo_read_message',
       'ordo_search_mail',
     ])
-    for (const x of mail) expect(x.kind).not.toBe('change')
     expect(t('ordo_mail_sync').kind).toBe('refresh')
     for (const name of ['ordo_mailboxes', 'ordo_messages', 'ordo_search_mail', 'ordo_read_message']) {
       expect(t(name).untrusted).toBe(true)
@@ -334,5 +355,491 @@ describe('mail tools', () => {
   it('turns a message that has gone into not_found', async () => {
     const r = await runTool(fakeServices(), t('ordo_read_message'), { uid: 99 }, read)
     expect(r).toMatchObject({ ok: false, code: 'not_found' })
+  })
+})
+
+describe('mail change tools', () => {
+  it('preview a move from Ordo’s cached headers: sender address, subject, date, and from and to', async () => {
+    const services = fakeServices()
+    const p = await previewTool(services, t('ordo_mail_move'), { uids: [7, 8], to: 'archive' })
+    expect(p).toMatchObject({
+      title: 'Move 2 messages to Archive',
+      details: [
+        'sam@friend.example · “Lunch?” · 16 Nov 2026: Inbox → Archive',
+        'digest@news.example · “Issue 12” · 16 Nov 2026: Inbox → Archive',
+      ],
+      notes: ['Nothing is deleted. You can undo the move while Ordo is open.'],
+      mail: {
+        messages: [
+          { address: 'sam@friend.example', name: 'Sam', subject: 'Lunch?' },
+          { address: 'digest@news.example', name: 'Daily Digest', subject: 'Issue 12' },
+        ],
+      },
+    })
+    expect(p.blocked).toBeUndefined()
+    // Bin, a user folder by name, and nothing touched by the preview.
+    expect((await previewTool(services, t('ordo_mail_move'), { uids: [7], to: 'bin' })).title).toBe(
+      'Move 1 message to Bin',
+    )
+    expect((await previewTool(services, t('ordo_mail_move'), { uids: [7], to: 'projects' })).details).toEqual(
+      ['sam@friend.example · “Lunch?” · 16 Nov 2026: Inbox → Projects'],
+    )
+    expect(services.mail.move).not.toHaveBeenCalled()
+  })
+
+  it('checks a folder against the server’s list, and never moves into Drafts', async () => {
+    const services = fakeServices()
+    const nowhere = await previewTool(services, t('ordo_mail_move'), { uids: [7], to: 'Secret Stash' })
+    expect(nowhere.blocked).toMatch(/There’s no folder called “Secret Stash”/)
+    const drafts = await previewTool(services, t('ordo_mail_move'), { uids: [7], to: 'Drafts' })
+    expect(drafts.blocked).toBe('Messages can’t be moved into Drafts.')
+    const here = await previewTool(services, t('ordo_mail_move'), { uids: [7], to: 'inbox' })
+    expect(here.blocked).toBe('These messages are already in Inbox.')
+    const r = await runTool(services, t('ordo_mail_move'), { uids: [7], to: 'Secret Stash' }, allow)
+    expect(r).toMatchObject({ ok: false, code: 'not_found' })
+    expect(services.mail.move).not.toHaveBeenCalled()
+  })
+
+  it('blocks a message Ordo hasn’t cached, so the card shows what would change', async () => {
+    const p = await previewTool(fakeServices(), t('ordo_mail_flag'), { uids: [7, 99] })
+    expect(p.blocked).toMatch(/Ordo doesn’t have message 99 in INBOX/)
+  })
+
+  it('preview flags and read state, current → new, and block when nothing would change', async () => {
+    const services = fakeServices()
+    const unflag = await previewTool(services, t('ordo_mail_flag'), { uids: [7, 8], flagged: false })
+    expect(unflag).toMatchObject({
+      title: 'Unflag 2 messages',
+      details: [
+        'sam@friend.example · “Lunch?” · 16 Nov 2026: flagged → not flagged',
+        'digest@news.example · “Issue 12” · 16 Nov 2026: not flagged → not flagged',
+      ],
+    })
+    expect(unflag.blocked).toBeUndefined()
+    const already = await previewTool(services, t('ordo_mail_flag'), { uids: [7] })
+    expect(already.blocked).toBe('Nothing would change: it’s already flagged.')
+    const read = await previewTool(services, t('ordo_mail_mark'), { uids: [7], read: true })
+    expect(read).toMatchObject({
+      title: 'Mark 1 message as read',
+      details: ['sam@friend.example · “Lunch?” · 16 Nov 2026: unread → read'],
+    })
+  })
+
+  it('preview an undo from the move it would reverse', async () => {
+    const services = fakeServices()
+    expect((await previewTool(services, t('ordo_mail_undo'), {})).blocked).toMatch(/no move to undo/)
+    services.mail.lastMove = () => ({
+      undoId: 4,
+      from: 'INBOX',
+      to: 'Archive',
+      count: 1,
+      messages: [summary(7)],
+    })
+    const p = await previewTool(services, t('ordo_mail_undo'), {})
+    expect(p).toMatchObject({
+      title: 'Move 1 message from Archive back to Inbox',
+      details: ['sam@friend.example · “Lunch?” · 16 Nov 2026: Archive → Inbox'],
+    })
+    expect(await runTool(services, t('ordo_mail_undo'), {}, allow)).toEqual({
+      ok: true,
+      data: { undoId: 4, restored: 1 },
+    })
+    expect(services.mail.undoMove).toHaveBeenCalledWith(4)
+  })
+
+  it('every mail change needs --allow-changes and confirm, and calls nothing otherwise', async () => {
+    const services = fakeServices()
+    const calls: [string, Record<string, unknown>][] = [
+      ['ordo_mail_move', { uids: [7], to: 'archive' }],
+      ['ordo_mail_flag', { uids: [7], flagged: false }],
+      ['ordo_mail_mark', { uids: [7], read: true }],
+      ['ordo_mail_undo', {}],
+      ['ordo_mail_draft', { mode: 'new', to: ['sam@friend.example'], subject: 'Hi', body: 'Hello' }],
+    ]
+    for (const [name, args] of calls) {
+      expect(await runTool(services, t(name), args, { allowChanges: false, confirm: true })).toMatchObject({
+        ok: false,
+        code: 'changes_not_allowed',
+      })
+      expect(await runTool(services, t(name), args, { allowChanges: true, confirm: false })).toMatchObject({
+        ok: false,
+        code: 'confirm_required',
+      })
+    }
+    expect(services.mail.move).not.toHaveBeenCalled()
+    expect(services.mail.setFlags).not.toHaveBeenCalled()
+    expect(services.mail.undoMove).not.toHaveBeenCalled()
+    expect(services.mail.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it('preview a reply draft: Ordo picks the recipients and subject, and quotes the original', async () => {
+    const services = fakeServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({
+        text: 'Are you free on Friday?',
+        html: null,
+        replyTo: [{ address: 'sam.lists@friend.example' }],
+      }),
+    }))
+    const p = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'reply',
+      uid: 7,
+      body: 'Yes, see you then.',
+    })
+    expect(p.title).toBe('Save a draft of “Re: Lunch?” to sam.lists@friend.example')
+    expect(p.email).toMatchObject({
+      from: 'me@icloud.example',
+      to: ['sam.lists@friend.example'],
+      cc: [],
+      subject: 'Re: Lunch?',
+      text: 'Yes, see you then.',
+      original: { kind: 'quoted' },
+      attachments: [],
+      send: false,
+    })
+    expect(p.email!.original!.text).toMatch(
+      /^\n\nOn .*, Sam <sam@friend\.example> wrote:\n\n> Are you free on Friday\?/,
+    )
+    // Where each recipient came from: here the Reply-To, which the sender picked.
+    expect(p.mail).toEqual({
+      messages: [{ address: 'sam@friend.example', name: 'Sam', subject: 'Lunch?' }],
+      target: { mailbox: 'INBOX', uid: 7 },
+      recipients: [{ address: 'sam.lists@friend.example', source: 'reply-to' }],
+    })
+    expect(p.notes).toEqual([DRAFT_NOTE])
+    // A reply goes to the sender: the model can't pick its To.
+    const redirected = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'reply',
+      uid: 7,
+      to: ['x@evil.example'],
+      body: 'Hi',
+    })
+    expect(redirected.blocked).toMatch(/A reply goes to the message’s sender/)
+  })
+
+  it('a forward lists the attachments it carries, and needs someone to send to', async () => {
+    const services = fakeServices()
+    const p = await previewTool(services, t('ordo_mail_send'), {
+      mode: 'forward',
+      uid: 7,
+      to: ['pat@friend.example'],
+      body: 'FYI',
+    })
+    expect(p.email).toMatchObject({
+      to: ['pat@friend.example'],
+      subject: 'Fwd: Lunch?',
+      attachments: [{ name: 'menu.pdf', size: 1000 }],
+      send: true,
+    })
+    expect(p.email!.text).toBe('FYI')
+    expect(p.email!.original).toMatchObject({ kind: 'forwarded' })
+    expect(p.email!.original!.text).toMatch(/^\n\n---------- Forwarded message ----------/)
+    expect(p.title).toBe('Send “Fwd: Lunch?” to pat@friend.example')
+    expect(p.notes).toEqual([SEND_NOTE])
+    expect(p.mail!.recipients).toEqual([{ address: 'pat@friend.example', source: 'model' }])
+    const nobody = await previewTool(services, t('ordo_mail_send'), {
+      mode: 'new',
+      subject: 'Hi',
+      body: 'Hi',
+    })
+    expect(nobody.blocked).toBe('There’s no one to send it to.')
+  })
+
+  it('takes plain addresses only, at most 20, and no Bcc at all', async () => {
+    const services = fakeServices()
+    const named = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'new',
+      to: ['Sam <sam@friend.example>'],
+      subject: 'Hi',
+      body: 'Hi',
+    })
+    expect(named.blocked).toMatch(/isn’t an email address/)
+    const many = Array.from({ length: 21 }, (_, i) => `p${i}@friend.example`)
+    expect(strictArgs(t('ordo_mail_send')).safeParse({ mode: 'new', to: many, body: 'x' }).success).toBe(
+      false,
+    )
+    expect(
+      strictArgs(t('ordo_mail_send')).safeParse({ mode: 'new', bcc: ['a@b.example'], body: 'x' }).success,
+    ).toBe(false)
+    expect(strictArgs(t('ordo_mail_send')).safeParse({ mode: 'reply-all', uid: 7, body: 'x' }).success).toBe(
+      false,
+    )
+    expect(strictArgs(t('ordo_mail_draft')).safeParse({ mode: 'reply-all', uid: 7, body: 'x' }).success).toBe(
+      true,
+    )
+  })
+
+  it('writes the model’s text as plain text: no control or bidi characters, capped', async () => {
+    const rlo = String.fromCharCode(0x202e)
+    const esc = String.fromCharCode(0x1b)
+    expect(plainBody(`Hi${rlo} there${esc}[2J\r\nBye\ttab`)).toBe('Hi there[2J\nBye\ttab')
+    expect(plainBody('x'.repeat(MAIL_BODY_MAX + 50))).toHaveLength(MAIL_BODY_MAX)
+    const services = fakeServices()
+    const p = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'new',
+      to: ['sam@friend.example'],
+      subject: `Hello${rlo}\u0000 there`,
+      body: `Line one${rlo}\nLine two`,
+    })
+    expect(p.email!.subject).toBe('Hello   there')
+    expect(p.email!.text).toBe('Line one\nLine two')
+    // The quoted original too, in what's sent as well as what's shown.
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ text: `Pay ${rlo}evil${esc}[2J now`, html: null }),
+    }))
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const args = { mode: 'reply', uid: 7, body: 'No.' }
+    const quoted = await previewTool(services, t('ordo_mail_send'), args)
+    expect(quoted.email!.original!.text).toContain('> Pay evil[2J now')
+    await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    const sent = vi.mocked(services.mail.send).mock.calls[0]![0]
+    expect(sent.body).toBe(quoted.email!.text + quoted.email!.original!.text)
+  })
+
+  it('removes characters that hide text, and closes up gaps that could push text out of sight', () => {
+    const hidden = [
+      '\u00ad', // soft hyphen
+      '\u180e', // Mongolian vowel separator
+      '\ufe0f', // variation selector
+      '\u115f\u1160\u3164\uffa0', // Hangul fillers
+      '\u2800', // blank braille pattern
+      '\u200b\u2060', // zero-width space, word joiner
+      String.fromCodePoint(0xe0041, 0xe0042, 0xe007f), // tag characters
+    ].join('')
+    expect(visibleText(`a${hidden}b`)).toBe('ab')
+    expect(visibleText(`Thanks.${'\n'.repeat(80)}123456`)).toBe('Thanks.\n\n\n123456')
+    expect(visibleText(`Thanks.${' '.repeat(200)}123456`)).toBe('Thanks. 123456')
+    expect(visibleText(`Thanks.${'\u3000'.repeat(10)}123456  \n\t\t\t\t\nx`)).toBe('Thanks. 123456\n\nx')
+    // Two blank lines and short indents stay.
+    expect(visibleText('a\n\n\nb\n  c')).toBe('a\n\n\nb\n  c')
+    // Cleaning twice changes nothing, so what's shown is exactly what's sent.
+    const once = visibleText(`x ${hidden}\n\n\n\n\n y     z  \n`)
+    expect(visibleText(once)).toBe(once)
+  })
+
+  it('cuts a long original so the email fits the card whole, and says so', async () => {
+    const services = fakeServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ text: 'word '.repeat(40_000), html: null, attachments: [] }),
+    }))
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const args = { mode: 'forward', uid: 7, to: ['pat@friend.example'], body: 'See below.' }
+    const p = await previewTool(services, t('ordo_mail_send'), args)
+    const e = p.email!
+    expect(e.text.length + e.original!.text.length).toBeLessThanOrEqual(EMAIL_SHOWN_MAX)
+    expect(e.original!.text.endsWith(ORIGINAL_CUT)).toBe(true)
+    await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    expect(vi.mocked(services.mail.send).mock.calls[0]![0].body).toBe(e.text + e.original!.text)
+  })
+
+  it('refuses a forward with too many or too big attachments before the card', async () => {
+    const services = fakeServices()
+    const file = (i: number, size = 1000) => ({
+      part: String(i + 2),
+      filename: `f${i}.pdf`,
+      contentType: 'application/pdf',
+      size,
+      inline: false,
+    })
+    const forward = { mode: 'forward', uid: 7, to: ['pat@friend.example'], body: 'FYI' }
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ attachments: Array.from({ length: 21 }, (_, i) => file(i)) }),
+    }))
+    expect((await previewTool(services, t('ordo_mail_send'), forward)).blocked).toBe(
+      'This email has 21 attachments, and Ordo forwards at most 20. Forward it from Mail instead.',
+    )
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ attachments: [file(0, 15 * 1024 * 1024)] }),
+    }))
+    expect((await previewTool(services, t('ordo_mail_draft'), forward)).blocked).toBe(
+      'f0.pdf is too big to send by email (over 14 MB).',
+    )
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ attachments: [file(0, 8 * 1024 * 1024), file(1, 8 * 1024 * 1024)] }),
+    }))
+    expect((await previewTool(services, t('ordo_mail_send'), forward)).blocked).toBe(
+      'The attachments are too big to send by email together (over 14 MB).',
+    )
+  })
+
+  it('says where each reply recipient came from: the sender, the thread, or the model', async () => {
+    const services = fakeServices()
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ cc: [{ address: 'pat@friend.example' }] }),
+    }))
+    const p = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'reply-all',
+      uid: 7,
+      cc: ['lee@friend.example'],
+      body: 'Yes',
+    })
+    expect(p.mail!.recipients).toEqual([
+      { address: 'sam@friend.example', source: 'sender' },
+      { address: 'pat@friend.example', source: 'thread' },
+      { address: 'lee@friend.example', source: 'model' },
+    ])
+  })
+
+  it('a uid can only be given once, so a card never lists the same email twice', () => {
+    for (const name of ['ordo_mail_move', 'ordo_mail_flag', 'ordo_mail_mark'])
+      expect(strictArgs(t(name)).safeParse({ uids: [7, 7], to: 'archive', read: true }).success).toBe(false)
+  })
+
+  it('a failed draft or send keeps its kind of error', async () => {
+    const services = fakeServices()
+    services.mail.saveDraft = vi.fn(async () => ({
+      ok: false as const,
+      error: 'not-found' as const,
+      message: 'The message you’re replying to isn’t there any more.',
+    }))
+    services.mail.send = vi.fn(async () => ({
+      ok: false as const,
+      error: 'invalid' as const,
+      message: 'iCloud refused x@y.example.',
+    }))
+    const args = { mode: 'new', to: ['sam@friend.example'], subject: 'Hi', body: 'Hi' }
+    expect(await runTool(services, t('ordo_mail_draft'), args, allow)).toMatchObject({ code: 'not_found' })
+    expect(
+      await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' }),
+    ).toMatchObject({
+      code: 'invalid',
+    })
+  })
+})
+
+describe('sending is the assistant’s alone', () => {
+  const args = { mode: 'new', to: ['sam@friend.example'], subject: 'Hi', body: 'Hello' }
+
+  it('is refused for any caller but the assistant, even with changes allowed and confirmed', async () => {
+    const services = fakeServices()
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const r = await runTool(services, t('ordo_mail_send'), args, allow)
+    expect(r).toMatchObject({ ok: false, code: 'unavailable' })
+    expect(services.mail.send).not.toHaveBeenCalled()
+    const ok = await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    expect(ok).toEqual({ ok: true, data: { sent: true } })
+    expect(services.mail.send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ['sam@friend.example'], cc: [], bcc: [], subject: 'Hi', body: 'Hello' }),
+    )
+  })
+
+  it('can’t send with headless services, which have no send at all', async () => {
+    const services = fakeServices()
+    expect(services.mail.send).toBeUndefined()
+    const r = await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    expect(r).toMatchObject({ ok: false, code: 'unavailable' })
+    expect((await previewTool(services, t('ordo_mail_send'), args)).blocked).toMatch(
+      /only sends email from the app/,
+    )
+  })
+
+  it('has no headless command', () => {
+    expect(t('ordo_mail_send').command).toBeUndefined()
+    expect([...CHANGE_COMMANDS].some((c) => /send|reply|forward/.test(c))).toBe(false)
+  })
+})
+
+describe('review round three: tools', () => {
+  it('passes recipients as lists, one address each, and checks them against the card before sending', async () => {
+    const services = fakeServices()
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const args = {
+      mode: 'new',
+      to: ['pat@friend.example'],
+      cc: ['lee@friend.example'],
+      subject: 'Hi',
+      body: 'Hi',
+    }
+    await runTool(services, t('ordo_mail_send'), args, { ...allow, caller: 'assistant' })
+    expect(vi.mocked(services.mail.send).mock.calls[0]![0]).toMatchObject({
+      to: ['pat@friend.example'],
+      cc: ['lee@friend.example'],
+      bcc: [],
+    })
+  })
+
+  it('refuses when what would be parsed isn’t exactly the card’s list', () => {
+    const built = (to: string[] | string, shown: string[], bcc: string[] | string = []) =>
+      ({
+        ok: true,
+        compose: { to, cc: [], bcc, subject: 'x', body: 'x', attachments: [] },
+        email: {
+          from: 'me@icloud.example',
+          to: shown,
+          cc: [],
+          subject: 'x',
+          text: 'x',
+          attachments: [],
+          send: true,
+        },
+        mail: { messages: [] },
+      }) as never
+    expect(recipientsMismatch(built(['sam@friend.example'], ['sam@friend.example']))).toBeNull()
+    for (const b of [
+      built('sam@friend.example,boss@corp.example', ['sam@friend.example,boss@corp.example']),
+      built(['sam@friend.example,boss@corp.example'], ['sam@friend.example,boss@corp.example']),
+      built(['sam@friend.example', 'boss@corp.example'], ['sam@friend.example']),
+      built(['sam@friend.example'], ['sam@friend.example'], ['spy@evil.example']),
+    ])
+      expect(recipientsMismatch(b)).toMatchObject({ ok: false, code: 'invalid' })
+  })
+
+  it('shows an attachment’s full name, and won’t forward one whose name could disguise it', async () => {
+    const services = fakeServices()
+    const rlo = String.fromCharCode(0x202e)
+    const file = (filename: string) => ({
+      part: '2',
+      filename,
+      contentType: 'application/pdf',
+      size: 10,
+      inline: false,
+    })
+    const forward = { mode: 'forward', uid: 7, to: ['pat@friend.example'], body: 'FYI' }
+    const long = `${'b'.repeat(200)}.pdf`
+    services.mail.open = vi.fn(async () => ({
+      ok: true as const,
+      message: content({ attachments: [file(long)] }),
+    }))
+    expect((await previewTool(services, t('ordo_mail_send'), forward)).email!.attachments).toEqual([
+      { name: long, size: 10 },
+    ])
+    for (const bad of [
+      `invoice${rlo}fdp.exe`,
+      `a${String.fromCharCode(0x200b)}.pdf`,
+      `${'c'.repeat(300)}.pdf`,
+      'tab\there.pdf',
+    ]) {
+      services.mail.open = vi.fn(async () => ({
+        ok: true as const,
+        message: content({ attachments: [file(bad)] }),
+      }))
+      expect((await previewTool(services, t('ordo_mail_send'), forward)).blocked).toMatch(
+        /has a name Ordo can’t show you exactly .* Forward it from Mail instead\.$/,
+      )
+    }
+    expect(attachmentNameOk('report.pdf')).toBe(true)
+  })
+
+  it('removes every other format, private-use and unassigned character, and caps stacked marks', () => {
+    const cps = [
+      0xfff9, 0xfffa, 0xfffb, 0x13430, 0x1343f, 0x600, 0x605, 0x6dd, 0x70f, 0x890, 0x891, 0x8e2, 0x110bd,
+      0x110cd, 0xe000, 0xf8ff, 0x10fffd, 0x0378,
+    ]
+    for (const cp of cps) expect(visibleText(`a${String.fromCodePoint(cp)}b`)).toBe('ab')
+    const acute = String.fromCharCode(0x301)
+    expect(visibleText(`a${acute.repeat(50)}b`)).toBe(`a${acute.repeat(MARKS_MAX)}b`)
+    // Ordinary accents and emoji with one mark stay.
+    expect(visibleText(`e${acute} caf${String.fromCharCode(0xe9)}`)).toBe(
+      `e${acute} caf${String.fromCharCode(0xe9)}`,
+    )
+    const once = visibleText(`x${acute.repeat(9)}${String.fromCodePoint(0xfff9)}y`)
+    expect(visibleText(once)).toBe(once)
   })
 })

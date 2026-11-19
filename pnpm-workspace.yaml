@@ -16,3 +16,5 @@ overrides:
   encodeurl: 2.0.1
   express-rate-limit: 8.7.2
   jose: 6.2.15
+  # happy-dom (unit tests' DOM) would otherwise pull a days-old ws.
+  ws: 8.22.1

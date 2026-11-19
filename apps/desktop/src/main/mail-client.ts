@@ -7,7 +7,7 @@ import {
   checkLink,
   COMPOSE_LIMITS,
   hasControlChars,
-  parseAddressList,
+  recipientList,
   referencesFor,
   safeFilename,
   type AttachmentInfo,
@@ -45,6 +45,7 @@ import {
   UndoMoveSchema,
   type AttachmentRef,
   type ComposeInput,
+  type LastMove,
   type MailError,
   type MailFailure,
   type MailOutcome,
@@ -227,6 +228,14 @@ export function messages(input: unknown): { total: number; messages: MessageSumm
   return { total: page.total, messages: page.messages.map(summary) }
 }
 
+/** One message's headers from the cache, or null. No network: for previews of changes. */
+export function cached(input: unknown): MessageSummary | null {
+  const parsed = MessageRefSchema.safeParse(input)
+  if (!parsed.success || !loadAccount()) return null
+  const h = mailStore().message(parsed.data.mailbox, parsed.data.uid)
+  return h ? summary(h) : null
+}
+
 export function search(input: unknown): MessageSummary[] {
   const parsed = SearchQuerySchema.safeParse(input)
   if (!parsed.success || !loadAccount()) return []
@@ -322,6 +331,8 @@ interface MoveRecord {
   toUidValidity: string | null
   /** [UID in `from`, UID in `to`] */
   pairs: [number, number][]
+  /** The messages as they were in the cache before the move, to say what an undo puts back. */
+  messages: MessageSummary[]
 }
 
 /** Recent moves that can be undone, newest last. Kept in memory: undo is for the moment. */
@@ -336,20 +347,46 @@ const TARGET_NAMES: Record<MoveTarget, string> = {
   junk: 'Junk',
 }
 
-/** Move messages to Archive, Bin, Inbox or Junk. Nothing is ever deleted. */
+/** A move's destination as a folder path and a name to show, or why it can't be one. */
+export function moveDestination(
+  to: MoveTarget | { folder: string },
+): { ok: true; path: string; name: string } | MailFailure {
+  if (typeof to === 'string') {
+    const path = mailboxFor(to)
+    return path
+      ? { ok: true, path, name: TARGET_NAMES[to] }
+      : fail('unavailable', `This account has no ${TARGET_NAMES[to]} mailbox.`)
+  }
+  // Only a folder the server listed, and never Drafts: a draft is made by saving one.
+  const box = knownMailbox(to.folder)
+  if (!box) return fail('not-found', 'There’s no folder by that name. Check for new mail to update the list.')
+  if (box.role === 'drafts') return fail('invalid', 'Messages can’t be moved into Drafts.')
+  return {
+    ok: true,
+    path: box.path,
+    name: box.role ? (TARGET_NAMES[box.role as MoveTarget] ?? box.name) : box.name,
+  }
+}
+
+/** Move messages to Archive, Bin, Inbox, Junk or one of the user's folders. Nothing is ever deleted. */
 export async function move(input: unknown): Promise<MailOutcome<{ moved: number; undoId: number | null }>> {
   const parsed = MailMoveSchema.safeParse(input)
   if (!parsed.success) return INVALID
   if (!loadAccount()) return NO_ACCOUNT
   const { mailbox, uids, to } = parsed.data
   if (!knownMailbox(mailbox)) return UNKNOWN_MAILBOX
-  const target = mailboxFor(to)
-  if (!target) return fail('unavailable', `This account has no ${TARGET_NAMES[to]} mailbox.`)
-  if (target === mailbox) return fail('invalid', `These messages are already in ${TARGET_NAMES[to]}.`)
+  const dest = moveDestination(to)
+  if (!dest.ok) return dest
+  const target = dest.path
+  if (target === mailbox) return fail('invalid', `These messages are already in ${dest.name}.`)
   return changing('moving mail', () =>
     withImap(async (p) => {
-      const res = await p.moveMessages(mailbox, target, uids)
       const store = mailStore()
+      const before = uids.flatMap((uid) => {
+        const h = store.message(mailbox, uid)
+        return h ? [summary(h)] : []
+      })
+      const res = await p.moveMessages(mailbox, target, uids)
       store.deleteMessages(mailbox, uids)
       const moved = res.uidMap ? res.uidMap.size : uids.length
       let undoId: number | null = null
@@ -360,6 +397,7 @@ export async function move(input: unknown): Promise<MailOutcome<{ moved: number;
           to: target,
           toUidValidity: res.uidValidity,
           pairs: [...res.uidMap],
+          messages: before.slice(0, 20),
         })
         for (const id of moves.keys()) if (moves.size > MOVES_KEPT) moves.delete(id)
       }
@@ -368,6 +406,20 @@ export async function move(input: unknown): Promise<MailOutcome<{ moved: number;
       return { ok: true, moved, undoId }
     }),
   )
+}
+
+/** The newest move that can still be undone (by the window or the assistant), or null. */
+export function lastMove(): LastMove | null {
+  const id = [...moves.keys()].at(-1)
+  const record = id === undefined ? undefined : moves.get(id)
+  if (id === undefined || !record) return null
+  return {
+    undoId: id,
+    from: record.from,
+    to: record.to,
+    count: record.pairs.length,
+    messages: record.messages,
+  }
 }
 
 /** Put moved messages back where they were, if they're still where they went. */
@@ -547,9 +599,9 @@ type Built = { message: OutgoingMessage; original: MessageContent | null } | Mai
 /** Turn the compose sheet's fields into a checked message, fetching what the main process needs. */
 async function compose(input: ComposeInput, from: string, needRecipients: boolean): Promise<Built> {
   const fields = {
-    to: parseAddressList(input.to),
-    cc: parseAddressList(input.cc),
-    bcc: parseAddressList(input.bcc),
+    to: recipientList(input.to),
+    cc: recipientList(input.cc),
+    bcc: recipientList(input.bcc),
   }
   const bad = [...fields.to.invalid, ...fields.cc.invalid, ...fields.bcc.invalid]
   if (bad.length) return fail('invalid', `Check this address: ${bad[0]!.slice(0, 80)}`)

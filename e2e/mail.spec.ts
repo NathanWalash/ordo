@@ -668,17 +668,28 @@ test('scrolls past 500 messages without losing the list', async () => {
     .getByRole('button', { name: new RegExp(`^${BIG}`) })
     .click()
   await expect(list().getByRole('option').first()).toBeVisible({ timeout: 20_000 })
-  // Keep scrolling to the bottom: every page loads, past the 500 a single request can return
-  // (the folder's first sync keeps its newest 500).
+  // Keep moving to the bottom: every page loads, past the 500 a single request can return (the
+  // folder's first sync keeps its newest 500). Scroll events never reach the list here, so paging
+  // has to come from the list noticing its end is in view, not from scrolling.
+  await page.evaluate(() => {
+    const block = (e: Event) => e.stopImmediatePropagation()
+    window.addEventListener('scroll', block, true)
+    ;(window as unknown as { unblockScroll: () => void }).unblockScroll = () =>
+      window.removeEventListener('scroll', block, true)
+  })
   await expect
     .poll(
       async () => {
-        await list().getByRole('option').last().scrollIntoViewIfNeeded()
+        await list().evaluate((el) => {
+          const box = el.parentElement!
+          box.scrollTop = box.scrollHeight
+        })
         return list().getByRole('option').count()
       },
       { timeout: 30_000 },
     )
     .toBe(500)
+  await page.evaluate(() => (window as unknown as { unblockScroll: () => void }).unblockScroll())
   await expect(list().getByRole('option').first()).toBeAttached()
 })
 

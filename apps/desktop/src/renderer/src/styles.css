@@ -10,6 +10,8 @@
   --hover: rgb(0 0 0 / 0.05);
   --selected: rgb(0 0 0 / 0.08);
   --accent: #007aff;
+  /* Fill for a primary button: white text on it is 5.4:1 (--accent is only 4.0:1). Not the system accent. */
+  --accent-strong: #0066d6;
   --promotions: #ff9500;
   --newsletters: #af52de;
   --notifications: #30b0c7;
@@ -69,6 +71,8 @@
     --hover: rgb(255 255 255 / 0.06);
     --selected: rgb(255 255 255 / 0.1);
     --accent: #0a84ff;
+    /* White text on it is 5:1. */
+    --accent-strong: #0a6cdb;
     --uncategorised: #636366;
     --sheet: #2a2a2a;
     --field: #323232;
@@ -140,6 +144,7 @@
   --color-hover: var(--hover);
   --color-selected: var(--selected);
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
   --color-sheet: var(--sheet);
   --color-field: var(--field);
   --color-danger: var(--danger);
@@ -305,4 +310,26 @@ body,
 :root.dragging,
 :root.dragging * {
   cursor: grabbing !important;
+}
+
+/*
+ * A button that becomes ready after a pause (the assistant's Send): a fill sweeps left to right
+ * while it waits. With reduced motion there's no sweep; the button just becomes ready.
+ */
+@keyframes arm-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.arm-fill {
+  transform-origin: left;
+  animation: arm-fill var(--arm-ms, 1500ms) linear forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arm-fill {
+    display: none;
+  }
 }

@@ -69,9 +69,11 @@ interface Props {
   onConnect: () => void
   /** Show a different title in the toolbar (the mailbox), or null for the default. */
   onTitle: (title: string | null) => void
+  /** Bumped when the assistant changed mail: reload what's on screen, keeping the open folder. */
+  changed?: number
 }
 
-export function MailPage({ account, onConnect, onTitle }: Props) {
+export function MailPage({ account, onConnect, onTitle, changed = 0 }: Props) {
   if (!account?.connected)
     return (
       <EmptyState
@@ -85,7 +87,7 @@ export function MailPage({ account, onConnect, onTitle }: Props) {
         }
       />
     )
-  return <MailClient key={account.email} email={account.email} onTitle={onTitle} />
+  return <MailClient key={account.email} email={account.email} onTitle={onTitle} changed={changed} />
 }
 
 type Opened = { key: string; message?: MessageContent; error?: string }
@@ -113,7 +115,15 @@ function useWindowWidth(): number {
   return width
 }
 
-function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | null) => void }) {
+function MailClient({
+  email,
+  onTitle,
+  changed,
+}: {
+  email: string
+  onTitle: (t: string | null) => void
+  changed: number
+}) {
   const [boxes, setBoxes] = useState<MailboxInfo[]>([])
   const [current, setCurrent] = useState(INBOX)
   const [filter, setFilter] = useState<Filter>('all')
@@ -189,10 +199,44 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
       if (p.messages.length < Math.min(CHUNK, want - offset)) break
     }
     const b = await window.ordo.mail.mailboxes()
-    if (mailbox !== view.current.current || f !== view.current.filter) return
+    if (mailbox !== view.current.current || f !== view.current.filter) return null
     setBoxes(b)
     setList({ total, messages: pages })
+    return pages
   }, [])
+
+  // The assistant moved, flagged or marked mail, or saved a draft: show it, in the same folder.
+  // The selection becomes its fresh row (so its flag and read state are current), or goes if the
+  // message moved away. A search on screen runs again. With Unread on, a message the assistant just
+  // marked read stays open, as it does when you open it yourself.
+  useEffect(() => {
+    if (!changed) return
+    let live = true
+    void (async () => {
+      const rows = await load()
+      if (!live || !rows) return
+      const { query: q, filter: f, current: mailbox } = view.current
+      let found = rows
+      if (q.trim()) {
+        found = await window.ordo.mail.search({ query: q.trim(), limit: 200 })
+        if (!live) return
+        setResults(found)
+      }
+      const all =
+        f === 'unread' && !q.trim()
+          ? (await window.ordo.mail.messages({ mailbox, limit: CHUNK })).messages
+          : []
+      if (!live) return
+      setSelected((s) => {
+        if (!s) return s
+        const same = (r: MessageSummary) => keyOf(r) === keyOf(s)
+        return found.find(same) ?? all.find(same) ?? null
+      })
+    })()
+    return () => {
+      live = false
+    }
+  }, [changed, load])
 
   /** The next page, added to the end of the list. */
   const loadMore = async () => {
@@ -211,10 +255,10 @@ function MailClient({ email, onTitle }: { email: string; onTitle: (t: string | n
       setList((cur) => {
         if (!cur) return cur
         const seen = new Set(cur.messages.map(keyOf))
-        return {
-          total: p.total,
-          messages: [...cur.messages, ...p.messages.filter((m) => !seen.has(keyOf(m)))],
-        }
+        const added = p.messages.filter((m) => !seen.has(keyOf(m)))
+        // Nothing new keeps the same rows, so the list doesn't ask for the same page again.
+        if (!added.length) return cur.total === p.total ? cur : { total: p.total, messages: cur.messages }
+        return { total: p.total, messages: [...cur.messages, ...added] }
       })
     } finally {
       loadingMore.current = false

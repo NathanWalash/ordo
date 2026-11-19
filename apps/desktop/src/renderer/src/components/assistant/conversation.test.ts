@@ -73,6 +73,33 @@ describe('the conversation', () => {
     })
   })
 
+  it('a confirmed send card learns whether it was sent, from its own tool’s result', () => {
+    const send: ConfirmCard = { ...card, tool: 'ordo_mail_send', action: 'send' }
+    const tool = (status: 'running' | 'done' | 'failed') =>
+      ({ type: 'tool', id: 's1', tool: 'ordo_mail_send', label: 'x', kind: 'change', status }) as const
+    let items = applyEvent(start(), { type: 'confirm', id: 's1', card: send })
+    items = applyEvent(items, { type: 'confirmed', id: 's1', approved: true })
+    items = applyEvent(items, tool('running'))
+    expect(reply(items).trace[0]).toMatchObject({ kind: 'card', state: 'approved' })
+    expect(reply(items).trace[0]).not.toHaveProperty('result')
+    expect(reply(applyEvent(items, tool('done'))).trace[0]).toMatchObject({ result: 'done' })
+    // A send that went out with a problem, or failed, says why on the card.
+    expect(
+      reply(applyEvent(items, { ...tool('done'), summary: 'Sent. iCloud refused x@y.example.' })).trace[0],
+    ).toMatchObject({ result: 'done', resultText: 'Sent. iCloud refused x@y.example.' })
+    expect(reply(applyEvent(items, { ...tool('failed'), summary: 'No connection.' })).trace[0]).toMatchObject(
+      {
+        result: 'failed',
+        resultText: 'No connection.',
+      },
+    )
+    expect(reply(applyEvent(items, tool('failed'))).trace[0]).toMatchObject({ result: 'failed' })
+    // A cancelled card never gets a result.
+    let no = applyEvent(start(), { type: 'confirm', id: 's1', card: send })
+    no = applyEvent(no, { type: 'confirmed', id: 's1', approved: false })
+    expect(reply(applyEvent(no, tool('done'))).trace[0]).not.toHaveProperty('result')
+  })
+
   it('ignores events once the reply has finished', () => {
     const done = finish(start(), { ok: true, answer: 'Done.', steps: 0 }, 10)
     expect(applyEvent(done, { type: 'thinking', step: 2 })).toBe(done)
@@ -143,6 +170,15 @@ describe('suggestions and pages', () => {
   it('suggests prompts for every page', () => {
     for (const r of ROUTES) expect(suggestionsFor(r).length).toBeGreaterThan(1)
     expect(suggestionsFor('money/bills')[0]!.text).toBe('Which bills are due next?')
+  })
+
+  it('suggests mail changes on the Mail page; one to finish yourself goes in the box', () => {
+    expect(suggestionsFor('mail/inbox')).toEqual(
+      expect.arrayContaining([
+        { text: 'Archive this week’s newsletters', icon: 'mail' },
+        { text: 'Draft a reply to the last email from …', icon: 'mail', fill: true },
+      ]),
+    )
   })
 
   it('only lets the assistant open real routes', () => {

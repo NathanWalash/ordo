@@ -224,8 +224,8 @@ test('a change waits for the card: Cancel changes nothing', async () => {
   await expect(card.getByRole('button', { name: 'Confirm' })).toBeEnabled()
   await page.screenshot({ path: 'test-results/assistant-confirm-light.png', animations: 'disabled' })
 
-  // Closed with a card open, the toolbar says it's waiting.
-  await page.keyboard.press('Escape')
+  // Closed with a card open, the toolbar says it's waiting. (Escape on the card would cancel it.)
+  await panel().getByRole('button', { name: 'Close assistant' }).click()
   await expect(page.getByRole('button', { name: /^Assistant ?, waiting for you$/ })).toBeVisible()
   await page.keyboard.press(`${mod}+k`)
   await expect(card).toBeVisible()

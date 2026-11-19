@@ -3,6 +3,7 @@ import { Flag, Paperclip, Reply } from 'lucide-react'
 import { displayName } from '@ordo/mail-core'
 import type { MessageSummary } from '@ordo/shared'
 import { fullDate, listDate, people } from './format'
+import { END_MARGIN, nearEnd } from './paging'
 
 export const keyOf = (m: { mailbox: string; uid: number }) => `${m.mailbox}\u0000${m.uid}`
 
@@ -77,13 +78,41 @@ export function MessageList({
   }
 
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) onEndReached?.()
+    if (nearEnd(e.currentTarget)) onEndReached?.()
   }
+
+  // Scroll events alone aren't enough: a page that finishes loading while the list is already at
+  // the bottom (or that was asked for while another was still loading) brings no new scroll event,
+  // and paging would stall. So a marker after the last row asks whenever it comes into view, and
+  // the list checks again whenever its rows change.
+  const scroller = useRef<HTMLDivElement>(null)
+  const sentinel = useRef<HTMLDivElement>(null)
+  const endReached = useRef(onEndReached)
+  useEffect(() => {
+    endReached.current = onEndReached
+  }, [onEndReached])
+  useEffect(() => {
+    const el = scroller.current
+    if (el && messages.length && nearEnd(el)) endReached.current?.()
+  }, [messages])
+  const hasRows = messages.length > 0
+  useEffect(() => {
+    const root = scroller.current
+    const end = sentinel.current
+    if (!hasRows || !root || !end || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) endReached.current?.()
+      },
+      { root, rootMargin: `0px 0px ${END_MARGIN}px 0px` },
+    )
+    observer.observe(end)
+    return () => observer.disconnect()
+  }, [hasRows])
 
   if (!messages.length) return <div className="flex flex-1 items-center justify-center p-6">{empty}</div>
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto" onScroll={onScroll}>
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" onScroll={onScroll}>
       <ul
         ref={list}
         role="listbox"
@@ -156,6 +185,7 @@ export function MessageList({
           )
         })}
       </ul>
+      <div ref={sentinel} aria-hidden="true" className="h-px" />
       {footer}
     </div>
   )

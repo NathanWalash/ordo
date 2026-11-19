@@ -304,6 +304,16 @@ describe('moving mail', () => {
 })
 
 describe('sending', () => {
+  it('takes recipients as a list, one address per entry, and refuses an entry that would split', async () => {
+    expect(await client.send(compose({ to: ['sam@friend.example'], cc: [], bcc: [] }))).toEqual({ ok: true })
+    expect(server.sent[0]).toMatchObject({ to: [{ address: 'sam@friend.example' }], cc: [], bcc: [] })
+    const split = await client.send(
+      compose({ to: ['sam@friend.example,boss@corp.example'], cc: [], bcc: [] }),
+    )
+    expect(split).toMatchObject({ ok: false, error: 'invalid' })
+    expect(server.sent).toHaveLength(1)
+  })
+
   it('sends, keeps a read copy in Sent and marks the original answered', async () => {
     const r = await client.send(compose({ replyTo: { mailbox: 'INBOX', uid: 1 } }))
     expect(r).toEqual({ ok: true })
@@ -405,5 +415,121 @@ describe('refreshing', () => {
     expect(mail.mailStore().count('Archive')).toBe(0)
     expect(mail.mailStore().count('INBOX')).toBe(0)
     expect(mail.mailStore().mailboxes()).toEqual([])
+  })
+})
+
+const { runTool, previewTool, toolByName } = await import('./headless/tools')
+const { fakeServices } = await import('./headless/fake-services')
+
+describe('the assistant’s and MCP’s mail tools, through the real mail client', () => {
+  /** The real mail client behind the shared tools; `send` only as the assistant gets it. */
+  const services = (send = false) =>
+    fakeServices({
+      account: mail.status,
+      mail: {
+        mailboxes: client.mailboxes,
+        refresh: (input, onProgress) => client.refresh(input, onProgress),
+        messages: client.messages,
+        search: client.search,
+        searchServer: client.searchServer,
+        open: client.open,
+        cached: client.cached,
+        setFlags: client.setFlags,
+        move: client.move,
+        lastMove: client.lastMove,
+        undoMove: client.undoMove,
+        saveDraft: client.saveDraft,
+        ...(send && { send: client.send }),
+      },
+    })
+  const t = (name: string) => toolByName(name)!
+  const yes = { allowChanges: true, confirm: true }
+
+  it('moves to a user folder the server listed, and undoes the last move', async () => {
+    server.boxes.set('Projects', { uidValidity: '3', next: 1, msgs: new Map() })
+    expect(await client.refresh({ mailbox: 'INBOX' })).toMatchObject({ ok: true })
+    const s = services()
+    const preview = await previewTool(s, t('ordo_mail_move'), { uids: [1, 3], to: 'Projects' })
+    expect(preview.title).toBe('Move 2 messages to Projects')
+    expect(preview.details[0]).toMatch(/^sam@friend\.example · “Lunch\?” · .*: Inbox → Projects$/)
+    expect(await runTool(s, t('ordo_mail_move'), { uids: [1, 3], to: 'Projects' }, yes)).toMatchObject({
+      ok: true,
+      data: { to: 'Projects', moved: 2 },
+    })
+    expect([...server.boxes.get('Projects').msgs.values()].map((m: Msg) => m.subject)).toEqual([
+      'Lunch?',
+      'Notes',
+    ])
+    expect(client.lastMove()).toMatchObject({ from: 'INBOX', to: 'Projects', count: 2 })
+    const undo = await previewTool(s, t('ordo_mail_undo'), {})
+    expect(undo.title).toBe('Move 2 messages from Projects back to Inbox')
+    expect(await runTool(s, t('ordo_mail_undo'), {}, yes)).toMatchObject({ ok: true, data: { restored: 2 } })
+    expect(server.boxes.get('Projects').msgs.size).toBe(0)
+    expect(
+      inbox()
+        .map((m) => m.subject)
+        .sort(),
+    ).toEqual(['Lunch?', 'Notes', 'Receipt'])
+    expect(client.lastMove()).toBeNull()
+  })
+
+  it('refuses a folder the server never listed, and never moves into Drafts', async () => {
+    expect(await client.move({ mailbox: 'INBOX', uids: [1], to: { folder: 'Nowhere' } })).toMatchObject({
+      ok: false,
+      error: 'not-found',
+    })
+    expect(await client.move({ mailbox: 'INBOX', uids: [1], to: { folder: 'Drafts' } })).toMatchObject({
+      ok: false,
+      error: 'invalid',
+    })
+    expect(server.boxes.get('INBOX').msgs.size).toBe(3)
+  })
+
+  it('flags and marks read on the server and in the cache', async () => {
+    const s = services()
+    await runTool(s, t('ordo_mail_flag'), { uids: [1] }, yes)
+    await runTool(s, t('ordo_mail_mark'), { uids: [1, 3], read: true }, yes)
+    expect([...server.boxes.get('INBOX').msgs.get(1).flags].sort()).toEqual(['\\Flagged', '\\Seen'])
+    expect(inbox().find((m) => m.uid === 3)?.seen).toBe(true)
+    const again = await previewTool(s, t('ordo_mail_flag'), { uids: [1] })
+    expect(again.blocked).toBe('Nothing would change: it’s already flagged.')
+  })
+
+  it('saves a threaded reply draft, and sends a reply only with the assistant’s send', async () => {
+    const draft = await runTool(
+      services(),
+      t('ordo_mail_draft'),
+      { mode: 'reply', uid: 1, body: 'Yes!' },
+      yes,
+    )
+    expect(draft).toMatchObject({ ok: true, data: { saved: true, draft: { mailbox: 'Drafts' } } })
+    const saved = [...server.boxes.get('Drafts').msgs.values()][0] as Msg
+    expect(saved.raw).toMatch(/^In-Reply-To: <m1@fake>/m)
+    expect(saved.raw).toMatch(/^Subject: Re: Lunch\?/m)
+    expect(saved.raw).toContain('Yes!')
+    expect(server.sent).toHaveLength(0)
+
+    // MCP and the CLI can't send, whatever they pass; nor can a caller without the send function.
+    const args = { mode: 'reply', uid: 1, body: 'Yes please!' }
+    expect(await runTool(services(true), t('ordo_mail_send'), args, yes)).toMatchObject({
+      code: 'unavailable',
+    })
+    expect(
+      await runTool(services(false), t('ordo_mail_send'), args, { ...yes, caller: 'assistant' }),
+    ).toMatchObject({ code: 'unavailable' })
+    expect(server.sent).toHaveLength(0)
+
+    const sent = await runTool(services(true), t('ordo_mail_send'), args, { ...yes, caller: 'assistant' })
+    expect(sent).toEqual({ ok: true, data: { sent: true } })
+    expect(server.sent[0]).toMatchObject({
+      to: [{ address: 'sam@friend.example' }],
+      bcc: [],
+      subject: 'Re: Lunch?',
+      inReplyTo: '<m1@fake>',
+      references: ['<m1@fake>'],
+    })
+    expect(server.sent[0].text).toMatch(/^Yes please!\n\nOn .*, sam@friend\.example wrote:\n\n> Hello/)
+    expect(server.boxes.get('INBOX').msgs.get(1).flags.has('\\Answered')).toBe(true)
+    expect(server.boxes.get('Sent Messages').msgs.size).toBe(1)
   })
 })
