@@ -206,15 +206,33 @@ function MailClient({
   }, [])
 
   // The assistant moved, flagged or marked mail, or saved a draft: show it, in the same folder.
-  // A selected message that moved away is no longer selected.
+  // The selection becomes its fresh row (so its flag and read state are current), or goes if the
+  // message moved away. A search on screen runs again. With Unread on, a message the assistant just
+  // marked read stays open, as it does when you open it yourself.
   useEffect(() => {
     if (!changed) return
     let live = true
-    void load().then((rows) => {
-      if (!live || !rows || view.current.query.trim()) return
-      const keys = new Set(rows.map(keyOf))
-      setSelected((s) => (s && !keys.has(keyOf(s)) ? null : s))
-    })
+    void (async () => {
+      const rows = await load()
+      if (!live || !rows) return
+      const { query: q, filter: f, current: mailbox } = view.current
+      let found = rows
+      if (q.trim()) {
+        found = await window.ordo.mail.search({ query: q.trim(), limit: 200 })
+        if (!live) return
+        setResults(found)
+      }
+      const all =
+        f === 'unread' && !q.trim()
+          ? (await window.ordo.mail.messages({ mailbox, limit: CHUNK })).messages
+          : []
+      if (!live) return
+      setSelected((s) => {
+        if (!s) return s
+        const same = (r: MessageSummary) => keyOf(r) === keyOf(s)
+        return found.find(same) ?? all.find(same) ?? null
+      })
+    })()
     return () => {
       live = false
     }
