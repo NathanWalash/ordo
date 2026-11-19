@@ -83,6 +83,16 @@ describe('the conversation', () => {
     expect(reply(items).trace[0]).toMatchObject({ kind: 'card', state: 'approved' })
     expect(reply(items).trace[0]).not.toHaveProperty('result')
     expect(reply(applyEvent(items, tool('done'))).trace[0]).toMatchObject({ result: 'done' })
+    // A send that went out with a problem, or failed, says why on the card.
+    expect(
+      reply(applyEvent(items, { ...tool('done'), summary: 'Sent. iCloud refused x@y.example.' })).trace[0],
+    ).toMatchObject({ result: 'done', resultText: 'Sent. iCloud refused x@y.example.' })
+    expect(reply(applyEvent(items, { ...tool('failed'), summary: 'No connection.' })).trace[0]).toMatchObject(
+      {
+        result: 'failed',
+        resultText: 'No connection.',
+      },
+    )
     expect(reply(applyEvent(items, tool('failed'))).trace[0]).toMatchObject({ result: 'failed' })
     // A cancelled card never gets a result.
     let no = applyEvent(start(), { type: 'confirm', id: 's1', card: send })
@@ -165,7 +175,7 @@ describe('suggestions and pages', () => {
   it('suggests mail changes on the Mail page; one to finish yourself goes in the box', () => {
     expect(suggestionsFor('mail/inbox')).toEqual(
       expect.arrayContaining([
-        { text: 'Archive newsletters from this week', icon: 'mail' },
+        { text: 'Archive this week’s newsletters', icon: 'mail' },
         { text: 'Draft a reply to the last email from …', icon: 'mail', fill: true },
       ]),
     )

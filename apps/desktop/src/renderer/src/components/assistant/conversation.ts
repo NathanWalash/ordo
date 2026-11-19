@@ -19,6 +19,8 @@ export type TraceEntry =
       state: 'open' | 'approved' | 'cancelled' | 'blocked'
       /** After approval: whether the change it confirmed went through ("Sent", or not). */
       result?: 'done' | 'failed'
+      /** Ordo's words about how it went: why it failed, or a warning from a send that worked. */
+      resultText?: string
     }
 
 export interface UserItem {
@@ -77,7 +79,11 @@ export function applyEvent(items: Item[], e: AssistantEvent): Item[] {
           ? withTool
           : withTool.map((t) =>
               t.kind === 'card' && t.id === e.id && t.state === 'approved'
-                ? { ...t, result: e.status === 'done' ? ('done' as const) : ('failed' as const) }
+                ? {
+                    ...t,
+                    result: e.status === 'done' ? ('done' as const) : ('failed' as const),
+                    ...(e.summary !== undefined && { resultText: e.summary }),
+                  }
                 : t,
             )
       return replaceLast(items, { ...reply, trace, status: e.status === 'running' ? e.label : reply.status })

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiError, type CompleteRequest, type ModelProvider } from '@ordo/ai'
-import { ASSISTANT_PAGES, type AiSettings, type AssistantEvent } from '@ordo/shared'
+import { ASSISTANT_PAGES, SEND_ARM_MS, type AiSettings, type AssistantEvent } from '@ordo/shared'
 
 // The Electron and AI edges, faked. Everything else (the loop, the tools, the services' shapes) is real.
 const state = vi.hoisted(() => ({
@@ -48,6 +48,12 @@ vi.mock('../headless/services', async () => {
 
 const { ask, clear, confirm, currentHistory, info, MAX_HISTORY, setCloudConsent, stop } =
   await import('./index')
+
+/** Move the clock on: `Date.now()` reads this much later from now on. */
+let skew = 0
+const realNow = Date.now.bind(Date)
+vi.spyOn(Date, 'now').mockImplementation(() => realNow() + skew)
+const later = (ms: number) => void (skew += ms)
 
 type Reply = (req: CompleteRequest) => object | Promise<object>
 
@@ -168,10 +174,58 @@ describe('asking', () => {
     const run = ask({ text: 'Send an email to pat@friend.example saying hello', page: 'mail/inbox' }, asWc(w))
     const id = await cardOn(w)
     const card = w.events.find((e) => e.type === 'confirm') as Extract<AssistantEvent, { type: 'confirm' }>
-    expect(card.card).toMatchObject({ action: 'send', email: { to: ['pat@friend.example'] } })
+    expect(card.card).toMatchObject({ action: 'send', email: { to: [{ address: 'pat@friend.example' }] } })
+    later(SEND_ARM_MS)
     confirm({ id, approve: true }, asWc(w))
     expect(await run).toMatchObject({ ok: true, answer: 'Sent.' })
     expect(currentHistory().at(-1)).toMatchObject({ changes: ['Sent an email'], sent: [expect.any(String)] })
+  })
+
+  it('ignores a Send that comes sooner than anyone could press it, but takes Cancel at once', async () => {
+    const sendThenAnswer = (body = 'Hello') => {
+      let n = 0
+      return () =>
+        n++ === 0
+          ? {
+              type: 'tool',
+              tool: 'ordo_mail_send',
+              args: { mode: 'new', to: ['pat@friend.example'], subject: 'Hi', body },
+            }
+          : { type: 'answer', text: 'Sent.' }
+    }
+    model(sendThenAnswer())
+    const w = window()
+    const run = ask({ text: 'Send an email to pat@friend.example saying hello', page: 'mail/inbox' }, asWc(w))
+    const id = await cardOn(w)
+    confirm({ id, approve: true }, asWc(w))
+    later(SEND_ARM_MS - 100)
+    confirm({ id, approve: true }, asWc(w))
+    // Still waiting: neither early Send counted.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(info().busy).toBe(true)
+    expect(w.events.some((e) => e.type === 'confirmed')).toBe(false)
+    later(200)
+    confirm({ id, approve: true }, asWc(w))
+    expect(await run).toMatchObject({ ok: true, answer: 'Sent.' })
+
+    // Cancel needs no wait.
+    model(sendThenAnswer('Hello again'))
+    const w2 = window()
+    const run2 = ask(
+      { text: 'Send an email to pat@friend.example saying hello again', page: 'mail/inbox' },
+      asWc(w2),
+    )
+    const id2 = await cardOn(w2)
+    confirm({ id: id2, approve: false }, asWc(w2))
+    expect(await run2).toMatchObject({ ok: false, reason: 'cancelled' })
+  })
+
+  it('other cards take a confirm straight away, as before', async () => {
+    model(undoThenAnswer())
+    const w = window()
+    const run = ask({ text: 'Undo clean-up 4', page: 'home' }, asWc(w))
+    confirm({ id: await cardOn(w), approve: true }, asWc(w))
+    expect(await run).toMatchObject({ ok: true })
   })
 
   it('surfaces a model that can’t be reached instead of hiding it', async () => {

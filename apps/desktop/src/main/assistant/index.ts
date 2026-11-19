@@ -9,6 +9,7 @@ import {
   AssistantPageSchema,
   CloudConsentInputSchema,
   ConfirmInputSchema,
+  SEND_ARM_MS,
   type AskOutcome,
   type AssistantEvent,
   type AssistantInfo,
@@ -43,7 +44,8 @@ let running: AbortController | null = null
 let owner: WebContents | null = null
 /** Bumped by Clear, so an answer that finishes afterwards isn't added back. */
 let generation = 0
-const pending = new Map<string, (approved: boolean) => void>()
+/** Cards waiting for an answer: how to answer, when each was shown, and whether it sends an email. */
+const pending = new Map<string, { answer: (approved: boolean) => void; shownAt: number; sends: boolean }>()
 
 const cut = (s: string) => (s.length > MAX_HISTORY_CHARS ? `${s.slice(0, MAX_HISTORY_CHARS)}…` : s)
 
@@ -188,13 +190,17 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
       signal: ctrl.signal,
       onEvent: send,
       timeoutMs: provider.kind === 'local' ? 120_000 : 180_000,
-      confirm: (id) =>
+      confirm: (id, card) =>
         new Promise<boolean>((resolve) => {
           if (ctrl.signal.aborted) return resolve(false)
           const timer = setTimeout(() => resolve(false), timeoutMs)
-          pending.set(id, (yes) => {
-            clearTimeout(timer)
-            resolve(yes)
+          pending.set(id, {
+            answer: (yes) => {
+              clearTimeout(timer)
+              resolve(yes)
+            },
+            shownAt: Date.now(),
+            sends: card.action === 'send',
           })
           ctrl.signal.addEventListener(
             'abort',
@@ -229,13 +235,19 @@ export async function ask(raw: unknown, sender: WebContents, options: AskOptions
   }
 }
 
-/** Answer a card. Only the asking window, only a card the current run is waiting on, and only once. */
+/**
+ * Answer a card. Only the asking window, only a card the current run is waiting on, and only once.
+ * A Send that comes sooner after its card appeared than the window lets anyone press it is ignored
+ * (the card stays open): only a script could be that quick.
+ */
 export function confirm(raw: unknown, sender: WebContents): void {
   const parsed = ConfirmInputSchema.safeParse(raw)
   if (!parsed.success || sender !== owner) return
-  const resolve = pending.get(parsed.data.id)
+  const card = pending.get(parsed.data.id)
+  if (!card) return
+  if (parsed.data.approve && card.sends && Date.now() - card.shownAt < SEND_ARM_MS) return
   pending.delete(parsed.data.id)
-  resolve?.(parsed.data.approve)
+  card.answer(parsed.data.approve)
 }
 
 export function stop(): void {

@@ -916,7 +916,7 @@ exports[`MCP server > keeps its tool surface stable: every name, description and
       "openWorldHint": false,
       "readOnlyHint": false,
     },
-    "description": "Undo the most recent mail move (by Ordo’s window or an agent) made while this Ordo has been running: the messages go back where they were. Only available because Ordo was started with --allow-changes. Requires confirm: true; ask the user before calling it.",
+    "description": "Undo the most recent mail move made by this Ordo process (in MCP, made by this MCP session): the messages go back where they were. A move made by another process can’t be undone here. Only available because Ordo was started with --allow-changes. Requires confirm: true; ask the user before calling it.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {

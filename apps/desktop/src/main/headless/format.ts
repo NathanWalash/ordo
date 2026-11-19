@@ -234,7 +234,8 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
 
   'mail move': (d) =>
     `Moved ${plural(d.moved, 'message')} from ${clean(d.mailbox, 60)} to ${clean(d.to, 60)}.` +
-    (d.undoId ? ` Undo with \`mail undo ${d.undoId} --confirm\` while this Ordo is running.` : ''),
+    // Undo is kept in memory, so a one-off command can't undo it later; an MCP session can.
+    ' Nothing is deleted; move them back with `mail move` (undo only works within one MCP session).',
 
   'mail flag': (d) => `${d.flagged ? 'Flagged' : 'Unflagged'} ${plural(d.uids.length, 'message')}.`,
 

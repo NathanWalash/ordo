@@ -61,15 +61,33 @@ export interface CardDetail {
 }
 
 /** An email on a card. Addresses only, never display names; the body is plain text. */
+/** A recipient on a card: the full address, and whether the user didn't type it themselves. */
+export interface CardRecipient {
+  address: string
+  untyped?: true
+}
+
+/**
+ * An email on a card. Addresses only, never display names. What's sent is `text` followed by
+ * `original.text`, exactly as shown: nothing is cut or hidden.
+ */
 export interface CardEmail {
   from: string
-  to: string[]
-  cc: string[]
+  to: CardRecipient[]
+  cc: CardRecipient[]
   subject: string
-  body: string
+  /** What the assistant wrote. */
+  text: string
+  /** The quoted (reply) or forwarded original, below what the assistant wrote. */
+  original?: { kind: 'quoted' | 'forwarded'; text: string }
   /** Forwarded attachments. */
   attachments: { name: string; size: number }[]
 }
+
+/** Presses on a card this soon after it appears are ignored, so a double press can't confirm it. */
+export const CARD_ARM_MS = 500
+/** A card that sends an email waits longer, in the window and in the main process. */
+export const SEND_ARM_MS = 1500
 
 /**
  * What a confirmation card shows. Built by Ordo from its own data; the model's own words appear only
@@ -94,9 +112,11 @@ export interface ConfirmCard {
   action?: 'send'
   /**
    * Why this card appeared. `request`: the user's own words asked for exactly this, and nothing
-   * untrusted had been read. `data`: otherwise, so it may have come from text the assistant read.
+   * untrusted had been read. `sender`: a reply the user asked for, going only to the address the
+   * named email came from, which they didn't type themselves (an amber note). `data`: otherwise,
+   * so it may have come from text the assistant read ("Check this first").
    */
-  trigger: { kind: 'request' | 'data'; text: string }
+  trigger: { kind: 'request' | 'sender' | 'data'; text: string }
 }
 
 export type AssistantEvent =

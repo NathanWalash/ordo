@@ -16,12 +16,14 @@ import {
   pickEvent,
   runCommand,
   type CommandResult,
+  type ErrorCode,
   type EventFlags,
   type OrdoServices,
 } from './commands'
 import { checkDraft, localZone, type EventDraft } from '@ordo/calendar-core'
 import {
   bodyText,
+  COMPOSE_LIMITS,
   forwardBody,
   forwardSubject,
   isEmailAddress,
@@ -73,28 +75,42 @@ export interface ChangePreview {
   mail?: MailTargets
 }
 
-/** An email as the card shows it, built by Ordo from the account, the original and the model's text. */
+/**
+ * An email as the card shows it, built by Ordo from the account, the original and the model's text.
+ * What's saved or sent is `text` followed by `original.text`, exactly.
+ */
 export interface EmailPreview {
   from: string
   /** Full addresses only: a display name can pose as someone else. */
   to: string[]
   cc: string[]
   subject: string
-  /** Plain text, with the quoted original or forwarded message. */
-  body: string
+  /** What the model wrote, as plain text. */
+  text: string
+  /** The quoted (reply) or forwarded original, below it. */
+  original?: { kind: 'quoted' | 'forwarded'; text: string }
   attachments: { name: string; size: number }[]
   /** True to send it; false to save it to Drafts. */
   send: boolean
 }
 
+/**
+ * Where a recipient came from. `sender`: the address the email being replied to came from.
+ * `reply-to`: that email's Reply-To, which its sender picks. `thread`: the email's other recipients
+ * (reply-all). `model`: an address the model gave. Whether the user typed it is the loop's to say.
+ */
+export type RecipientSource = 'sender' | 'reply-to' | 'thread' | 'model'
+
 export interface MailTargets {
   /** The messages a change acts on (or replies to, or forwards), from Ordo's cache or the message itself. */
   messages: { address: string; name: string | null; subject: string }[]
+  /** The email a draft or send replies to or forwards: reading it doesn't count as reading other mail. */
+  target?: { mailbox: string; uid: number }
   /**
    * Every address a draft or an email goes to (To and Cc). Each counts as asked for only if the
    * user typed it: a reply's sender, Reply-To, name and subject are all the sender's to choose.
    */
-  recipients?: string[]
+  recipients?: { address: string; source: RecipientSource }[]
 }
 
 export interface RunContext {
@@ -651,6 +667,7 @@ const uidList = z
   .array(z.number().int().positive().max(4_294_967_295))
   .min(1)
   .max(MAIL_CHANGE_MAX)
+  .refine((u) => new Set(u).size === u.length, 'Each uid only once')
   .describe(
     `Message uids from ordo_messages or ordo_search_mail, all in one mailbox (at most ${MAIL_CHANGE_MAX})`,
   )
@@ -695,15 +712,46 @@ function previewMessages(services: OrdoServices, title: string, mailbox: string,
 
 /** The most text the model may write in one email, before any quoted original. */
 export const MAIL_BODY_MAX = 20_000
-/** The most of a body a card shows. */
-const CARD_BODY_MAX = 100_000
+/**
+ * The most an email the assistant writes may hold, its text and the quoted or forwarded original
+ * together. The card shows all of it, so a longer original is cut, and says so, before the card.
+ */
+export const EMAIL_SHOWN_MAX = 100_000
 /** Recipients the assistant may write to in one email (To and Cc together). */
 export const MAIL_RECIPIENTS_MAX = 20
 
-/** Model text as a plain-text body: line endings normalised, control and bidi characters out, capped. */
-export function plainBody(text: string): string {
-  return text.replace(/\r\n?/g, '\n').replace(UNSAFE_KEEP_LINES, '').slice(0, MAIL_BODY_MAX)
+/**
+ * Characters that show as nothing, or as blank space, and so can hide text: every default-ignorable
+ * code point (zero-width characters, Unicode tags U+E0000 to E007F, variation selectors U+FE00 to
+ * FE0F, the soft hyphen, the Mongolian vowel separator and the Hangul fillers U+115F, U+1160,
+ * U+3164 and U+FFA0 are all among them), plus the blank braille pattern U+2800, which draws as space.
+ */
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\u2800]/gu
+
+/**
+ * Text as an email Ordo shows in full and then sends: line endings normalised; control, bidi and
+ * invisible characters out; and the long runs of spaces and blank lines that could push text out
+ * of sight collapsed (four or more spaces become one; three or more blank lines become two).
+ */
+export function visibleText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(UNSAFE_KEEP_LINES, '')
+    .replace(INVISIBLE, '')
+    .replace(/[^\S\n]{4,}/g, ' ')
+    .replace(/[^\S\n]+$/gm, '')
+    .replace(/\n{4,}/g, '\n\n\n')
 }
+
+/** The model's text as a plain-text body: `visibleText`, capped. */
+export function plainBody(text: string): string {
+  // Cleaned again after the cut, which could leave spaces at the end of a line.
+  return visibleText(visibleText(text).slice(0, MAIL_BODY_MAX))
+}
+
+/** Said in place of the part of a long original that's left out. */
+export const ORIGINAL_CUT =
+  '\n[Ordo left out the rest of the original email: it’s too long to show in full.]\n'
 
 const recipientList = z.array(z.string().trim().min(3).max(254)).max(MAIL_RECIPIENTS_MAX).optional()
 
@@ -750,13 +798,15 @@ const emailInput = (modes: readonly Mode[]) => ({
 })
 
 type Built =
-  | { ok: true; compose: ComposeInput; email: EmailPreview; mail: MailTargets; notes: string[] }
-  | { ok: false; message: string }
+  { ok: true; compose: ComposeInput; email: EmailPreview; mail: MailTargets } | { ok: false; message: string }
+
+const kb = (n: number) => `${Math.ceil(n / 1024 / 1024)} MB`
 
 /**
  * A draft or an email from the model's arguments: recipients checked, the reply's recipients and
- * subject taken from the original, the body as plain text with the original quoted. The card shows
- * exactly this, and exactly this is saved or sent.
+ * subject taken from the original, the model's text as plain text with the original quoted or
+ * forwarded below it. The card shows exactly this, and exactly this is saved or sent. Each
+ * recipient says where it came from, for the card's trigger.
  */
 async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): Promise<Built> {
   const account = services.account()
@@ -778,11 +828,14 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     original = r.message
   }
 
+  const sourceOf = new Map<string, RecipientSource>()
+  const from = (list: string[], source: RecipientSource) => {
+    for (const x of list) if (!sourceOf.has(x.toLowerCase())) sourceOf.set(x.toLowerCase(), source)
+    return list
+  }
   let recipients: { to: string[]; cc: string[] }
-  /** Said on the card when a reply goes somewhere other than the sender. */
-  let replyNote: string | null = null
   let subject: string
-  let body = plainBody(a.body)
+  let quoted: string | null = null
   const when = (d: Date) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
   if (a.mode === 'reply' || a.mode === 'reply-all') {
     if (to.length)
@@ -790,26 +843,31 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     const m = original!
     const inSent = services.mail.mailboxes().find((b) => b.path === mailbox)?.role === 'sent'
     const r = replyRecipients(m, own, a.mode === 'reply-all', { inSent })
-    recipients = { to: r.to.map((x) => x.address), cc: [...r.cc.map((x) => x.address), ...cc] }
-    // The sender chooses Reply-To: say so when it sends the reply somewhere else.
+    // The sender picks their own Reply-To, so it's told apart from the address the email came from.
     const sender = m.from?.address.toLowerCase()
-    const elsewhere = m.replyTo.map((x) => x.address).filter((x) => x.toLowerCase() !== sender)
-    if (sender && elsewhere.length)
-      replyNote = `The email asks for replies to go to ${elsewhere.map((x) => clean(x, 254)).join(', ')}, not to the sender, ${clean(m.from!.address, 254)}.`
+    const replyTo = new Set(m.replyTo.map((x) => x.address.toLowerCase()))
+    for (const x of [...r.to, ...r.cc]) {
+      const k = x.address.toLowerCase()
+      sourceOf.set(
+        k,
+        replyTo.has(k) && k !== sender ? 'reply-to' : k === sender && !inSent ? 'sender' : 'thread',
+      )
+    }
+    recipients = { to: r.to.map((x) => x.address), cc: [...r.cc.map((x) => x.address), ...from(cc, 'model')] }
     subject = a.subject?.trim() || replySubject(m.subject)
-    body += replyBody(m, bodyText(m), when(m.date))
+    quoted = replyBody(m, bodyText(m), when(m.date))
   } else if (a.mode === 'forward') {
     const m = original!
-    recipients = { to, cc }
+    recipients = { to: from(to, 'model'), cc: from(cc, 'model') }
     subject = a.subject?.trim() || forwardSubject(m.subject)
-    body += forwardBody(m, bodyText(m), when(m.date))
+    quoted = forwardBody(m, bodyText(m), when(m.date))
   } else {
-    recipients = { to, cc }
+    recipients = { to: from(to, 'model'), cc: from(cc, 'model') }
     subject = a.subject?.trim() ?? ''
     if (!subject) return { ok: false, message: 'Give the email a subject.' }
   }
   // One line, no control or bidi characters: the subject is a header.
-  subject = clean(subject, 300).trim()
+  subject = clean(subject, 300).replace(INVISIBLE, '').trim()
   const dedupe = new Set<string>()
   const keep = (list: string[]) =>
     list.filter((x) => {
@@ -824,9 +882,29 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
   if (everyone.length > MAIL_RECIPIENTS_MAX)
     return { ok: false, message: `The assistant writes to at most ${MAIL_RECIPIENTS_MAX} people at once.` }
 
-  // The quoted original is third-party text too: what's sent is exactly what the card shows.
-  body = body.replace(UNSAFE_KEEP_LINES, '')
   const files = a.mode === 'forward' ? original!.attachments.filter((x) => !x.inline) : []
+  if (files.length > COMPOSE_LIMITS.attachments)
+    return {
+      ok: false,
+      message: `This email has ${files.length} attachments, and Ordo forwards at most ${COMPOSE_LIMITS.attachments}. Forward it from Mail instead.`,
+    }
+  const big = files.find((f) => f.size > COMPOSE_LIMITS.attachmentBytes)
+  if (big || files.reduce((n, f) => n + f.size, 0) > COMPOSE_LIMITS.attachmentBytes)
+    return {
+      ok: false,
+      message: big
+        ? `${clean(big.filename, 80)} is too big to send by email (over ${kb(COMPOSE_LIMITS.attachmentBytes)}).`
+        : `The attachments are too big to send by email together (over ${kb(COMPOSE_LIMITS.attachmentBytes)}).`,
+    }
+
+  // What the model wrote, and the original below it. Both are cleaned the same way, and the original
+  // is cut (saying so) so that the card can show every character that's sent.
+  const text = plainBody(a.body)
+  let rest = quoted === null ? null : visibleText(quoted)
+  const room = EMAIL_SHOWN_MAX - text.length
+  if (rest !== null && rest.length > room)
+    rest = visibleText(rest.slice(0, Math.max(0, room - ORIGINAL_CUT.length)) + ORIGINAL_CUT)
+  const body = text + (rest ?? '')
   const compose: ComposeInput = {
     to: recipients.to.join(', '),
     cc: recipients.cc.join(', '),
@@ -837,7 +915,6 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     ...((a.mode === 'reply' || a.mode === 'reply-all') && { replyTo: { mailbox, uid: a.uid! } }),
     ...(a.mode === 'forward' && { forward: { mailbox, uid: a.uid!, parts: files.map((f) => f.part) } }),
   }
-  const shown = body.length > CARD_BODY_MAX ? `${body.slice(0, CARD_BODY_MAX)}\n[…]` : body
   return {
     ok: true,
     compose,
@@ -846,7 +923,8 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
       to: recipients.to,
       cc: recipients.cc,
       subject,
-      body: shown,
+      text,
+      ...(rest !== null && { original: { kind: a.mode === 'forward' ? 'forwarded' : 'quoted', text: rest } }),
       attachments: files.map((f) => ({ name: clean(f.filename, 120), size: f.size })),
       send,
     },
@@ -860,14 +938,23 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
             },
           ]
         : [],
-      recipients: everyone,
+      ...(original && { target: { mailbox, uid: a.uid! } }),
+      recipients: everyone.map((address) => ({
+        address,
+        source: sourceOf.get(address.toLowerCase()) ?? 'model',
+      })),
     },
-    notes: replyNote ? [replyNote] : [],
   }
 }
 
-const emailTitle = (send: boolean, e: EmailPreview) =>
-  `${send ? 'Send' : 'Save a draft of'} “${clean(e.subject || '(no subject)', 80)}”`
+/** "Send “Re: Lunch?” to sam@friend.example and 2 more". */
+const emailTitle = (send: boolean, e: EmailPreview) => {
+  const all = [...e.to, ...e.cc]
+  const who = all.length
+    ? ` to ${clean(all[0]!, 254)}${all.length > 1 ? ` and ${all.length - 1} more` : ''}`
+    : ''
+  return `${send ? 'Send' : 'Save a draft of'} “${clean(e.subject || '(no subject)', 80)}”${who}`
+}
 
 const MAIL_CHANGE_TOOLS = [
   tool({
@@ -877,7 +964,8 @@ const MAIL_CHANGE_TOOLS = [
     done: (d) => `Moved ${plural(num(d, 'moved'), 'message')}`,
     command: 'mail move',
     intent:
-      /\b(?:move|archive|file|put|bin|trash|delete|junk|spam|throw (?:away|out)|get rid of|clear (?:out|away))\b/i,
+      // Verbs only: "Is it spam?" or "What's in my archive?" ask nothing.
+      /\b(?:move|delete|throw (?:away|out)|get rid of|clear (?:out|away))\b|(?<!\b(?:my|the|in|from|your)\s)\barchive\b|\b(?:bin|trash|junk)\s+(?:it|them|this|that|these|those|the|all|every)\b|\bput\b.{0,60}\b(?:in|into)\b|\bfile\b.{0,60}\b(?:in|into|under)\b|\bmark\b.{0,60}\bas\s+(?:spam|junk)\b/i,
     description:
       'Move messages (at most 20, from one mailbox) to Archive, Bin, Junk, the Inbox, or one of the user’s folders ' +
       'from ordo_mailboxes. Nothing is deleted; ordo_mail_undo puts the last move back.' +
@@ -922,7 +1010,8 @@ const MAIL_CHANGE_TOOLS = [
     label: 'Flagging mail',
     done: () => 'Changed the flags',
     command: 'mail flag',
-    intent: /\b(?:flag|unflag|star|unstar)/i,
+    // The verb only: "Which are flagged?" and "Starting with…" ask for nothing.
+    intent: /\b(?:flag|unflag|star|unstar)\b/i,
     description: 'Flag or unflag messages (at most 20, from one mailbox).' + MAIL_TEXT,
     untrusted: false,
     input: {
@@ -958,7 +1047,7 @@ const MAIL_CHANGE_TOOLS = [
     label: 'Marking mail',
     done: () => 'Marked mail',
     command: 'mail mark',
-    intent: /\b(?:mark|unread)\b/i,
+    intent: /\bmark\b.{0,60}\bas\s+(?:read|unread|seen|new|not read)\b/i,
     description: 'Mark messages (at most 20, from one mailbox) as read or unread.' + MAIL_TEXT,
     untrusted: false,
     input: {
@@ -996,8 +1085,8 @@ const MAIL_CHANGE_TOOLS = [
     command: 'mail undo',
     intent: /\b(?:undo|restore|revert|(?:put|bring|move) .{0,60}\bback)\b/i,
     description:
-      'Undo the most recent mail move (by Ordo’s window or an agent) made while this Ordo has been running: ' +
-      'the messages go back where they were.',
+      'Undo the most recent mail move made by this Ordo process (in MCP, made by this MCP session): the ' +
+      'messages go back where they were. A move made by another process can’t be undone here.',
     untrusted: false,
     input: {},
     run: viaCommand('mail undo', () => ({ input: {} })),
@@ -1025,7 +1114,7 @@ const MAIL_CHANGE_TOOLS = [
     kind: 'change',
     destructive: false,
     label: 'Saving a draft',
-    done: () => 'Saved a draft',
+    done: () => 'Saved to Drafts',
     intent:
       /\b(?:draft|write|reply|respond|answer|forward|compose|send)\b|\bemail (?:him|her|them|back|\S+@)/i,
     description:
@@ -1039,7 +1128,7 @@ const MAIL_CHANGE_TOOLS = [
       const built = await buildEmail(services, a as EmailArgs, false)
       if (!built.ok) return { ok: false, code: 'invalid', message: built.message }
       const r = await services.mail.saveDraft(built.compose)
-      if (!r.ok) return { ok: false, code: r.error === 'locked' ? 'locked' : 'failed', message: r.message }
+      if (!r.ok) return { ok: false, code: mailErrorCode(r.error), message: r.message }
       return { ok: true, data: { saved: true, draft: r.draft } }
     },
     async preview(services, a) {
@@ -1048,10 +1137,7 @@ const MAIL_CHANGE_TOOLS = [
       return {
         title: emailTitle(false, built.email),
         details: [],
-        notes: [
-          ...built.notes,
-          'It’s saved to Drafts. Nothing is sent: you can finish it and send it in Mail.',
-        ],
+        notes: [DRAFT_NOTE],
         email: built.email,
         mail: built.mail,
       }
@@ -1084,7 +1170,7 @@ const MAIL_CHANGE_TOOLS = [
       const built = await buildEmail(services, a as EmailArgs, true)
       if (!built.ok) return { ok: false, code: 'invalid', message: built.message }
       const r = await services.mail.send(built.compose)
-      if (!r.ok) return { ok: false, code: r.error === 'locked' ? 'locked' : 'failed', message: r.message }
+      if (!r.ok) return { ok: false, code: mailErrorCode(r.error), message: r.message }
       return { ok: true, data: { sent: true, ...(r.warning && { warning: r.warning }) } }
     },
     async preview(services, a) {
@@ -1093,7 +1179,7 @@ const MAIL_CHANGE_TOOLS = [
       return {
         title: emailTitle(true, built.email),
         details: [],
-        notes: [...built.notes, SEND_NOTE],
+        notes: [SEND_NOTE],
         email: built.email,
         mail: built.mail,
         ...(!services.mail.send && { blocked: 'Ordo only sends email from the app, after you confirm it.' }),
@@ -1104,6 +1190,22 @@ const MAIL_CHANGE_TOOLS = [
 
 /** What the send card always says. */
 export const SEND_NOTE = 'This sends the email. You can’t unsend it.'
+/** What the draft card always says. */
+export const DRAFT_NOTE = 'This saves it to Drafts. Nothing is sent: you can finish it and send it from Mail.'
+
+/** A mail client failure as a tool error, keeping what kind it was. */
+function mailErrorCode(error: string): ErrorCode {
+  const codes: Record<string, ErrorCode> = {
+    invalid: 'invalid',
+    'not-found': 'not_found',
+    locked: 'locked',
+    busy: 'busy',
+    auth: 'auth',
+    network: 'network',
+    unavailable: 'unavailable',
+  }
+  return codes[error] ?? 'failed'
+}
 
 export const TOOLS: readonly OrdoTool[] = [
   tool({

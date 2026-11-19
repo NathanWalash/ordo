@@ -23,7 +23,7 @@ const BY_ROUTE: Record<Route, Suggestion[]> = {
   ],
   'mail/inbox': [
     { text: 'What’s unread in my inbox?', icon: 'mail' },
-    { text: 'Archive newsletters from this week', icon: 'mail' },
+    { text: 'Archive this week’s newsletters', icon: 'mail' },
     { text: 'Draft a reply to the last email from …', icon: 'mail', fill: true },
   ],
   'mail/unclutter': MAIL,

@@ -197,7 +197,7 @@ describe('commands', () => {
     expect(services.mail.move).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7, 8], to: 'trash' })
     const human = await cli(services, 'mail', 'move', '7', '--to', 'Projects', ...go)
     expect(human.stdout).toBe(
-      'Moved 1 message from INBOX to Projects. Undo with `mail undo 5 --confirm` while this Ordo is running.\n',
+      'Moved 1 message from INBOX to Projects. Nothing is deleted; move them back with `mail move` (undo only works within one MCP session).\n',
     )
     expect(services.mail.move).toHaveBeenLastCalledWith({
       mailbox: 'INBOX',
