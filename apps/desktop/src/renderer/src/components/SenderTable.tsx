@@ -1,6 +1,15 @@
 import { useState, type ReactNode } from 'react'
-import { ExternalLink, ShieldCheck, Sparkles, Trash2, Zap } from 'lucide-react'
-import type { Category, CategorisedSender } from '@ordo/mail-core'
+import {
+  CircleCheck,
+  ExternalLink,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  TriangleAlert,
+  Zap,
+} from 'lucide-react'
+import { stillEmailing, type Category, type CategorisedSender } from '@ordo/mail-core'
 import { Button } from './Button'
 
 export const CATEGORY_LABELS: { id: Category; label: string }[] = [
@@ -24,10 +33,15 @@ interface Props {
   actions?: ReactNode
   /** Open the review sheet for the selected senders. Without it (sample data) clearing is off. */
   onReview?: (chosen: CategorisedSender[]) => void
+  /**
+   * Open the review sheet to unsubscribe from one sender. Without it (sample data) the column only
+   * says how each sender unsubscribes.
+   */
+  onUnsubscribe?: (sender: CategorisedSender) => void
 }
 
 /** Inbox makeup, category filters and a selectable sender list. People can never be selected. */
-export function SenderTable({ senders, banner, actions, onReview }: Props) {
+export function SenderTable({ senders, banner, actions, onReview, onUnsubscribe }: Props) {
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -96,7 +110,7 @@ export function SenderTable({ senders, banner, actions, onReview }: Props) {
               <th className="py-1.5 font-medium">Sender</th>
               <th className="w-20 pr-4 text-right font-medium">Emails</th>
               <th className="w-20 pr-4 text-right font-medium">Unread</th>
-              <th className="w-32 font-medium">Unsubscribe</th>
+              <th className="w-36 font-medium">Unsubscribe</th>
             </tr>
           </thead>
           <tbody>
@@ -144,8 +158,8 @@ export function SenderTable({ senders, banner, actions, onReview }: Props) {
                   <td className="pr-4 text-right tabular-nums text-ink-2">
                     {Math.round((s.unread / s.count) * 100)}%
                   </td>
-                  <td className="text-ink-2">
-                    <UnsubLabel kind={s.unsubscribe.kind} />
+                  <td className="pr-3 text-ink-2">
+                    <UnsubscribeCell sender={s} onUnsubscribe={person ? undefined : onUnsubscribe} />
                   </td>
                 </tr>
               )
@@ -186,6 +200,111 @@ function Chip(props: { active: boolean; onClick: () => void; children: ReactNode
       }`}
     >
       {props.children}
+    </button>
+  )
+}
+
+const METHOD = {
+  'one-click': { icon: Zap, about: 'One-click: Ordo unsubscribes for you' },
+  link: { icon: ExternalLink, about: 'Web page: opens the sender’s unsubscribe page' },
+  mailto: { icon: Mail, about: 'Email: Ordo sends an unsubscribe email from your iCloud address' },
+} as const
+
+/**
+ * The Unsubscribe column: an Unsubscribe button for a sender Ordo can unsubscribe from, "Unsubscribed"
+ * once clean-up history says it has, or how the sender unsubscribes when there's no button (people,
+ * sample data, or no way to unsubscribe).
+ */
+function UnsubscribeCell({
+  sender: s,
+  onUnsubscribe,
+}: {
+  sender: CategorisedSender
+  onUnsubscribe?: (sender: CategorisedSender) => void
+}) {
+  const name = s.name ?? s.address
+  const done = s.category === 'people' ? undefined : s.unsubscribed
+  const canUnsubscribe = Boolean(onUnsubscribe) && s.unsubscribe.kind !== 'none' && s.category !== 'people'
+  const when = done?.at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  const open = () => onUnsubscribe?.(s)
+
+  // Unsubscribed, but mail still came more than two days later: say so, and offer the button again.
+  if (done && stillEmailing(s))
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        {canUnsubscribe ? (
+          <UnsubscribeButton sender={s} onClick={open} />
+        ) : (
+          <UnsubLabel kind={s.unsubscribe.kind} />
+        )}
+        <span
+          className="flex items-center gap-1 text-[11px] font-medium text-warn"
+          title={`Ordo unsubscribed on ${when}, but ${name} has emailed since.`}
+        >
+          <TriangleAlert size={11} className="shrink-0" aria-hidden />
+          Still emailing
+        </span>
+      </div>
+    )
+
+  if (done) {
+    const opened = done.status === 'opened'
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <span
+          data-unsubscribe-for={s.address}
+          tabIndex={-1}
+          title={
+            opened
+              ? `Ordo opened the unsubscribe page on ${when}. Finish there if you haven’t.`
+              : `Unsubscribed on ${when}`
+          }
+          className="flex items-center gap-1 text-[12px] text-ink outline-none"
+        >
+          <CircleCheck size={13} className="shrink-0 text-success" aria-hidden />
+          {opened ? 'Page opened' : 'Unsubscribed'}
+        </span>
+        {canUnsubscribe && (
+          <button
+            type="button"
+            aria-label={`Unsubscribe from ${name} again`}
+            onClick={(e) => {
+              // Never selects the row.
+              e.stopPropagation()
+              open()
+            }}
+            className="rounded-sm text-[11px] font-medium text-accent hover:underline"
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (!canUnsubscribe) return <UnsubLabel kind={s.unsubscribe.kind} />
+  return <UnsubscribeButton sender={s} onClick={open} />
+}
+
+function UnsubscribeButton({ sender: s, onClick }: { sender: CategorisedSender; onClick: () => void }) {
+  if (s.unsubscribe.kind === 'none') return null
+  const method = METHOD[s.unsubscribe.kind]
+  const Icon = method.icon
+  return (
+    <button
+      type="button"
+      data-unsubscribe-for={s.address}
+      aria-label={`Unsubscribe from ${s.name ?? s.address}`}
+      aria-description={method.about}
+      title={method.about}
+      onClick={(e) => {
+        // The button sits in a selectable row: unsubscribing never selects it.
+        e.stopPropagation()
+        onClick()
+      }}
+      className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border border-sep bg-field px-2 text-[12px] font-medium text-ink shadow-[0_1px_1px_rgb(0_0_0/0.06)] hover:bg-hover"
+    >
+      <Icon size={12} className="shrink-0 text-ink-2" aria-hidden />
+      <span className="truncate">Unsubscribe</span>
     </button>
   )
 }

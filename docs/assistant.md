@@ -1,7 +1,9 @@
 # Assistant
 
 Ordo's assistant answers questions about your mail, calendar and money, opens pages for you, and
-makes changes once you confirm them, including moving, drafting and sending email. It uses the model you chose in **Settings → AI**, and the same
+makes changes once you confirm them, including moving, drafting and sending email. It's also a
+general assistant: it answers general questions, helps with writing and planning, and does sums,
+from the model's own knowledge. It uses the model you chose in **Settings → AI**, and the same
 tools as Ordo's MCP server.
 
 ## Using it
@@ -11,8 +13,8 @@ tools as Ordo's MCP server.
   you to the question box; pressed again, or Escape, it closes.
 - When the window is wide enough it sits beside the page, which narrows to make room; otherwise it
   floats over it.
-- Suggested prompts change with the page you're on. An unsent question is kept while the panel is
-  closed.
+- Suggested prompts change with the page you're on, and mix questions about your data with general
+  ones. An unsent question is kept while the panel is closed.
 - While it works you see what it's doing ("Reading transactions", "Waiting for your answer") and
   how long it's taken. **Stop** cancels the answer; an open confirmation card counts as cancelled.
 - Each step shows as a chip that says what it did ("Read 8 transactions", "Opened Finances"). Ordo
@@ -24,7 +26,31 @@ Examples: "Which bills are due next?", "How much did I spend last month?", "What
 "What did the bank email me about last week?", "Archive this week’s newsletters", "Draft a reply
 to the last email from Sam", "Reply to sam@friend.example saying Friday works", "What's overdue on my boards?", "Add a card to Home to book the MOT",
 "Show me August's spending" (opens Finances on August), "Undo clean-up 4", "Import
-/Users/me/Downloads/monzo.csv".
+/Users/me/Downloads/monzo.csv". General ones: "Help me word a polite note to my landlord", "Explain
+what an ISA is", "How does the 50/30/20 budget work?", "What's 15% of £240?". "Help me plan my
+week" is about your data: it looks at your calendar first.
+
+## General questions and your data
+
+- **General questions** (explanations, how-tos, writing and rewording help, planning, maths, ideas)
+  are answered straight from the model's own knowledge, without looking anything up. When an answer
+  is general knowledge rather than from your data, it says so ("This is general advice, not from
+  your Ordo data"), unless that's obvious, as with a sum.
+- **Your own mail, calendar, money, boards and Ordo itself** always come from Ordo's tools. The
+  assistant is told never to guess them, and never to pass general knowledge off as your data.
+  Planning your own time counts: it looks at your calendar first. If the tools can't answer, it
+  says so rather than guessing.
+- **Ordo marks answers that looked nothing up.** When Ordo ran no tool for an answer (no chips),
+  it adds its own note under it: "General answer: nothing was looked up in your Ordo data." The
+  note comes from Ordo's count of tool calls, never from the model, so the model can't add or hide
+  it. It's plain text in the reply, so screen readers read it with the answer. A follow-up can still
+  build on what earlier answers looked up.
+- **Writing help** goes in the answer as text. A note, a message to copy or a rewording is never
+  saved or sent; an email you ask it to write, draft, reply to or send follows the email rules
+  below (a draft, or a Send card you confirm).
+- Every safety rule below applies unchanged. A general question can't change anything without a
+  card, and whether Ordo looked anything up is shown under each answer: as chips for each step, or
+  the general-answer note when there were none.
 
 ## What it can do
 
@@ -75,6 +101,10 @@ to the last email from Sam", "Reply to sam@friend.example saying Friday works", 
   mid-question, it stops there, before anything more is read or sent. The
   answer card says when an answer also adds someone to Bills, and the forget card says when
   forgetting an event would also drop a payback that has no payments to link to.
+- **A general question sends only your question and the conversation so far** (earlier questions
+  and answers, as below), with Ordo's fixed instructions, today's date and which page you're on. No
+  tool runs, so none of your mail, calendar, money or boards data goes with it. With a cloud model
+  the same OK applies: "your questions" in it covers these.
 - The conversation is kept in memory for this session only. Tool results are sent for the question
   they answer and never kept; later questions only carry earlier questions and answers (the last
   eight). Nothing is written to disk. Quitting Ordo, reloading the window or pressing New conversation
@@ -252,7 +282,10 @@ tool({
 
 ### Testing
 
-- `loop.test.ts` drives the loop with a scripted fake model: tool choice, bad JSON, schema
+- `prompt.test.ts` checks the system prompt: general questions answered without a tool, the user's
+  data only from tools, and every safety rule word for word.
+- `loop.test.ts` drives the loop with a scripted fake model: a general question answered with no
+  tool call and nothing but the question and history sent, tool choice, bad JSON, schema
   mismatches and retries, both step caps, prompt injection in results and in history, plan-first,
   stale previews, cards, Stop after a change, and trust; and for mail, the send trigger rules
   (asked, from email text, mixed, Reply-To and look-alike senders), one send per question,
@@ -266,10 +299,13 @@ tool({
   never, Stop and Clear mid-question, a closed or reloaded window, history, page checks and cloud
   consent.
 - `e2e/assistant.spec.ts` runs the app against a fake LM Studio that reads tool results back out of
-  the prompt; `e2e/assistant-setup.spec.ts` checks the no-model state and the cloud OK.
+  the prompt; "Help me plan my week" reads the calendar, and "Explain what an ISA is" is answered
+  with no tool and shows the general-answer note; `e2e/assistant-setup.spec.ts` checks the no-model state and the cloud OK.
 
 ## Limits
 
+- General answers come from the model alone: they can be wrong or out of date, and small local
+  models know less. Check anything important.
 - Small local models sometimes need the retry, or answer without looking things up. gpt-oss-20b
   works well; smaller ones make more mistakes.
 - One question at a time, and no streaming: the answer appears when it's ready.

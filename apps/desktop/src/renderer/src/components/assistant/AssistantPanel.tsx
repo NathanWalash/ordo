@@ -18,9 +18,12 @@ import {
   CircleX,
   Cloud,
   Inbox,
+  Info,
+  Lightbulb,
   Loader2,
   MessageSquareText,
   Paperclip,
+  PenLine,
   Receipt,
   RotateCcw,
   ShieldAlert,
@@ -45,7 +48,9 @@ import { Button } from '../Button'
 import {
   answerBlocks,
   elapsed,
+  GENERAL_NOTE,
   groupTrace,
+  isGeneralAnswer,
   WAITING,
   workedFor,
   type Item,
@@ -76,6 +81,8 @@ const SUGGESTION_ICONS: Record<SuggestionIcon, ReactNode> = {
   bills: <Receipt size={14} />,
   sparkles: <Sparkles size={14} />,
   boards: <SquareKanban size={14} />,
+  write: <PenLine size={14} />,
+  idea: <Lightbulb size={14} />,
 }
 
 /**
@@ -261,7 +268,7 @@ export function AssistantPanel({ assistant, route, shortcut, docked, onClose, on
               maxLength={2000}
               disabled={waiting}
               aria-label="Ask the assistant"
-              placeholder={waiting ? 'Answer the card above first' : 'Ask about your mail, calendar or money'}
+              placeholder={waiting ? 'Answer the card above first' : 'Ask anything, or about your data'}
               className="max-h-28 min-h-[22px] flex-1 resize-none bg-transparent py-[3px] text-[13px] leading-[18px] text-ink outline-none select-text placeholder:text-ink-2 disabled:opacity-60"
             />
             {busy ? (
@@ -424,8 +431,8 @@ function Welcome({
       <div className="px-1">
         <h3 className="text-[15px] leading-snug font-semibold">What can I help with?</h3>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
-          I can look things up in your mail, calendar and money, open pages for you, and make changes once you
-          confirm them.
+          Ask me anything: I can help with writing, planning and general questions, and look things up in your
+          mail, calendar, money and boards. I only change anything once you confirm it.
         </p>
       </div>
       <ul aria-label="Suggestions" className="flex flex-col gap-1">
@@ -516,6 +523,13 @@ function Reply({
       )}
       {item.status && <Working item={item} />}
       {item.answer && <Answer text={item.answer} />}
+      {isGeneralAnswer(item) && (
+        // Ordo's own words, from its count of tool calls: the model can't add or remove this.
+        <p className="flex items-start gap-1.5 text-[11px] leading-snug text-ink-2">
+          <Info size={12} className="mt-px shrink-0" aria-hidden />
+          {GENERAL_NOTE}
+        </p>
+      )}
       {showError && item.error && (
         <div className="flex flex-col items-start gap-2">
           <p className="flex items-start gap-1.5 text-[13px] leading-snug text-ink-2">
