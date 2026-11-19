@@ -228,6 +228,19 @@ function ReviewRow({
           {d.amount !== null ? `${formatPence(d.amount)} ${PER[d.cadence]}` : 'Amount unknown'}
           {evidence && ` · ${evidence}`}
         </div>
+        {d.suggestedSplit && (
+          <div
+            className="flex items-center gap-1 truncate text-[12px] text-ink-2"
+            title={d.suggestedSplit.reason}
+          >
+            <Users size={11} className="shrink-0" aria-hidden="true" />
+            Split:{' '}
+            {d.suggestedSplit.shares
+              .map((x) => `${x.name === 'Me' ? 'you' : x.name} ${formatPence(x.amount)}`)
+              .join(' · ')}
+            <span className="text-ink-3"> · from what you told Ordo</span>
+          </div>
+        )}
       </div>
       <Button className="h-6 px-2.5 text-[12px]" aria-label={`Dismiss ${d.name}`} onClick={onDismiss}>
         Dismiss

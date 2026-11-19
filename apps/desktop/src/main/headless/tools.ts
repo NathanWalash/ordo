@@ -66,6 +66,11 @@ export interface OrdoTool<S extends z.ZodRawShape = z.ZodRawShape> {
   untrusted: boolean
   /** For untrusted tools: what the assistant read, as the card names it ("your transactions"). */
   reads?: string
+  /**
+   * Results carry what Ordo learned about the user's money: exact amounts, dates and people's names.
+   * The assistant offers these tools to a cloud model only with the separate Money details consent.
+   */
+  moneyDetails?: boolean
   /** Arguments, as a zod shape (MCP turns it into JSON Schema; the assistant validates strictly). */
   input: S
   /** The headless command behind it, if any. Change gate messages use its name. */
@@ -745,6 +750,188 @@ export const TOOLS: readonly OrdoTool[] = [
     reads: 'your balances',
     input: {},
     run: viaCommand('money balances', () => ({ input: {} })),
+  }),
+
+  // What Ordo learned about money (Ask Ordo). Exact amounts, dates and people's names: a cloud
+  // model only gets these with the separate Money details consent.
+
+  tool({
+    name: 'ordo_money_knows',
+    kind: 'read',
+    label: 'Reading what Ordo knows about your money',
+    done: (d) => `Read ${plural(num(d, 'facts'), 'fact')}`,
+    command: 'money knows',
+    description:
+      'What the user has taught Ordo about their money (people, events, paybacks, money held for others, ' +
+      'payments to ignore), as sentences with ids, and how each bank dates payments.',
+    untrusted: true,
+    moneyDetails: true,
+    reads: 'what you’ve taught Ordo about your money',
+    input: {},
+    run: viaCommand('money knows', () => ({ input: {} })),
+  }),
+
+  tool({
+    name: 'ordo_money_questions',
+    kind: 'read',
+    label: 'Reading Ordo’s questions about your money',
+    done: (d) => `Read ${plural(num(d, 'questions'), 'question')}`,
+    command: 'money questions',
+    description:
+      'Short questions Ordo has about the user’s money (who a person is, whether money in was a payback ' +
+      'or passed straight through), each with answer ids. Ask the user; answer with ordo_money_answer.',
+    untrusted: true,
+    moneyDetails: true,
+    reads: 'Ordo’s questions about your money',
+    input: {},
+    run: viaCommand('money questions', () => ({ input: {} })),
+  }),
+
+  tool({
+    name: 'ordo_money_loose_ends',
+    kind: 'read',
+    label: 'Checking loose ends',
+    done: (d) => `Read ${plural(num(d, 'held') + num(d, 'owed'), 'loose end')}`,
+    command: 'money loose-ends',
+    description:
+      'Money the user holds for someone else that hasn’t gone on yet (not income), and money people still ' +
+      'owe them, in pence (GBP). Worked out by Ordo.',
+    untrusted: true,
+    moneyDetails: true,
+    reads: 'money you hold for others and who owes you',
+    input: {},
+    run: viaCommand('money loose-ends', () => ({ input: {} })),
+  }),
+
+  tool({
+    name: 'ordo_money_events',
+    kind: 'read',
+    label: 'Reading events and trips',
+    done: (d) => `Read ${plural(num(d, 'events'), 'event')}`,
+    command: 'money events',
+    description:
+      'Events and trips the user saved, with paid out, paid back and net cost across every account, in ' +
+      'pence (GBP).',
+    untrusted: true,
+    moneyDetails: true,
+    reads: 'your events and trips',
+    input: {},
+    run: viaCommand('money events', () => ({ input: {} })),
+  }),
+
+  tool({
+    name: 'ordo_money_compare',
+    kind: 'read',
+    label: 'Comparing with last month',
+    done: () => 'Compared with last month',
+    command: 'money compare',
+    description:
+      'Spending this month so far against last month to the same day, net of paybacks, in pence (GBP). ' +
+      'Transfers between the user’s accounts, money held for others and ignored payments never count. ' +
+      'Includes caveats such as banks that show posting dates.',
+    untrusted: true,
+    moneyDetails: true,
+    reads: 'your spending this month and last',
+    input: {
+      category: z.string().max(40).optional().describe('Only this category, e.g. Groceries or Home'),
+      account: z.string().max(60).optional().describe('Only this account, by name'),
+    },
+    run: viaCommand('money compare', (a: { category?: string; account?: string }) => ({
+      input: { category: a.category, account: a.account },
+    })),
+  }),
+
+  tool({
+    name: 'ordo_money_answer',
+    kind: 'change',
+    label: 'Answering Ordo’s question',
+    done: (d) => `Saved ${plural(num(d, 'saved'), 'fact')}`,
+    command: 'money answer',
+    intent:
+      /\b(?:answer|reply|tell ordo|yes|no|it'?s|is my|they'?re|flatmate|friend|family|payback|passing through|pass (?:it )?on|income)\b/i,
+    description:
+      'Answer one of Ordo’s money questions with one of its answer ids (from ordo_money_questions). Ordo saves ' +
+      'the facts that answer means; "no" and "later" only stop the question coming back.',
+    untrusted: false,
+    moneyDetails: true,
+    input: {
+      question: z.string().min(1).max(400).describe('Question id from ordo_money_questions'),
+      answer: z.string().min(1).max(40).describe('One of that question’s answer ids'),
+    },
+    run: viaCommand('money answer', (a: { question: string; answer: string }) => ({
+      input: { question: a.question, answer: a.answer },
+    })),
+    staleMessage: 'That question has changed or been answered since. Nothing was saved.',
+    // Ordo's own question and answer, never the model's words.
+    async preview(services, a) {
+      const q = (await services.money.memory()).questions.find((x) => x.id === a.question)
+      const choice = q?.answers.find((x) => x.id === a.answer)
+      if (!q || !choice)
+        return {
+          title: 'Answer one of Ordo’s questions',
+          details: [],
+          notes: [],
+          blocked: q
+            ? 'That isn’t one of the question’s answers.'
+            : 'That question has already been answered.',
+        }
+      const remembers = !['no', 'later', 'not-person'].includes(choice.id)
+      return {
+        title: 'Answer one of Ordo’s questions',
+        details: [clean(q.text, 300), `Answer: ${clean(choice.label, 60)}`],
+        notes: [
+          remembers
+            ? 'Ordo saves what this answer means. You can forget it on Money → Ask Ordo.'
+            : 'Ordo won’t ask this again. Nothing else changes.',
+          ...(choice.addsPerson ? [`Adds ${clean(choice.addsPerson, 40)} to Bills.`] : []),
+        ],
+      }
+    },
+  }),
+
+  tool({
+    name: 'ordo_money_forget',
+    kind: 'change',
+    label: 'Forgetting a fact',
+    done: () => 'Forgot a fact',
+    command: 'money forget',
+    intent: /\b(?:forget|remove|delete|drop|wrong)\b/i,
+    description: 'Forget one fact Ordo learned about the user’s money (ids from ordo_money_knows).',
+    untrusted: false,
+    moneyDetails: true,
+    input: { fact: z.string().min(1).max(100).describe('Fact id from ordo_money_knows') },
+    run: viaCommand('money forget', (a: { fact: string }) => ({ input: { fact: a.fact } })),
+    staleMessage: 'That fact has changed or been forgotten since. Nothing was changed.',
+    // Ordo's own sentence for the fact.
+    async preview(services, a) {
+      const view = await services.money.memory()
+      const f = view.facts.find((x) => x.id === a.fact)
+      if (!f)
+        return {
+          title: 'Forget something Ordo learned',
+          details: [],
+          notes: [],
+          blocked: 'Ordo doesn’t know that fact any more.',
+        }
+      let note = 'Ordo will work things out without it, and may ask about it again.'
+      if (f.kind === 'event') {
+        // The same rule as forgetting: a payback for the event that names no payments of its own is
+        // pointed at the event's payments, and only goes too when the event has none.
+        const payments = view.events.find((e) => e.id === f.id)?.outgoings.length ?? 0
+        const lost = view.facts.filter(
+          (x) => x.kind === 'payback' && x.eventId === f.id && x.outIds.length === 0,
+        ).length
+        note =
+          lost && !payments
+            ? `The event has no payments to link them to, so ${plural(lost, 'payback')} for it ${lost === 1 ? 'is' : 'are'} forgotten too.`
+            : 'Paybacks and money owed for this event are kept, linked to its payments instead.'
+      }
+      return {
+        title: 'Forget something Ordo learned',
+        details: [clean(f.summary, 300)],
+        notes: [note],
+      }
+    },
   }),
 
   tool({

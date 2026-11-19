@@ -4,6 +4,12 @@ import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'ele
 import {
   ME,
   aiCategoriseTransactions,
+  buildLedger,
+  heldSettlements,
+  withMemoryBills,
+  type Settlement,
+  type Split,
+  type SuggestedSplit,
   aiMatchBills,
   allocate,
   applyCategoryOverrides,
@@ -62,7 +68,7 @@ import { pathProblem } from './paths'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
 let store: MoneyStore | null = null
-const moneyStore = () => (store ??= new MoneyStore(join(app.getPath('userData'), 'money.sqlite')))
+export const moneyStore = () => (store ??= new MoneyStore(join(app.getPath('userData'), 'money.sqlite')))
 
 /**
  * The model whose earlier answers apply to Money right now: AI for Money is on, the provider may
@@ -246,10 +252,15 @@ function saveStatement(input: StatementInput): ImportOutcome {
   return { ok: true, accountName, ...moneyStore().addTransactions(r.transactions) }
 }
 
+/** Every transaction as Finances shows it: your categories, AI's, and transfers between your accounts paired. */
+export async function allTransactions(): Promise<Transaction[]> {
+  return pairOwnTransfers(await categorised(moneyStore().transactions()))
+}
+
 export async function transactions(raw: unknown): Promise<TransactionPage> {
   const q = TransactionQuerySchema.parse(raw ?? {})
   const s = moneyStore()
-  const all = pairOwnTransfers(await categorised(s.transactions()))
+  const all = await allTransactions()
   const inAccount = filterTransactions(all, { account: q.account })
   const shown = filterTransactions(inAccount, { month: q.month })
   return {
@@ -358,8 +369,43 @@ async function detect(today: string) {
   const txs = moneyStore().transactions()
   const { headers, hints, linked } = billEvidence(txs, today)
   const suggestions = await (await advisor()).suggest(linked, hints).catch(() => [])
-  const detected = applySuggestions(linked, hints, suggestions)
+  const detected = learnedBills(applySuggestions(linked, hints, suggestions), txs, today)
   return { txs, hints, detected, mailConnected: headers !== null }
+}
+
+/**
+ * Money a flatmate paid you that you hold for a shared bill's payee counts as their share being
+ * paid (not shown as settlements you can delete). Never fails the overview.
+ */
+function heldPayments(txs: Transaction[], bills: StoredBill[], splits: Split[]): Settlement[] {
+  try {
+    const s = moneyStore()
+    const facts = s.memoryFacts()
+    if (!facts.some((f) => f.kind === 'held')) return []
+    const paired = pairOwnTransfers(txs)
+    return heldSettlements({
+      transactions: paired,
+      ledger: buildLedger(paired, facts),
+      facts,
+      people: s.people(),
+      bills,
+      splits,
+    })
+  } catch {
+    return []
+  }
+}
+
+/** Add what you taught Ordo: shared bills and splits it can now suggest. Never fails detection. */
+function learnedBills(detected: DetectedBill[], txs: Transaction[], today: string): DetectedBill[] {
+  try {
+    const facts = moneyStore().memoryFacts()
+    if (!facts.length) return detected
+    const paired = pairOwnTransfers(txs)
+    return withMemoryBills(detected, paired, buildLedger(paired, facts), facts, today)
+  } catch {
+    return detected
+  }
 }
 
 async function current() {
@@ -387,7 +433,13 @@ export async function overview(): Promise<MoneyOverview> {
   const c = await current()
   const splits = s.splits()
   const settlements = s.settlements()
-  const { debts } = balances({ bills: c.stored, splits, transactions: c.txs, settlements, today: c.today })
+  const { debts } = balances({
+    bills: c.stored,
+    splits,
+    transactions: c.txs,
+    settlements: [...settlements, ...heldPayments(c.txs, c.stored, splits)],
+    today: c.today,
+  })
   const bySplit = new Map(splits.map((x) => [x.billId, x]))
   const bills = c.bills.map((b): BillView => {
     const split = bySplit.get(b.id)
@@ -443,7 +495,8 @@ async function confirmBill(raw: unknown): Promise<MoneyResult> {
   if (!d) return fail('That suggestion is no longer there.')
   const amount = d.amount ?? parsed.data.amount
   if (amount === undefined) return fail('Enter how much this costs.')
-  moneyStore().saveBill({
+  const s = moneyStore()
+  const bill = s.saveBill({
     name: d.name,
     amount,
     cadence: d.cadence,
@@ -452,7 +505,30 @@ async function confirmBill(raw: unknown): Promise<MoneyResult> {
     status: 'active',
     merchantKey: d.merchantKey,
   })
+  if (d.suggestedSplit && parsed.data.withSplit !== false) saveSuggestedSplit(bill, d.suggestedSplit, today)
   return ok
+}
+
+/**
+ * Save the split Ordo suggested from what you taught it: fixed amounts, paid by you. People it
+ * names are added to Bills if they aren't there yet. Skipped if the shares don't fit the bill.
+ */
+function saveSuggestedSplit(bill: StoredBill, suggested: SuggestedSplit, today: string): void {
+  const s = moneyStore()
+  const shares = suggested.shares.map((x) => ({
+    personId: x.name === 'Me' ? ME : ensurePerson(x.name).id,
+    value: x.amount,
+  }))
+  const split = { billId: bill.id, paidBy: ME, mode: 'fixed' as const, shares }
+  if (validateSplit(split, bill.amount, s.people())) return
+  s.saveSplit({ ...split, since: splitStartDate(bill, s.transactions(), today) })
+}
+
+/** Find someone on Bills by name, or add them. */
+export function ensurePerson(name: string) {
+  const s = moneyStore()
+  const clean = name.trim().slice(0, 40)
+  return s.people().find((p) => p.name.toLowerCase() === clean.toLowerCase()) ?? s.savePerson({ name: clean })
 }
 
 function saveBill(raw: unknown): MoneyResult {

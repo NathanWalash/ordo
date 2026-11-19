@@ -201,6 +201,8 @@ it('marks exactly the commands that change data', () => {
     'calendar delete',
     'calendar edit',
     'cleanup run',
+    'money answer',
+    'money forget',
     'money import',
     'money sort',
     'undo',

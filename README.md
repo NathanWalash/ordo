@@ -59,6 +59,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: Sort with AI for categories and matching bills to email                  | Done   |
 | Money: change a transaction's category yourself                                 | Done   |
 | Money: HSBC and Monzo app exports; transfers between your accounts              | Done   |
+| Money: Ask Ordo, which learns how your money works (exploratory)                | Done   |
 | Headless mode: a CLI and an MCP server for scripts and AI agents                | Done   |
 | Boards: local kanban with drag and drop, custom fields and templates            | Done   |
 | Boards: link cards to events, emails, bills and cards; due on Calendar          | Done   |
@@ -140,6 +141,10 @@ Playwright, electron-builder, pnpm workspaces.
 2. **Reading mail (done):** folders, a safe HTML reader with remote images blocked, search. Conversation threads are next.
 3. **Writing mail (done):** compose, reply, reply all, forward, drafts, attachments.
 4. **Finance** and other modules. Money and Boards are in; see [docs/boards.md](docs/boards.md).
+5. **Money that learns** (exploratory): Ask Ordo answers questions about your money with Ordo's own
+   sums, asks short questions with one-tap answers, and remembers what you tell it: paybacks, money
+   you hold for others, events and trips, who owes you. Next: richer editing of what Ordo knows,
+   events from calendar entries, and reconciling settle-ups with paybacks.
 
 How the mail client keeps you safe, and its keyboard shortcuts, are in [docs/mail.md](docs/mail.md). More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
 Boards are described in [docs/boards.md](docs/boards.md).

@@ -96,6 +96,9 @@ test('picking LM Studio preselects gpt-oss-20b and saves it', async () => {
     money: false,
     boards: false,
     cloudConsent: null,
+    moneyDetailsConsent: null,
+    askStyle: 'brief',
+    askClarify: true,
   })
 
   // AI for Boards is its own switch, off by default, saying exactly what Suggest sends.

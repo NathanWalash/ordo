@@ -7,6 +7,7 @@ export const ROUTES = [
   'boards',
   'money/finances',
   'money/bills',
+  'money/ask',
   'settings',
 ] as const
 export type Route = (typeof ROUTES)[number]
@@ -20,6 +21,7 @@ export const TITLES: Record<Route, string> = {
   boards: 'Boards',
   'money/finances': 'Finances',
   'money/bills': 'Bills & Subscriptions',
+  'money/ask': 'Ask Ordo',
   settings: 'Settings',
 }
 
