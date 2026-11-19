@@ -75,31 +75,14 @@ test('boards list and boards cards read without changing anything', async () => 
   expect(readFileSync(db).length).toBeGreaterThan(0)
 })
 
-// TEMPORARY (fix/windows-headless-crash): repeat the reads to catch the Windows crash.
-test('TEMP loop boards reads', async () => {
-  test.setTimeout(900_000)
-  const env = process.env['ORDO_CRASH_DUMP_DIR']
-    ? { ORDO_TEST_CRASH_DUMPS: process.env['ORDO_CRASH_DUMP_DIR'] }
-    : {}
-  const commands = [
-    ['boards', 'cards', '--board', 'home'],
-    ['boards', 'list', '--json'],
-    ['status', '--json'],
-    ['--help'],
-  ]
-  const crashes = commands.map(() => 0)
-  for (let i = 0; i < 25; i++)
-    for (const [n, args] of commands.entries()) {
-      const r = await ordo(args, profile, env)
-      const crashed = r.code !== 0 || /EXCEPTION/.test(r.stderr)
-      if (crashed) crashes[n]!++
-      if (crashed || i < 2)
-        console.error(`TEMP ${crashed ? 'CRASH' : 'ok'} ${args.join(' ')}: ${r.stderr.trim()}`)
-    }
-  console.error(
-    `TEMP crashes out of 25: ${commands.map((c, n) => `${c.join(' ')}=${crashes[n]}`).join(', ')}`,
-  )
-  expect(crashes.every((c) => c === 0)).toBe(true)
+test('a quick read exits cleanly, every time', async () => {
+  // A read is done before Electron's message loop starts. Exiting from there crashed on Windows
+  // now and then (0xC0000005) while Chromium was still launching its helper processes.
+  for (let i = 0; i < 5; i++) {
+    const list = await ordo(['boards', 'list', '--json'], profile)
+    expect(list.code).toBe(0)
+    expect(json(list)).toEqual({ boards: [expect.objectContaining({ name: 'Home' })] })
+  }
 })
 
 test('add-card and move-card need --allow-changes and --confirm', async () => {
