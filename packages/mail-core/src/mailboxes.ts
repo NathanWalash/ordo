@@ -7,7 +7,10 @@ export interface RawMailbox {
   delimiter: string
   flags: Set<string>
   specialUse?: string
-  /** "extension" when the server said so, "name" when guessed from a well-known name. */
+  /**
+   * "extension" when the server said so; "name" when guessed from a well-known name, "name-guess"
+   * from a decorated one ("Sent Mail").
+   */
   specialUseSource?: string
   status?: { messages?: number; unseen?: number }
 }
@@ -42,7 +45,10 @@ export function toMailboxList(raw: readonly RawMailbox[]): MailboxInfo[] {
     for (const m of usable) {
       const role = roleFor(m)
       if (!role || claimed.has(role)) continue
-      const declared = m.specialUseSource !== 'name' || role === 'inbox'
+      // imapflow says `name` for a folder named exactly like one and `name-guess` for a decorated
+      // name ("Sent Mail"): both are guesses, below anything the server declared.
+      const guessed = m.specialUseSource === 'name' || m.specialUseSource === 'name-guess'
+      const declared = !guessed || role === 'inbox'
       if ((pass === 'extension') === declared) claimed.set(role, m)
     }
   const owner = new Map([...claimed].map(([role, m]) => [m.path, role]))

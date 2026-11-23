@@ -95,6 +95,14 @@ describe('folder roles by provider', () => {
     expect(archiveMailbox(toMailboxList([box('INBOX')]))).toBeNull()
   })
 
+  it('a folder only guessed from a decorated name never displaces one the server declared', () => {
+    const list = toMailboxList([
+      box('Sent Mail', { specialUse: '\\Sent', specialUseSource: 'name-guess' }),
+      box('[Gmail]/Sent Mail', { specialUse: '\\Sent', specialUseSource: 'extension' }),
+    ])
+    expect(list.find((m) => m.role === 'sent')?.path).toBe('[Gmail]/Sent Mail')
+  })
+
   it('names All Mail', () => {
     expect(ROLE_NAMES.all).toBe('All Mail')
   })
