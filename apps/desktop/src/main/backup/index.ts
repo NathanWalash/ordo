@@ -391,6 +391,10 @@ async function tick(): Promise<void> {
 let picked: string | null = null
 let pending: { id: string; manifest: Manifest; keepsAccount: boolean } | null = null
 let restoring = false
+/** A backup is being decrypted into restore-staging: only one at a time may use it. */
+let opening = false
+/** Cancel was pressed while opening: throw the result away when it finishes. */
+let cancelOpening = false
 
 function clearStaging(): void {
   pending = null
@@ -407,7 +411,7 @@ export async function restorePick(win: BrowserWindow | null): Promise<RestorePic
   }
   const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
   const file = r.filePaths[0]
-  if (r.canceled || !file) return { ok: false, cancelled: true }
+  if (r.canceled || !file || opening) return { ok: false, cancelled: true }
   clearStaging()
   picked = file
   return { ok: true, fileName: file.split(/[\\/]/).pop() ?? file }
@@ -439,13 +443,18 @@ function restoreSpace(): number {
 export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
   const parsed = RestoreOpenSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, error: 'invalid', message: firstIssue(parsed.error) }
+  if (opening)
+    return { ok: false, error: 'busy', message: 'Ordo is already opening a backup. Wait for it to finish.' }
   if (!picked) return { ok: false, error: 'no-file', message: 'Choose a backup file first.' }
-  const problem = pathProblem(picked, { requireAbsolute: true })
+  const file = picked
+  const problem = pathProblem(file, { requireAbsolute: true })
   if (problem) return { ok: false, error: 'invalid', message: problem }
-  clearStaging()
+  opening = true
+  cancelOpening = false
   let manifest: Manifest
   try {
-    manifest = await openBackup(picked, parsed.data.passphrase, {
+    clearStaging()
+    manifest = await openBackup(file, parsed.data.passphrase, {
       into: stagingDir(),
       maxBytes: restoreSpace(),
     })
@@ -453,6 +462,12 @@ export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
     clearStaging()
     if (err instanceof BackupError) return { ok: false, error: err.code, message: err.message }
     return { ok: false, error: 'failed', message: friendly(err) }
+  } finally {
+    opening = false
+  }
+  if (cancelOpening) {
+    clearStaging()
+    return { ok: false, error: 'failed', message: 'Cancelled.' }
   }
   if (compareVersions(manifest.appVersion, app.getVersion()) > 0) {
     clearStaging()
@@ -471,7 +486,7 @@ export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
     ok: true,
     preview: {
       id,
-      fileName: picked.split(/[\\/]/).pop() ?? picked,
+      fileName: file.split(/[\\/]/).pop() ?? file,
       createdAt: manifest.createdAt,
       appVersion: manifest.appVersion,
       files: manifest.files.map((f) => ({ name: f.name, label: LABELS[f.name], size: f.size })),
@@ -483,8 +498,10 @@ export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
 }
 
 export function restoreCancel(): void {
-  clearStaging()
   picked = null
+  // The open in progress still owns the staging folder; it tidies up when it sees this.
+  if (opening) cancelOpening = true
+  else clearStaging()
 }
 
 /** Close every store and stop anything running, so no database is open while files move. */

@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import type * as Fs from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -24,11 +25,11 @@ const env = vi.hoisted(() => ({
 }))
 // Free disk space, when a test wants to pretend the disk is nearly full.
 vi.mock('node:fs', async (importOriginal) => {
-  const fs = await importOriginal<typeof import('node:fs')>()
+  const fs = await importOriginal<typeof Fs>()
   const statfsSync = ((path: string) =>
     env.freeBytes === null
       ? fs.statfsSync(path)
-      : { ...fs.statfsSync(path), bavail: env.freeBytes, bsize: 1 }) as typeof fs.statfsSync
+      : { ...fs.statfsSync(path), bavail: env.freeBytes, bsize: 1 }) as typeof Fs.statfsSync
   return { ...fs, default: { ...fs, statfsSync }, statfsSync }
 })
 const electron = vi.hoisted(() => ({
@@ -302,6 +303,31 @@ describe('hardening', () => {
     expect(existsSync(join(env.profile, 'restore-staging', 'mail.sqlite'))).toBe(false)
     expect(await backup.restoreOpen({ passphrase: PASS })).toMatchObject({ ok: true })
     backup.restoreCancel()
+  })
+
+  it('opens one backup at a time: a second open while one runs is refused', async () => {
+    env.pick = [join(root, 'copy.ordobackup')]
+    await backup.restorePick(null)
+    const first = backup.restoreOpen({ passphrase: PASS })
+    const second = await backup.restoreOpen({ passphrase: PASS })
+    expect(second).toEqual({
+      ok: false,
+      error: 'busy',
+      message: 'Ordo is already opening a backup. Wait for it to finish.',
+    })
+    // Picking another file can't swap the staging folder out from under it either.
+    expect(await backup.restorePick(null)).toEqual({ ok: false, cancelled: true })
+    expect(await first).toMatchObject({ ok: true })
+    backup.restoreCancel()
+  })
+
+  it('cancelling while a backup is opening throws the result away', async () => {
+    env.pick = [join(root, 'copy.ordobackup')]
+    await backup.restorePick(null)
+    const opening = backup.restoreOpen({ passphrase: PASS })
+    backup.restoreCancel()
+    expect(await opening).toMatchObject({ ok: false, message: 'Cancelled.' })
+    expect(existsSync(join(env.profile, 'restore-staging'))).toBe(false)
   })
 
   it('records a backup as made even if tidying old ones fails', async () => {
