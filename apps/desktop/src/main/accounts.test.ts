@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MessageHeader } from '@ordo/mail-core'
 import { MailStore } from '@ordo/mail-core/node'
+import { ipcMain } from 'electron'
 
 // Several mail accounts in the main process: the accounts file and its migration from one
 // account, adding, testing, renaming and removing accounts, and the mail client reading them side
@@ -558,5 +559,41 @@ describe('the mail client with several accounts', () => {
       ok: false,
       error: 'invalid',
     })
+  })
+})
+
+describe('account IPC', () => {
+  /** The handlers as registered, by channel. */
+  const handlers = () => {
+    const handle = vi.mocked(ipcMain.handle)
+    handle.mockClear()
+    accounts.registerAccountsIpc()
+    return new Map(handle.mock.calls.map(([channel, fn]) => [channel, fn as (...a: unknown[]) => unknown]))
+  }
+  const app = { senderFrame: { url: 'file:///Applications/Ordo.app/renderer/index.html', parent: null } }
+  const frame = { senderFrame: { url: 'about:srcdoc', parent: {} } }
+  const other = { senderFrame: { url: 'https://evil.example/', parent: null } }
+
+  it('changes accounts only for Ordo’s own page in its window', async () => {
+    const h = handlers()
+    const input = { provider: 'gmail', email: 'jo@gmail.com', password: GMAIL_PASSWORD }
+    for (const e of [frame, other, { senderFrame: null }]) {
+      for (const channel of ['accounts:add', 'accounts:test', 'accounts:update', 'accounts:set-password'])
+        expect(
+          await h.get(channel)!(e, channel === 'accounts:add' ? input : { id: 'acc-1', label: 'x' }),
+        ).toMatchObject({
+          ok: false,
+          message: 'Change your accounts in Settings → Accounts.',
+        })
+    }
+    expect(logins.seen).toEqual([])
+    expect(await h.get('accounts:add')!(app, input)).toMatchObject({ ok: true, account: { id: 'acc-1' } })
+    // Removing from anywhere else does nothing.
+    await h.get('accounts:remove')!(frame, 'acc-1')
+    expect(account.listAccounts()).toHaveLength(1)
+    await h.get('accounts:remove')!(app, 'acc-1')
+    expect(account.listAccounts()).toEqual([])
+    // Listing is never refused.
+    expect(h.get('accounts:list')!(other)).toEqual([])
   })
 })

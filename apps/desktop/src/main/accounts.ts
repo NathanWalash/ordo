@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { PROVIDERS, serversFor } from '@ordo/mail-core'
 import { testImapLogin } from '@ordo/mail-core/node'
 import {
@@ -34,6 +34,7 @@ import {
   removeAccount,
   syncSchedule,
 } from './mail'
+import { fromAppWindow } from './ipc-sender'
 
 /**
  * Settings → Accounts: add, test, rename, recolour, re-enter a password, remove. Every input from
@@ -197,14 +198,29 @@ export async function remove(input: unknown): Promise<void> {
   await removeAccount(id.data)
 }
 
+/** Refused: an account change that didn't come from Ordo's own page in its window. */
+const NOT_FROM_APP: AccountResult = {
+  ok: false,
+  error: 'invalid',
+  message: 'Change your accounts in Settings → Accounts.',
+}
+
 export function registerAccountsIpc(onRemoved?: (id: string) => void): void {
+  // Changes only from Ordo's own page in its window (the preload also wants a click or key press).
+  const own =
+    <T>(fn: (input: unknown) => T | Promise<T>, refusal: T) =>
+    (e: IpcMainInvokeEvent, input: unknown) =>
+      fromAppWindow(e) ? fn(input) : refusal
   ipcMain.handle(ACCOUNTS_IPC.list, () => list())
-  ipcMain.handle(ACCOUNTS_IPC.test, (_e, input: unknown) => test(input))
-  ipcMain.handle(ACCOUNTS_IPC.add, (_e, input: unknown) => add(input))
-  ipcMain.handle(ACCOUNTS_IPC.update, (_e, input: unknown) => update(input))
-  ipcMain.handle(ACCOUNTS_IPC.setPassword, (_e, input: unknown) => setPassword(input))
-  ipcMain.handle(ACCOUNTS_IPC.remove, async (_e, id: unknown) => {
-    await remove(id)
-    if (typeof id === 'string') onRemoved?.(id)
-  })
+  ipcMain.handle(ACCOUNTS_IPC.test, own(test, NOT_FROM_APP))
+  ipcMain.handle(ACCOUNTS_IPC.add, own(add, NOT_FROM_APP))
+  ipcMain.handle(ACCOUNTS_IPC.update, own(update, NOT_FROM_APP))
+  ipcMain.handle(ACCOUNTS_IPC.setPassword, own(setPassword, NOT_FROM_APP))
+  ipcMain.handle(
+    ACCOUNTS_IPC.remove,
+    own(async (id: unknown) => {
+      await remove(id)
+      if (typeof id === 'string') onRemoved?.(id)
+    }, undefined),
+  )
 }
