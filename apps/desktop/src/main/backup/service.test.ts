@@ -106,6 +106,31 @@ describe('setting up', () => {
     expect(JSON.parse(saved)).toMatchObject({ check: { logN: 17, r: 8, p: 1 } })
   })
 
+  it('changes the passphrase only with the current one, and writes nothing otherwise', async () => {
+    const file = join(env.profile, 'backup.json')
+    const before = readFileSync(file, 'utf8')
+    const next = { passphrase: 'another synthetic passphrase', remember: true }
+    expect(await backup.setPassphrase(next)).toEqual({
+      ok: false,
+      message: 'Enter your current passphrase to change it.',
+    })
+    expect(await backup.setPassphrase({ ...next, current: 'not the current one' })).toEqual({
+      ok: false,
+      message: 'That isn’t your current passphrase.',
+    })
+    expect(readFileSync(file, 'utf8')).toBe(before)
+
+    expect(await backup.setPassphrase({ ...next, current: PASS })).toMatchObject({ ok: true })
+    expect(readFileSync(file, 'utf8')).not.toBe(before)
+    // Back to PASS, which now needs the new one as the current passphrase.
+    expect(await backup.setPassphrase({ passphrase: PASS, remember: true, current: PASS })).toMatchObject({
+      ok: false,
+    })
+    expect(
+      await backup.setPassphrase({ passphrase: PASS, remember: true, current: next.passphrase }),
+    ).toMatchObject({ ok: true })
+  })
+
   it('validates settings changes', () => {
     expect(backup.update({ keep: 5 })).toMatchObject({ ok: false })
     expect(backup.update({ auto: 'yes' })).toMatchObject({ ok: false })

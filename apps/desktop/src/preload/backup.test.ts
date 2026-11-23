@@ -6,6 +6,7 @@ vi.mock('electron', () => ({ ipcRenderer: { invoke, on: vi.fn(), removeListener:
 const { backupApi } = await import('./backup')
 
 const real = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+/** Whether the window has just had a click or key press (`navigator.userActivation.isActive`). */
 function activation(isActive: boolean | undefined) {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -17,20 +18,44 @@ afterEach(() => {
   if (real) Object.defineProperty(globalThis, 'navigator', real)
 })
 
-describe('the backup preload', () => {
-  const input = { id: 'x', confirm: 'restore' as const }
+const confirm = { id: 'x', confirm: 'restore' as const }
+const newPassphrase = { passphrase: 'a new passphrase', remember: true, current: 'the old one' }
 
-  it('never passes on a restore without a click or key press in the window', async () => {
+/** Every call that changes something: name, call, and what should reach ipcRenderer.invoke. */
+const changes: [string, () => Promise<unknown>, unknown[]][] = [
+  ['restoreConfirm', () => backupApi.restoreConfirm(confirm), [BACKUP_IPC.restoreConfirm, confirm]],
+  [
+    'restoreOpen',
+    () => backupApi.restoreOpen({ passphrase: 'p' }),
+    [BACKUP_IPC.restoreOpen, { passphrase: 'p' }],
+  ],
+  ['restorePick', () => backupApi.restorePick(), [BACKUP_IPC.restorePick]],
+  ['setPassphrase', () => backupApi.setPassphrase(newPassphrase), [BACKUP_IPC.setPassphrase, newPassphrase]],
+  ['forgetPassphrase', () => backupApi.forgetPassphrase(), [BACKUP_IPC.forgetPassphrase]],
+  ['update', () => backupApi.update({ auto: false }), [BACKUP_IPC.update, { auto: false }]],
+  ['chooseFolder', () => backupApi.chooseFolder(), [BACKUP_IPC.chooseFolder]],
+  ['run', () => backupApi.run({}), [BACKUP_IPC.run, {}]],
+]
+
+describe('the backup preload', () => {
+  it.each(changes)('never passes on %s without a click or key press in the window', async (_name, call) => {
     for (const state of [false, undefined]) {
       activation(state)
-      expect(await backupApi.restoreConfirm(input)).toMatchObject({ ok: false })
+      expect(await call()).toMatchObject({ ok: false })
     }
     expect(invoke).not.toHaveBeenCalled()
   })
 
-  it('passes on a restore that follows a click', async () => {
+  it.each(changes)('passes on %s that follows a click', async (_name, call, expected) => {
     activation(true)
-    await backupApi.restoreConfirm(input)
-    expect(invoke).toHaveBeenCalledWith(BACKUP_IPC.restoreConfirm, input)
+    await call()
+    expect(invoke).toHaveBeenCalledWith(...expected)
+  })
+
+  it('always passes on reading the status and cancelling a restore', async () => {
+    activation(false)
+    await backupApi.status()
+    await backupApi.restoreCancel()
+    expect(invoke.mock.calls.map((c) => c[0])).toEqual([BACKUP_IPC.status, BACKUP_IPC.restoreCancel])
   })
 })

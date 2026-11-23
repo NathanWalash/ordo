@@ -30,6 +30,8 @@ export const SetBackupPassphraseSchema = z.strictObject({
     .max(MAX_PASSPHRASE_LENGTH),
   /** Keep it in this Mac's keychain (safeStorage), so automatic backups work after a restart. */
   remember: z.boolean(),
+  /** The passphrase being replaced. Required once one is set: changing it needs proof you know it. */
+  current: z.string().max(MAX_PASSPHRASE_LENGTH).optional(),
 })
 export type SetBackupPassphrase = z.infer<typeof SetBackupPassphraseSchema>
 
@@ -129,7 +131,10 @@ export interface BackupApi {
   /** Show a folder picker; resolves with the new status (unchanged if cancelled). */
   chooseFolder(): Promise<BackupActionResult>
   setPassphrase(input: SetBackupPassphrase): Promise<BackupActionResult>
-  /** Remove the passphrase from this Mac's keychain. Automatic backups then wait for it. */
+  /**
+   * Remove the passphrase from this Mac's keychain. Automatic backups then wait for it. This and
+   * every other call that changes something are only passed on after a click or key press.
+   */
   forgetPassphrase(): Promise<BackupActionResult>
   update(input: BackupUpdate): Promise<BackupActionResult>
   run(input?: BackupRun): Promise<BackupRunResult>

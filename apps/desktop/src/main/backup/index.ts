@@ -216,7 +216,15 @@ export async function chooseFolder(win: BrowserWindow | null): Promise<BackupAct
 export async function setPassphrase(raw: unknown): Promise<BackupActionResult> {
   const parsed = SetBackupPassphraseSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
-  const { passphrase, remember } = parsed.data
+  const { passphrase, remember, current } = parsed.data
+  // Replacing a passphrase needs the current one, so nothing (a script in the window, someone at
+  // an unlocked computer) can quietly switch future backups to a passphrase only they know.
+  const existing = readConfig().check
+  if (existing) {
+    if (!current) return { ok: false, message: 'Enter your current passphrase to change it.' }
+    if (!(await passphraseMatches(current, existing)))
+      return { ok: false, message: 'That isn’t your current passphrase.' }
+  }
   if (remember && !canRemember())
     return { ok: false, message: 'This computer can’t keep secrets securely, so Ordo can’t remember it.' }
   const check = await makePassphraseCheck(passphrase)
