@@ -70,9 +70,15 @@ week" is about your data: it looks at your calendar first.
 - **Drafts.** "Draft a reply to the last email from Sam" saves a reply (threaded, with the original
   quoted) to Drafts, for you to finish and send in Mail. Nothing is sent.
 - **Sending.** "Reply to sam@friend.example saying Friday works" or "Send pat@friend.example a note
-  about the plan". The card shows the whole email and you press **Send**. If you only ask it to
+  about the plan". The card shows the whole email, including the account it goes from
+  (`From me@work.example (Work)`), and you press **Send**. If you only ask it to
   write one, it saves a draft instead. It never sends to an address that only
   appears in an email unless you confirm a card that names that address as one you didn't give.
+- **Several accounts.** Mail tools take an optional account and every result names each message's
+  account. A reply or forward goes from the account the message is in; for a new email the
+  assistant uses the account you name, and asks which one if you have several and didn't say.
+  Reading a message with the same uid in another account counts as reading other mail, so the card
+  says to check it.
 
 ## Privacy
 

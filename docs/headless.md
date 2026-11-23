@@ -55,49 +55,49 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 
 ## Commands
 
-| Command                                                                       | What it does                                                     |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `status`                                                                      | Account email (never the password), last scan, AI, counts        |
-| `scan`                                                                        | Fetch new inbox headers into the cache (progress on stderr)      |
-| `senders [--category <c>] [--limit <n>]`                                      | Senders by email count. `other` means uncategorised              |
-| `cleanup plan --sender <address>... [--no-unsubscribe] [--no-trash]`          | Dry run: exactly what a clean-up would do. Changes nothing       |
-| `cleanup run --sender <address>... [--no-unsubscribe] [--no-trash] --confirm` | Unsubscribe and move the senders' emails to Trash \*             |
-| `history [--limit <n>]`                                                       | Past clean-ups, newest first                                     |
-| `undo <id> --confirm`                                                         | Move a clean-up's emails back from Trash \*                      |
-| `mail mailboxes`                                                              | Folders with message and unread counts                           |
-| `mail sync [--mailbox <path>]`                                                | Fetch new mail in one folder into the cache (default INBOX)      |
-| `mail list [--mailbox <path>] [--unread] [--limit <n>]`                       | Cached messages, newest first, with the uid to read              |
-| `mail search <words> [--mailbox <path>] [--server] [--limit <n>]`             | Search the cache (every folder), or the server (one folder)      |
-| `mail read <uid> [--mailbox <path>]`                                          | A message as plain text, headers and attachment names            |
-| `mail move <uid>... --to <where> [--mailbox <path>] --confirm`                | Move to archive, bin, junk, inbox or a folder \*                 |
-| `mail flag <uid>... [--unflag] [--mailbox <path>] --confirm`                  | Flag or unflag \*                                                |
-| `mail mark <uid>... --read\|--unread [--mailbox <path>] --confirm`            | Mark read or unread \*                                           |
-| `mail undo [<id>] --confirm`                                                  | Undo a move made in the same process (in practice, MCP) \*       |
-| `calendar sync`                                                               | Fetch changed iCloud, Google and linked calendars into the cache |
-| `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
-| `calendar list`                                                               | Calendars, where each comes from, and which can be changed       |
-| `calendar add --calendar <name> --title <t> --start <when> [...] --confirm`   | Add an event to a writable iCloud or Google calendar \*          |
-| `calendar edit --uid <uid> [--occurrence <id> \| --all] <fields> --confirm`   | Change an event, or one occurrence of a repeating one \*         |
-| `calendar delete --uid <uid> [--occurrence <id> \| --all] --confirm`          | Delete an event, or one occurrence of a repeating one \*         |
-| `money bills`                                                                 | Bills and subscriptions, and ones found to confirm in the app    |
-| `money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]`       | Imported transactions, newest first                              |
-| `money balances`                                                              | Who owes whom for shared bills                                   |
-| `money import <file.csv> [--account <name>] --confirm`                        | Import a bank statement CSV \*                                   |
-| `money sort --confirm`                                                        | Categorise merchants in Other and match bills to email (AI) \*   |
-| `money knows`                                                                 | What you've taught Ordo, and how each bank dates payments        |
-| `money questions`                                                             | Ordo's questions about your money, with answer ids               |
-| `money loose-ends`                                                            | Money you hold for others, and who still owes you                |
-| `money events`                                                                | Events and trips: paid out, paid back and net                    |
-| `money compare [--category <c>] [--account <name>]`                           | This month so far against last month to the same day             |
-| `money answer <question-id> --answer <id> --confirm`                          | Answer one of Ordo's questions; saves what it means \*           |
-| `money forget <fact-id> --confirm`                                            | Forget something Ordo learned \*                                 |
-| `boards list`                                                                 | Boards, with card and overdue counts                             |
-| `boards cards [--board <b>] [--column <c>] [--label <l>]...`                  | Cards in column order. Also `--archived` and `--limit <n>`       |
-| `boards add-card --board <b> --title <t> [options] --confirm`                 | Add a card; options below \*                                     |
-| `boards move-card <card> [--column <c>] [--position <n>] --confirm`           | Move a card; position 1 is the top \*                            |
-| `ai status`                                                                   | Model providers and the saved choice                             |
-| `ai sort --confirm`                                                           | Sort the senders in Other with the model chosen in Settings \*   |
-| `help`, `--help`, `-h`                                                        | The command list                                                 |
+| Command                                                                                       | What it does                                                                                        |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `status`                                                                                      | Accounts (names and emails, never a password), last scan, AI, counts                                |
+| `scan`                                                                                        | Fetch new inbox headers into the cache, every account (progress on stderr)                          |
+| `senders [--category <c>] [--limit <n>]`                                                      | Senders by email count. `other` means uncategorised                                                 |
+| `cleanup plan --sender <address>... [--no-unsubscribe] [--no-trash] [--account <a>]`          | Dry run: exactly what a clean-up would do. Changes nothing                                          |
+| `cleanup run --sender <address>... [--no-unsubscribe] [--no-trash] [--account <a>] --confirm` | Unsubscribe and move the senders' emails to Trash, in every account with mail from them (or one) \* |
+| `history [--limit <n>]`                                                                       | Past clean-ups, newest first                                                                        |
+| `undo <id> --confirm`                                                                         | Move a clean-up's emails back from Trash \*                                                         |
+| `mail mailboxes [--account <a>]`                                                              | Each account's folders with message and unread counts                                               |
+| `mail sync [--mailbox <path>] [--account <a>]`                                                | Fetch new mail into the cache (default: every account's inbox)                                      |
+| `mail list [--mailbox <path>] [--account <a>] [--unread] [--limit <n>]`                       | Cached messages, newest first, with the uid to read (default: every inbox together)                 |
+| `mail search <words> [--mailbox <path>] [--account <a>] [--server] [--limit <n>]`             | Search the cache (every folder of every account), or one account's server                           |
+| `mail read <uid> [--mailbox <path>] [--account <a>]`                                          | A message as plain text, headers and attachment names                                               |
+| `mail move <uid>... --to <where> [--mailbox <path>] [--account <a>] --confirm`                | Move to archive, bin, junk, inbox or a folder \*                                                    |
+| `mail flag <uid>... [--unflag] [--mailbox <path>] [--account <a>] --confirm`                  | Flag or unflag \*                                                                                   |
+| `mail mark <uid>... --read\|--unread [--mailbox <path>] [--account <a>] --confirm`            | Mark read or unread \*                                                                              |
+| `mail undo [<id>] --confirm`                                                                  | Undo a move made in the same process (in practice, MCP) \*                                          |
+| `calendar sync`                                                                               | Fetch changed iCloud, Google and linked calendars into the cache                                    |
+| `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`                             | Cached events, both days included, at most 400 days                                                 |
+| `calendar list`                                                                               | Calendars, where each comes from, and which can be changed                                          |
+| `calendar add --calendar <name> --title <t> --start <when> [...] --confirm`                   | Add an event to a writable iCloud or Google calendar \*                                             |
+| `calendar edit --uid <uid> [--occurrence <id> \| --all] <fields> --confirm`                   | Change an event, or one occurrence of a repeating one \*                                            |
+| `calendar delete --uid <uid> [--occurrence <id> \| --all] --confirm`                          | Delete an event, or one occurrence of a repeating one \*                                            |
+| `money bills`                                                                                 | Bills and subscriptions, and ones found to confirm in the app                                       |
+| `money transactions [--month YYYY-MM] [--account <name>] [--limit <n>]`                       | Imported transactions, newest first                                                                 |
+| `money balances`                                                                              | Who owes whom for shared bills                                                                      |
+| `money import <file.csv> [--account <name>] --confirm`                                        | Import a bank statement CSV \*                                                                      |
+| `money sort --confirm`                                                                        | Categorise merchants in Other and match bills to email (AI) \*                                      |
+| `money knows`                                                                                 | What you've taught Ordo, and how each bank dates payments                                           |
+| `money questions`                                                                             | Ordo's questions about your money, with answer ids                                                  |
+| `money loose-ends`                                                                            | Money you hold for others, and who still owes you                                                   |
+| `money events`                                                                                | Events and trips: paid out, paid back and net                                                       |
+| `money compare [--category <c>] [--account <name>]`                                           | This month so far against last month to the same day                                                |
+| `money answer <question-id> --answer <id> --confirm`                                          | Answer one of Ordo's questions; saves what it means \*                                              |
+| `money forget <fact-id> --confirm`                                                            | Forget something Ordo learned \*                                                                    |
+| `boards list`                                                                                 | Boards, with card and overdue counts                                                                |
+| `boards cards [--board <b>] [--column <c>] [--label <l>]...`                                  | Cards in column order. Also `--archived` and `--limit <n>`                                          |
+| `boards add-card --board <b> --title <t> [options] --confirm`                                 | Add a card; options below \*                                                                        |
+| `boards move-card <card> [--column <c>] [--position <n>] --confirm`                           | Move a card; position 1 is the top \*                                                               |
+| `ai status`                                                                                   | Model providers and the saved choice                                                                |
+| `ai sort --confirm`                                                                           | Sort the senders in Other with the model chosen in Settings \*                                      |
+| `help`, `--help`, `-h`                                                                        | The command list                                                                                    |
 
 \* Changes something: needs `--allow-changes` as well as `--confirm`.
 
@@ -116,16 +116,25 @@ turned into text, with link addresses after their text (`Read more <https://…>
 control characters and bidi overrides removed. `mail sync` refreshes the cache like `scan` (it takes
 the write lock but changes nothing on the server); for the inbox it is the same scan.
 
+### Several accounts
+
+`--account` names an account by its name, address or id, as `status` lists them (case doesn't
+matter; a name two accounts share is refused, so use the address). Without it, `mail list` and
+`mail sync` cover every account's inbox, `mail search` every account's cache, and the other mail
+commands the first account. Every message row says whose it is (`account`, the name, and
+`accountId`), because a uid is only unique within one account's folder: pass `--account` back when
+you read or change a message. MCP tools take the same as an optional `account` argument.
+
 ### Changing mail
 
 `mail move`, `mail flag`, `mail mark` and `mail undo` change messages through the same functions as
 the window, so they take the write lock and every check applies.
 
 - **Which messages:** uids from `mail list` or `mail search`, all in one `--mailbox` (default
-  INBOX), at most 20 at a time. Only messages already in Ordo's cache can be changed (run
+  INBOX) of one `--account` (default the first), at most 20 at a time. Only messages already in Ordo's cache can be changed (run
   `mail sync` first); any other uid fails with `not_found` and nothing changes.
-- **Where to:** `--to archive`, `bin` (or `trash`), `junk` (or `spam`), `inbox`, or one of the
-  folders `mail mailboxes` lists, by path or by name. A folder the server didn't list fails with
+- **Where to:** `--to archive` (All Mail on Gmail), `bin` (or `trash`), `junk` (or `spam`), `inbox`,
+  or one of the account's folders `mail mailboxes` lists, by path or by name. A folder the server didn't list fails with
   `not_found`; Drafts is refused. Nothing is ever deleted.
 - **Undo:** undo is kept in memory, so it only works within one MCP session (`ordo_mail_undo` undoes
   the last move that session made). A one-off `mail move` can't be undone by a later command: move
@@ -141,7 +150,7 @@ pnpm ordo -- mail mark 9071 --read --allow-changes --confirm
 ```jsonc
 // mail move --json (flag gives { mailbox, uids, flagged }, mark { mailbox, uids, read },
 // undo { undoId, restored })
-{ "mailbox": "INBOX", "to": "Archive", "moved": 2, "undoId": 3 }
+{ "account": "iCloud", "mailbox": "INBOX", "to": "Archive", "moved": 2, "undoId": 3 }
 ```
 
 `money import` accepts a regular `.csv` file under 5 MB (symlinks are resolved first), then reads

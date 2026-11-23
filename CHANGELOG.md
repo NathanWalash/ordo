@@ -6,6 +6,23 @@ All notable changes to Ordo are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Several mail accounts.** Add your personal iCloud, a work Gmail, another Gmail, Yahoo, Fastmail
+  or any IMAP server in **Settings → Accounts**, each with a name and colour; rename, recolour, test,
+  enter a password again or remove them there. Mail opens on **All Inboxes** with each message's
+  account shown, and each account's folders below. Each account is checked on its own connection:
+  one that fails says so and backs off without holding up the others. Replies always go from the
+  account the message arrived in; new messages and forwards have a **From** picker. Unclutter shows
+  every account's senders, or one account's, and History says which account each clean-up was in.
+  Gmail works with an app password (it needs 2-Step Verification, and Workspace admins may block
+  it); its All Mail, Bin, Spam and labels are found by their SPECIAL-USE flags, and Archive moves to
+  All Mail. Outlook.com isn't supported yet (Microsoft turned off password IMAP). Headless commands,
+  MCP tools and the assistant take an optional account, results name each message's account, and the
+  send card shows which account it sends from. See [docs/mail.md](docs/mail.md#accounts).
+- Your existing iCloud account moves into the accounts list by itself, with all its downloaded mail,
+  folders and clean-up history.
+
 ### Fixed
 
 - The message list kept loading past the first few hundred messages only when you scrolled again: a page that finished loading with the list already at the bottom stopped it there. It now carries on until everything in the folder is shown.

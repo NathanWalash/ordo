@@ -37,7 +37,9 @@ IMAP_TEST_PORT=3143 pnpm test:e2e
 pnpm imap:stop
 ```
 
-The test server accepts `test@ordo.test` with the password `abcd-efgh-ijkl-mnop`.
+The test server accepts `test@ordo.test` with the password `abcd-efgh-ijkl-mnop`, and a second
+account, `work@work.ordo.test` with `qrst-uvwx-yzab-cdef`, which the integration tests lay out like
+Gmail to test several accounts at once.
 `pnpm imap:start` opens IMAP on port 3143 and SMTP on 3025 (used to test unsubscribe emails).
 The clean-up end-to-end test also runs a local http endpoint for one-click unsubscribe; the
 unpackaged app accepts `http://127.0.0.1` there only because the test sets
