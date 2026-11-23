@@ -70,7 +70,7 @@ import {
   compareVersions,
   isOrdoBackupName,
 } from './policy'
-import { accountEmail, applyRestore, snapshotProfile } from './snapshot'
+import { RESTORE_MARKER, accountEmail, applyRestore, recoverRestore, snapshotProfile } from './snapshot'
 
 const profile = () => app.getPath('userData')
 const configFile = () => join(profile(), 'backup.json')
@@ -100,6 +100,7 @@ const DEFAULTS = {
   remembered: null,
   last: null,
   lastSuccessAt: null,
+  notice: null,
 }
 
 const ConfigSchema = z
@@ -113,6 +114,8 @@ const ConfigSchema = z
     remembered: z.string().nullable().catch(null),
     last: LastSchema.nullable().catch(null),
     lastSuccessAt: z.string().nullable().catch(null),
+    /** Something to tell you about a restore, shown in Settings until dismissed. */
+    notice: z.string().nullable().catch(null),
   })
   .catch(() => ({ ...DEFAULTS }))
 type Config = z.infer<typeof ConfigSchema>
@@ -166,6 +169,7 @@ export function status(): BackupStatus {
     running: running !== null,
     last: c.last,
     lastSuccessAt: c.lastSuccessAt,
+    notice: c.notice,
   }
 }
 
@@ -233,6 +237,11 @@ export async function setPassphrase(raw: unknown): Promise<BackupActionResult> {
   const remembered = remember ? safeStorage.encryptString(passphrase).toString('base64') : null
   sessionPassphrase = passphrase
   writeConfig({ check, remembered })
+  return ok()
+}
+
+export function dismissNotice(): BackupActionResult {
+  writeConfig({ notice: null })
   return ok()
 }
 
@@ -552,6 +561,11 @@ export async function restoreConfirm(raw: unknown): Promise<RestoreConfirmResult
   }
   pending = null
   picked = null
+  const made = new Date(manifest.createdAt).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+  writeConfig({ notice: `Restored the backup from ${made}. Your data from before is in ${asideDir}.` })
   console.info(`Restored a backup; the previous data is in ${asideDir}`)
   app.relaunch()
   app.exit(0)
@@ -561,6 +575,30 @@ export async function restoreConfirm(raw: unknown): Promise<RestoreConfirmResult
 // ---------------------------------------------------------------------------------------------
 // Wiring
 
+/**
+ * A restore that was cut short (Ordo crashed or the computer lost power part way through moving
+ * files): finish it or put everything back, before any database is opened, and say what happened.
+ * Returns the message, or null when there was nothing to do.
+ */
+export function recoverInterruptedRestore(): string | null {
+  let message: string | null
+  try {
+    const r = recoverRestore(profile())
+    if (!r) return null
+    message =
+      r.outcome === 'finished'
+        ? `Ordo finished restoring a backup it was restoring when it last closed. Your data from before is in ${r.aside}.`
+        : r.outcome === 'rolled-back'
+          ? 'A restore was interrupted when Ordo last closed, so Ordo put your data back as it was before. Nothing was lost; you can restore again.'
+          : `Ordo found an unfinished restore it couldn’t read, so it left your files as they are. If something looks wrong, check the before-restore folders in ${profile()}.`
+  } catch (err) {
+    message = `Ordo couldn’t finish putting back an interrupted restore (${err instanceof Error ? err.message : String(err)}). Your data from before is in a before-restore folder in ${profile()}.`
+  }
+  console.warn(message)
+  writeConfig({ notice: message })
+  return message
+}
+
 /** Leftovers from a backup or restore that was cut short. */
 function tidy(): void {
   try {
@@ -569,18 +607,23 @@ function tidy(): void {
   } catch {
     // No profile yet.
   }
-  if (existsSync(stagingDir())) rmSync(stagingDir(), { recursive: true, force: true })
+  // While a restore marker is left (recovery failed), staging may hold files it still needs.
+  if (existsSync(stagingDir()) && !existsSync(join(profile(), RESTORE_MARKER)))
+    rmSync(stagingDir(), { recursive: true, force: true })
 }
 
 let quitBackupDone = false
 
 /** Register the IPC handlers, the daily schedule and the backup on quit. Windowed app only. */
 export function registerBackup(): void {
+  // Before anything can open a database.
+  const recovered = recoverInterruptedRestore()
   const win = (e: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebContents(e.sender)
   ipcMain.handle(BACKUP_IPC.status, () => status())
   ipcMain.handle(BACKUP_IPC.chooseFolder, (e) => chooseFolder(win(e)))
   ipcMain.handle(BACKUP_IPC.setPassphrase, (_e, input: unknown) => setPassphrase(input))
   ipcMain.handle(BACKUP_IPC.forgetPassphrase, () => forgetPassphrase())
+  ipcMain.handle(BACKUP_IPC.dismissNotice, () => dismissNotice())
   ipcMain.handle(BACKUP_IPC.update, (_e, input: unknown) => update(input))
   ipcMain.handle(BACKUP_IPC.run, (_e, input: unknown) => run(input))
   ipcMain.handle(BACKUP_IPC.restorePick, (e) => restorePick(win(e)))
@@ -590,6 +633,8 @@ export function registerBackup(): void {
 
   void app.whenReady().then(() => {
     tidy()
+    if (recovered)
+      void dialog.showMessageBox({ type: 'info', message: 'About your last restore', detail: recovered })
     // A couple of minutes after opening, then every half hour: back up once a day.
     setTimeout(() => void tick(), 2 * 60 * 1000).unref()
     setInterval(() => void tick(), 30 * 60 * 1000).unref()

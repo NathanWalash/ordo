@@ -32,6 +32,7 @@ const changes: [string, () => Promise<unknown>, unknown[]][] = [
   ['restorePick', () => backupApi.restorePick(), [BACKUP_IPC.restorePick]],
   ['setPassphrase', () => backupApi.setPassphrase(newPassphrase), [BACKUP_IPC.setPassphrase, newPassphrase]],
   ['forgetPassphrase', () => backupApi.forgetPassphrase(), [BACKUP_IPC.forgetPassphrase]],
+  ['dismissNotice', () => backupApi.dismissNotice(), [BACKUP_IPC.dismissNotice]],
   ['update', () => backupApi.update({ auto: false }), [BACKUP_IPC.update, { auto: false }]],
   ['chooseFolder', () => backupApi.chooseFolder(), [BACKUP_IPC.chooseFolder]],
   ['run', () => backupApi.run({}), [BACKUP_IPC.run, {}]],

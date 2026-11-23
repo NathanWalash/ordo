@@ -116,6 +116,15 @@ and relaunches. All the file moves happen in one synchronous step, and if any fa
 undone. **The `before-restore` folder is never deleted**; to go back, quit Ordo and move its files
 back.
 
+Before moving anything Ordo writes `restore-in-progress.json` in its data folder, listing the
+before-restore and staging folders and every file it's about to move, and removes it when done. If
+Ordo crashes or the computer loses power part way, the next launch sees it before any database is
+opened: if every move had happened it finishes the restore; otherwise it puts the restored copies
+back in staging and your current data back from the before-restore folder, exactly as before the
+restore (the backup file is untouched, so you can restore again). Either way a message says what
+happened, also shown in Settings → Backup until dismissed. A marker Ordo can't read is renamed
+`.unreadable` and nothing is moved. A headless run doesn't do this check; open the app first.
+
 A module that isn't in the backup (say Boards, if you hadn't used it then) is moved aside too, so
 you get exactly the backup. Your account stays only if the backup's mail is for the same email;
 otherwise `account.json` is moved aside as well and you connect again. This computer's backup

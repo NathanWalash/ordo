@@ -80,6 +80,15 @@ export function BackupSettings() {
 
   return (
     <Section title="Backup">
+      {status.notice && (
+        <Row
+          label="Restore"
+          detail={<span role="status">{status.notice}</span>}
+          control={
+            <Button onClick={() => void window.ordo.backup.dismissNotice().then(apply)}>Dismiss</Button>
+          }
+        />
+      )}
       <Row
         label="Backup folder"
         detail={

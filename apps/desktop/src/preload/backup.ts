@@ -22,6 +22,8 @@ export const backupApi: BackupApi = {
     userActed() ? ipcRenderer.invoke(BACKUP_IPC.setPassphrase, input) : Promise.resolve(refused),
   forgetPassphrase: () =>
     userActed() ? ipcRenderer.invoke(BACKUP_IPC.forgetPassphrase) : Promise.resolve(refused),
+  dismissNotice: () =>
+    userActed() ? ipcRenderer.invoke(BACKUP_IPC.dismissNotice) : Promise.resolve(refused),
   update: (input) => (userActed() ? ipcRenderer.invoke(BACKUP_IPC.update, input) : Promise.resolve(refused)),
   run: (input) =>
     userActed()

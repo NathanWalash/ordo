@@ -6,6 +6,7 @@ export const BACKUP_IPC = {
   chooseFolder: 'backup:choose-folder',
   setPassphrase: 'backup:set-passphrase',
   forgetPassphrase: 'backup:forget-passphrase',
+  dismissNotice: 'backup:dismiss-notice',
   update: 'backup:update',
   run: 'backup:run',
   restorePick: 'backup:restore-pick',
@@ -87,6 +88,8 @@ export interface BackupStatus {
   last: BackupLast | null
   /** The last successful backup, for "Last backed up". */
   lastSuccessAt: string | null
+  /** What happened with a restore (done, or interrupted and put right), until dismissed. */
+  notice: string | null
 }
 
 export type BackupRunResult =
@@ -147,6 +150,8 @@ export interface BackupApi {
    */
   forgetPassphrase(): Promise<BackupActionResult>
   update(input: BackupUpdate): Promise<BackupActionResult>
+  /** Hide the restore notice. */
+  dismissNotice(): Promise<BackupActionResult>
   run(input?: BackupRun): Promise<BackupRunResult>
   /** Show a file picker for a backup to restore. */
   restorePick(): Promise<RestorePickResult>

@@ -330,6 +330,43 @@ describe('hardening', () => {
     expect(existsSync(join(env.profile, 'restore-staging'))).toBe(false)
   })
 
+  it('says a restore happened until you dismiss it', async () => {
+    expect(backup.status().notice).toMatch(
+      /^Restored the backup from .+ Your data from before is in .+before-restore-/,
+    )
+    expect(backup.dismissNotice()).toMatchObject({ ok: true, status: { notice: null } })
+  })
+
+  it('at launch, puts back a restore that was cut short, and says so', () => {
+    expect(backup.recoverInterruptedRestore()).toBeNull()
+    // As left by a crash after settings.json was moved aside, before the restored one went in.
+    const settings = join(env.profile, 'settings.json')
+    const current = readFileSync(settings, 'utf8')
+    mkdirSync(join(env.profile, 'before-restore-crash'))
+    renameSync(settings, join(env.profile, 'before-restore-crash', 'settings.json'))
+    mkdirSync(join(env.profile, 'restore-staging'))
+    writeFileSync(join(env.profile, 'restore-staging', 'settings.json'), '{"theme":"light"}')
+    writeFileSync(
+      join(env.profile, 'restore-in-progress.json'),
+      JSON.stringify({
+        version: 1,
+        startedAt: new Date().toISOString(),
+        aside: 'before-restore-crash',
+        staging: 'restore-staging',
+        moving: ['settings.json'],
+        restoring: ['settings.json'],
+      }),
+    )
+
+    const message = backup.recoverInterruptedRestore()
+    expect(message).toMatch(/^A restore was interrupted .+ put your data back as it was before/)
+    expect(readFileSync(settings, 'utf8')).toBe(current)
+    expect(existsSync(join(env.profile, 'restore-in-progress.json'))).toBe(false)
+    expect(existsSync(join(env.profile, 'restore-staging'))).toBe(false)
+    expect(backup.status().notice).toBe(message)
+    backup.dismissNotice()
+  })
+
   it('records a backup as made even if tidying old ones fails', async () => {
     const { shell } = await import('electron')
     backup.update({ keep: 3 })

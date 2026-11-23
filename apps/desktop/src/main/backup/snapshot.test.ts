@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openBackup, writeBackup, type Manifest } from './format'
-import { accountEmail, applyRestore, snapshotProfile } from './snapshot'
+import { RESTORE_MARKER, accountEmail, applyRestore, recoverRestore, snapshotProfile } from './snapshot'
 
 const FAST = { logN: 10, r: 8, p: 1 }
 const PASS = 'a long synthetic test passphrase'
@@ -146,7 +146,7 @@ describe('applyRestore', () => {
     writeFileSync(join(profile, 'backup.json'), 'this mac’s backup settings')
   }
   function staged(names: string[]) {
-    const staging = join(dir, 'staging')
+    const staging = join(profile, 'restore-staging')
     mkdirSync(staging)
     for (const n of names) writeFileSync(join(staging, n), `restored ${n}`)
     return staging
@@ -255,5 +255,116 @@ describe('applyRestore', () => {
         keepAccount: true,
       }),
     ).toThrow(/already exists/)
+  })
+
+  it('writes a marker before moving anything, and removes it when done or fully undone', () => {
+    current()
+    const marker = join(profile, RESTORE_MARKER)
+    const seen: boolean[] = []
+    const rename = (from: string, to: string) => {
+      seen.push(existsSync(marker))
+      renameSync(from, to)
+    }
+    const asideDir = join(profile, 'before-restore-x')
+    applyRestore({
+      profileDir: profile,
+      stagingDir: staged(['mail.sqlite']),
+      asideDir,
+      manifest: manifestOf(['mail.sqlite']),
+      keepAccount: true,
+      rename,
+    })
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.every(Boolean)).toBe(true)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  /**
+   * Run a restore that "crashes" at the nth rename: that rename and every one after it fail, as
+   * if the process had died, so nothing is undone and the marker is left behind.
+   */
+  function crashAt(n: number) {
+    current()
+    const stagingDir = staged(['mail.sqlite', 'settings.json'])
+    const asideDir = join(profile, 'before-restore-x')
+    let calls = 0
+    const rename = (from: string, to: string) => {
+      if (++calls >= n) throw new Error('process died')
+      renameSync(from, to)
+    }
+    expect(() =>
+      applyRestore({
+        profileDir: profile,
+        stagingDir,
+        asideDir,
+        manifest: manifestOf(['mail.sqlite', 'settings.json']),
+        keepAccount: true,
+        rename,
+      }),
+    ).toThrow(/process died/)
+    expect(existsSync(join(profile, RESTORE_MARKER))).toBe(true)
+    return { stagingDir, asideDir }
+  }
+
+  const expectAsBefore = () => {
+    expect(readFileSync(join(profile, 'mail.sqlite'), 'utf8')).toBe('old mail')
+    expect(readFileSync(join(profile, 'mail.sqlite-wal'), 'utf8')).toBe('old wal')
+    expect(readFileSync(join(profile, 'mail.sqlite-shm'), 'utf8')).toBe('old shm')
+    expect(readFileSync(join(profile, 'calendar.sqlite'), 'utf8')).toBe('old calendar')
+    expect(readFileSync(join(profile, 'settings.json'), 'utf8')).toBe('old settings')
+    expect(readFileSync(join(profile, 'account.json'), 'utf8')).toBe('this mac’s account')
+    expect(existsSync(join(profile, RESTORE_MARKER))).toBe(false)
+  }
+
+  // Renames 1-5 move the current files aside; 6 and 7 move the restored ones in.
+  it.each([
+    ['while moving the current data aside', 3],
+    ['before any restored file went in', 6],
+    ['with some restored files in', 7],
+  ])('after a crash %s, the next launch puts everything back', (_when, n) => {
+    const { stagingDir, asideDir } = crashAt(n)
+    expect(recoverRestore(profile)).toEqual({ outcome: 'rolled-back', aside: asideDir })
+    expectAsBefore()
+    // The restored copies are dropped (the backup file still has them), and the empty folder too.
+    expect(existsSync(stagingDir)).toBe(false)
+    expect(existsSync(asideDir)).toBe(false)
+  })
+
+  it('after a crash with every file moved, the next launch finishes the restore', () => {
+    current()
+    const marker = join(profile, RESTORE_MARKER)
+    let saved = ''
+    const rename = (from: string, to: string) => {
+      saved ||= readFileSync(marker, 'utf8')
+      renameSync(from, to)
+    }
+    const stagingDir = staged(['mail.sqlite', 'settings.json'])
+    const asideDir = join(profile, 'before-restore-x')
+    applyRestore({
+      profileDir: profile,
+      stagingDir,
+      asideDir,
+      manifest: manifestOf(['mail.sqlite', 'settings.json']),
+      keepAccount: true,
+      rename,
+    })
+    // As if it died just before removing the marker (and the staging folder).
+    writeFileSync(marker, saved)
+    mkdirSync(stagingDir)
+    expect(recoverRestore(profile)).toEqual({ outcome: 'finished', aside: asideDir })
+    expect(readFileSync(join(profile, 'mail.sqlite'), 'utf8')).toBe('restored mail.sqlite')
+    expect(readFileSync(join(asideDir, 'mail.sqlite'), 'utf8')).toBe('old mail')
+    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(stagingDir)).toBe(false)
+  })
+
+  it('does nothing without a marker, and moves nothing for one it can’t read', () => {
+    current()
+    expect(recoverRestore(profile)).toBeNull()
+    writeFileSync(join(profile, RESTORE_MARKER), '{"version":1,"aside":"../../elsewhere"}')
+    expect(recoverRestore(profile)).toEqual({ outcome: 'unreadable' })
+    expect(existsSync(join(profile, RESTORE_MARKER))).toBe(false)
+    expect(existsSync(join(profile, `${RESTORE_MARKER}.unreadable`))).toBe(true)
+    expect(readFileSync(join(profile, 'mail.sqlite'), 'utf8')).toBe('old mail')
   })
 })
