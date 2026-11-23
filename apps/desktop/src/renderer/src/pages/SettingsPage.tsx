@@ -3,6 +3,7 @@ import { Monitor, Moon, Sun } from 'lucide-react'
 import type { AccountStatus, AiSettings as Ai, Settings, Theme } from '@ordo/shared'
 import { Button } from '../components/Button'
 import { AiSettings } from '../components/AiSettings'
+import { BackupSettings } from '../components/BackupSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { UpdateSettings } from '../components/UpdateSettings'
 import { Row, Section } from '../components/SettingsSection'
@@ -90,6 +91,7 @@ export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
       </Section>
       {settings && <AiSettings ai={settings.ai} onSave={setAi} />}
       <UpdateSettings />
+      <BackupSettings />
     </div>
   )
 }
