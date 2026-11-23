@@ -17,6 +17,7 @@ import { routeFromHash, TITLES, type Route } from './routes'
 import { useAppearanceClasses } from './appearance'
 import { AssistantPanel, COMPOSER_ID, PANEL_ID } from './components/assistant/AssistantPanel'
 import { useAssistant } from './components/assistant/useAssistant'
+import { UpdateNotice } from './components/UpdateNotice'
 
 export function App() {
   const [route, setRouteState] = useState<Route>(() => routeFromHash(window.location.hash))
@@ -195,6 +196,7 @@ export function App() {
             onOpenSettings={() => setRoute('settings')}
           />
         )}
+        <UpdateNotice />
         {connecting && (
           <ConnectSheet
             onClose={() => setConnecting(false)}

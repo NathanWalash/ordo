@@ -5,6 +5,7 @@ import type { AiApi } from './ai'
 import type { CleanupApi } from './cleanup'
 import type { MailApi } from './mail'
 import type { AssistantApi } from './assistant'
+import type { UpdatesApi } from './updates'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 
 export * from './calendar'
@@ -66,6 +67,7 @@ export * from './ai'
 export * from './cleanup'
 export * from './mail'
 export * from './assistant'
+export * from './updates'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -103,6 +105,7 @@ export interface OrdoApi {
   cleanup: CleanupApi
   mail: MailApi
   assistant: AssistantApi
+  updates: UpdatesApi
 }
 
 export const IPC = {
