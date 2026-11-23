@@ -83,8 +83,11 @@ export interface ChangePreview {
  */
 export interface EmailPreview {
   from: string
-  /** The name of the account it's sent (or saved) from, as Settings → Accounts shows it. */
-  fromAccount: string
+  /**
+   * The name of the account it's sent (or saved) from, as Settings → Accounts shows it. Only with
+   * more than one account: with one, the card looks as it always did.
+   */
+  fromAccount?: string
   /** Full addresses only: a display name can pose as someone else. */
   to: string[]
   cc: string[]
@@ -1042,7 +1045,7 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     compose,
     email: {
       from: account.email,
-      fromAccount: account.label,
+      ...(accounts.length > 1 && { fromAccount: account.label }),
       to: recipients.to,
       cc: recipients.cc,
       subject,

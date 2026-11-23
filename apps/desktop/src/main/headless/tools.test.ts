@@ -491,7 +491,6 @@ describe('mail change tools', () => {
     expect(p.title).toBe('Save a draft of “Re: Lunch?” to sam.lists@friend.example')
     expect(p.email).toMatchObject({
       from: 'me@icloud.example',
-      fromAccount: 'iCloud',
       to: ['sam.lists@friend.example'],
       cc: [],
       subject: 'Re: Lunch?',
@@ -515,6 +514,8 @@ describe('mail change tools', () => {
       },
       recipients: [{ address: 'sam.lists@friend.example', source: 'reply-to' }],
     })
+    // One account: the card names no account, exactly as before several accounts.
+    expect(p.email).not.toHaveProperty('fromAccount')
     expect(p.notes).toEqual([DRAFT_NOTE])
     // A reply goes to the sender: the model can't pick its To.
     const redirected = await previewTool(services, t('ordo_mail_draft'), {

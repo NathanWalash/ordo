@@ -396,7 +396,7 @@ const cardEmail = (e: EmailPreview, typed: Set<string>): CardEmail => {
   })
   return {
     from: clean(e.from, 254),
-    fromAccount: clean(e.fromAccount, 40),
+    ...(e.fromAccount && { fromAccount: clean(e.fromAccount, 40) }),
     to: e.to.map(who),
     cc: e.cc.map(who),
     subject: clean(e.subject, 300),

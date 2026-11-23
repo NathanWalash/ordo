@@ -1098,7 +1098,6 @@ describe('mail: acting on email, drafting and sending', () => {
         notes: [],
         email: {
           from: 'me@icloud.example',
-          fromAccount: 'iCloud',
           to: ['pat@friend.example'],
           cc: [],
           subject: 'Hi',
