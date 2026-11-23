@@ -266,7 +266,13 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
       : table(
           d.calendars.map((c: any) => [
             clean(c.name, 40),
-            c.source === 'icloud' ? 'iCloud' : c.source === 'link' ? 'link' : 'file',
+            c.source === 'icloud'
+              ? 'iCloud'
+              : c.source === 'google'
+                ? `Google${c.account ? ` (${clean(c.account, 40)})` : ''}`
+                : c.source === 'link'
+                  ? 'link'
+                  : 'file',
             c.readOnly ? 'read-only' : 'writable',
             c.visible ? '' : 'hidden',
           ]),

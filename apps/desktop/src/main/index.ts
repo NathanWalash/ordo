@@ -12,7 +12,7 @@ import {
 } from 'electron'
 import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
-import { clearCalendar, closeCalendar, registerCalendarIpc } from './calendar'
+import { clearCalendar, closeCalendar, registerCalendarIpc, startCalendarPolling } from './calendar'
 import { registerCleanupIpc } from './cleanup'
 import { closeMailClient, registerMailIpc } from './mail-client'
 import { hasMica, setupAppearance } from './appearance'
@@ -196,6 +196,8 @@ function startApp(): void {
     registerAssistantIpc()
     app.on('before-quit', stopAssistant)
     createWindow()
+    // Google calendars stay near live while the app is open (it polls; see calendar.ts).
+    startCalendarPolling()
     void tidyBoards()
     scheduleUpdateChecks()
     app.on('activate', () => {

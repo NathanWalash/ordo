@@ -26,15 +26,24 @@ export type {
 /** A calendar in the sidebar list, with the user's choice of whether to show it. */
 export interface CalendarListItem extends CalendarInfo {
   visible: boolean
+  /** For a Google calendar: the account it's in. */
+  account?: string
+  /** For a Google calendar: when it last synced (ISO), and why the last try failed, if it did. */
+  syncedAt?: string
+  syncError?: string
 }
 
 /**
  * Calendar uses the same iCloud account as Mail: connected means an account is saved.
  * `subscriptions` counts calendars added by link or file, which work without iCloud.
  */
-export type CalendarStatus = { lastSync: string | null; syncing: boolean; subscriptions: number } & (
-  { connected: false } | { connected: true; email: string }
-)
+export type CalendarStatus = {
+  lastSync: string | null
+  syncing: boolean
+  subscriptions: number
+  /** Google accounts connected for Calendar. */
+  google?: number
+} & ({ connected: false } | { connected: true; email: string })
 
 /** `busy`: already syncing in this process; `locked`: another Ordo process is writing. */
 export type CalendarSyncError = 'auth' | 'network' | 'busy' | 'locked' | 'unknown'
@@ -163,6 +172,8 @@ export interface CalendarApi {
   sync(options?: { force?: boolean }): Promise<CalendarSyncOutcome>
   /** Subscribe to sync progress; returns an unsubscribe function. */
   onSyncProgress(listener: (p: CalendarSyncProgress) => void): () => void
+  /** Calendars changed in the background (a Google sync); returns an unsubscribe function. */
+  onChanged(listener: () => void): () => void
   calendars(): Promise<CalendarListItem[]>
   /** Cached occurrences overlapping the range, from visible calendars only. */
   events(range: DateRange): Promise<CalendarEvent[]>
@@ -171,11 +182,11 @@ export interface CalendarApi {
   addLink(input: AddCalendarLinkInput): Promise<AddCalendarOutcome>
   /** Pick an .ics file and add it as a calendar; null if the picker was cancelled. */
   importFile(): Promise<AddCalendarOutcome | null>
-  /** Remove a calendar added by link or file. iCloud calendars can't be removed here. */
+  /** Remove a calendar added by link or file. iCloud and Google calendars can't be removed here. */
   remove(calendarId: string): Promise<{ ok: true } | { ok: false; message: string }>
   /** An event's details for the editor, or null if it isn't cached (or its calendar is read-only). */
   details(ref: EventRef): Promise<EventDetails | null>
-  /** Add an event to a writable iCloud calendar. */
+  /** Add an event to a writable iCloud or Google calendar. */
   createEvent(input: CreateEventInput): Promise<CalendarChangeOutcome>
   /** Change an event: one occurrence (`this`) or all of a repeating event. */
   updateEvent(input: UpdateEventInput): Promise<CalendarChangeOutcome>
@@ -187,6 +198,7 @@ export const CALENDAR_IPC = {
   calendarStatus: 'calendar:status',
   calendarSync: 'calendar:sync',
   calendarSyncProgress: 'calendar:sync-progress',
+  calendarChanged: 'calendar:changed',
   calendarList: 'calendar:list',
   calendarEvents: 'calendar:events',
   calendarSetVisible: 'calendar:set-visible',
