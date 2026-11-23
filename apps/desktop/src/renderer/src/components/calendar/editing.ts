@@ -20,8 +20,37 @@ import {
 } from '@ordo/calendar-core'
 import type { CalendarListItem } from '@ordo/shared'
 
-/** Calendars new events can go in: iCloud ones that aren't read-only. */
-export const writable = (c: CalendarListItem) => (c.source ?? 'icloud') === 'icloud' && !c.readOnly
+/** Calendars new events can go in: iCloud and Google ones that aren't read-only. */
+export const writable = (c: CalendarListItem) =>
+  ((c.source ?? 'icloud') === 'icloud' || c.source === 'google') && !c.readOnly
+
+/** What deleting an event on this calendar does, for the confirmation. */
+export function deleteNote(c: CalendarListItem | undefined): string {
+  return c?.source === 'google'
+    ? `This deletes it from Google Calendar${c.account ? ` (${c.account})` : ''}, everywhere that calendar shows. You can’t undo this.`
+    : 'This deletes it from iCloud and all your devices. You can’t undo this.'
+}
+
+/**
+ * Calendars grouped by account, in list order: iCloud, each Google account (labelled with its
+ * email), then the rest. With only one group, it has no label.
+ */
+export function calendarGroups(
+  calendars: CalendarListItem[],
+): { label: string; calendars: CalendarListItem[] }[] {
+  const groups = new Map<string, CalendarListItem[]>()
+  for (const c of calendars) {
+    const label =
+      c.source === 'google'
+        ? (c.account ?? 'Google')
+        : (c.source ?? 'icloud') === 'icloud'
+          ? 'iCloud'
+          : 'Other calendars'
+    groups.set(label, [...(groups.get(label) ?? []), c])
+  }
+  const list = [...groups].map(([label, cs]) => ({ label, calendars: cs }))
+  return list.length === 1 ? [{ label: '', calendars: list[0]!.calendars }] : list
+}
 
 /** Why an event on this calendar can't be changed, and where it can be, or null if it can. */
 export function readOnlyReason(c: CalendarListItem | undefined): string | null {

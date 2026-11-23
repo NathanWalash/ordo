@@ -4,6 +4,7 @@ import type { AccountStatus, AiSettings as Ai, Settings, Theme } from '@ordo/sha
 import { Button } from '../components/Button'
 import { AiSettings } from '../components/AiSettings'
 import { BackupSettings } from '../components/BackupSettings'
+import { GoogleSettings } from '../components/GoogleSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { UpdateSettings } from '../components/UpdateSettings'
 import { Row, Section } from '../components/SettingsSection'
@@ -67,6 +68,7 @@ export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
           )}
         </Section>
       )}
+      <GoogleSettings />
       <Section title="Appearance">
         <Row
           label="Theme"

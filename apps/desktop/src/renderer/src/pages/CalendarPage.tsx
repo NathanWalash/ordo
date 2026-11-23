@@ -30,6 +30,7 @@ import { loadOverlays, OVERLAY_SOURCES } from '../components/calendar/overlays'
 import { CreateCardSheet } from '../components/boards/CreateCardSheet'
 import { useToast } from '../components/boards/UndoToast'
 import { useEventEditing } from '../components/calendar/useEventEditing'
+import { writable } from '../components/calendar/editing'
 import { SAMPLE_CALENDARS, sampleEvents } from './calendarSample'
 
 interface Props {
@@ -38,20 +39,24 @@ interface Props {
 }
 
 /**
- * Calendar shows the iCloud account connected for Mail and any calendars added by link or
- * file. With neither, it previews sample data.
+ * Calendar shows the iCloud account connected for Mail, connected Google accounts and any
+ * calendars added by link or file. With none of them, it previews sample data.
  */
 export function CalendarPage({ account, onConnect }: Props) {
   const [subscriptions, setSubscriptions] = useState<number | null>(null)
   const [adding, setAdding] = useState(false)
   const [changes, setChanges] = useState(0)
 
+  // Calendars that work without iCloud: links, files and Google accounts.
   const recount = useCallback(async () => {
-    setSubscriptions((await window.ordo.calendar.status()).subscriptions)
+    const s = await window.ordo.calendar.status()
+    setSubscriptions(s.subscriptions + (s.google ?? 0))
   }, [])
   useEffect(() => {
     let live = true
-    void window.ordo.calendar.status().then((s) => live && setSubscriptions(s.subscriptions))
+    void window.ordo.calendar
+      .status()
+      .then((s) => live && setSubscriptions(s.subscriptions + (s.google ?? 0)))
     return () => {
       live = false
     }
@@ -101,7 +106,8 @@ function SampleCalendar({ onConnect, onAdd }: { onConnect: () => void; onAdd: ()
       reloadKey={0}
       banner={
         <div className="flex items-center justify-between gap-3 rounded-md bg-hover px-3 py-2 text-ink-2">
-          Sample data. Connect your iCloud account or add a calendar by link to see your own.
+          Sample data. Connect your iCloud account, connect a Google account in Settings, or add a calendar by
+          link to see your own.
           <span className="flex shrink-0 gap-2">
             <Button onClick={onAdd}>Add calendar…</Button>
             <Button variant="primary" onClick={onConnect}>
@@ -135,13 +141,35 @@ function LiveCalendar({
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [removing, setRemoving] = useState<CalendarListItem | null>(null)
+  const [reauth, setReauth] = useState<{ id: string; email: string }[]>([])
 
   const refresh = useCallback(async () => {
-    const [c, s] = await Promise.all([window.ordo.calendar.calendars(), window.ordo.calendar.status()])
+    const [c, s, g] = await Promise.all([
+      window.ordo.calendar.calendars(),
+      window.ordo.calendar.status(),
+      window.ordo.google.status(),
+    ])
     setCalendars(c)
     setStatus(s)
+    setReauth(g.accounts.filter((a) => a.needsReauth))
     setReloadKey((k) => k + 1)
   }, [])
+
+  // Google calendars sync in the background: show what changed.
+  useEffect(() => window.ordo.calendar.onChanged(() => void refresh()), [refresh])
+  useEffect(() => {
+    let live = true
+    void window.ordo.google.status().then((g) => live && setReauth(g.accounts.filter((a) => a.needsReauth)))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const signInAgain = async (id: string) => {
+    const r = await window.ordo.google.connect({ accountId: id })
+    if (!r.ok && r.error !== 'cancelled') setError(r.message)
+    await refresh()
+  }
 
   const sync = useCallback(
     async (force = false) => {
@@ -201,14 +229,32 @@ function LiveCalendar({
     <>
       <CalendarBrowser
         listTitle="iCloud"
-        editable={icloud}
+        editable={calendars.some(writable)}
         calendars={calendars}
         onToggle={(id, visible) => void toggle(id, visible)}
         onAdd={onAdd}
         onRemove={setRemoving}
         loadEvents={loadLive}
         reloadKey={reloadKey}
-        banner={error && <div className="rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
+        banner={
+          (error || reauth.length > 0) && (
+            <div className="flex flex-col gap-2">
+              {reauth.map((a) => (
+                <div
+                  key={a.id}
+                  role="alert"
+                  className="flex items-center justify-between gap-3 rounded-md bg-warn-tint px-3 py-2 text-ink"
+                >
+                  <span>Google needs you to sign in to {a.email} again before its calendars can update.</span>
+                  <Button variant="primary" onClick={() => void signInAgain(a.id)}>
+                    Sign in again
+                  </Button>
+                </div>
+              ))}
+              {error && <div className="rounded-md bg-hover px-3 py-2 text-danger">{error}</div>}
+            </div>
+          )
+        }
         actions={
           <button
             type="button"
@@ -255,7 +301,7 @@ function failedMessage(failed: { name: string; message: string }[]): string {
     return failed[0]!.message.startsWith(failed[0]!.name)
       ? failed[0]!.message
       : `Couldn’t update ${failed[0]!.name}. ${failed[0]!.message}`
-  return `Couldn’t update ${failed.map((f) => f.name).join(', ')}. Check their links still work.`
+  return `Couldn’t update ${failed.map((f) => f.name).join(', ')}. ${failed[0]!.message}`
 }
 
 function RemoveSheet({

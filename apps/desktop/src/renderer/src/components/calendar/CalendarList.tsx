@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Plus, X } from 'lucide-react'
+import { AlertCircle, Plus, X } from 'lucide-react'
 import type { CalendarListItem } from '@ordo/shared'
 import type { CalendarOverlaySource } from './overlays'
 
@@ -17,23 +17,46 @@ interface Props {
 
 const added = (c: CalendarListItem) => c.source === 'link' || c.source === 'file'
 
+/** Google calendars by account, in list order. */
+function byAccount(calendars: CalendarListItem[]): [string, CalendarListItem[]][] {
+  const groups = new Map<string, CalendarListItem[]>()
+  for (const c of calendars)
+    if (c.source === 'google')
+      groups.set(c.account ?? 'Google', [...(groups.get(c.account ?? 'Google') ?? []), c])
+  return [...groups]
+}
+
 /** The list of calendars with colour checkboxes, like the macOS Calendar sidebar. */
 export function CalendarList({ title, calendars, onToggle, overlaySources, onAdd, onRemove, footer }: Props) {
-  const own = calendars.filter((c) => !added(c))
+  const own = calendars.filter((c) => !added(c) && c.source !== 'google')
+  const google = byAccount(calendars)
   const others = calendars.filter(added)
   return (
     <aside className="flex w-[196px] shrink-0 flex-col border-r border-sep" aria-label="Calendars">
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {(own.length > 0 || others.length === 0) && (
+        {(own.length > 0 || (others.length === 0 && google.length === 0)) && (
           <>
             <h2 className="px-1 pb-1 text-[11px] font-semibold text-ink-3">{title}</h2>
             {own.length === 0 && <p className="px-1 py-1 text-[12px] text-ink-3">No calendars yet</p>}
             <Calendars calendars={own} onToggle={onToggle} />
           </>
         )}
+        {google.map(([account, list], i) => (
+          <div key={account}>
+            <h2
+              className={`truncate px-1 pb-1 text-[11px] font-semibold text-ink-3 ${own.length || i ? 'mt-4' : ''}`}
+              title={account}
+            >
+              {account}
+            </h2>
+            <Calendars calendars={list} onToggle={onToggle} />
+          </div>
+        ))}
         {others.length > 0 && (
           <>
-            <h2 className={`px-1 pb-1 text-[11px] font-semibold text-ink-3 ${own.length ? 'mt-4' : ''}`}>
+            <h2
+              className={`px-1 pb-1 text-[11px] font-semibold text-ink-3 ${own.length || google.length ? 'mt-4' : ''}`}
+            >
               Other calendars
             </h2>
             <Calendars calendars={others} onToggle={onToggle} onRemove={onRemove} />
@@ -94,6 +117,16 @@ function Calendars({
               {c.name}
             </span>
           </label>
+          {c.syncError && (
+            <span
+              role="img"
+              aria-label={`${c.name} didn’t update: ${c.syncError}`}
+              title={c.syncError}
+              className="mr-1 flex shrink-0 text-warn"
+            >
+              <AlertCircle size={12} />
+            </span>
+          )}
           {onRemove && (
             <button
               type="button"
