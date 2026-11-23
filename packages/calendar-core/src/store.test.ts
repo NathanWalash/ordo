@@ -26,8 +26,24 @@ afterEach(() => store.close())
 describe('CalendarStore', () => {
   it('lists calendars in provider order, visible by default', () => {
     expect(store.calendars()).toEqual([
-      { id: 'home', name: 'Home', color: '#007aff', readOnly: false, visible: true, source: 'icloud' },
-      { id: 'work', name: 'Work', color: '#ff9500', readOnly: true, visible: true, source: 'icloud' },
+      {
+        id: 'home',
+        name: 'Home',
+        color: '#007aff',
+        readOnly: false,
+        visible: true,
+        source: 'icloud',
+        provider: 'icloud',
+      },
+      {
+        id: 'work',
+        name: 'Work',
+        color: '#ff9500',
+        readOnly: true,
+        visible: true,
+        source: 'icloud',
+        provider: 'icloud',
+      },
     ])
   })
 
@@ -40,7 +56,15 @@ describe('CalendarStore', () => {
     )
     store.setCalendars([{ ...HOME, name: 'Personal' }])
     expect(store.calendars()).toEqual([
-      { id: 'home', name: 'Personal', color: '#007aff', readOnly: false, visible: false, source: 'icloud' },
+      {
+        id: 'home',
+        name: 'Personal',
+        color: '#007aff',
+        readOnly: false,
+        visible: false,
+        source: 'icloud',
+        provider: 'icloud',
+      },
     ])
     expect(store.count()).toBe(0)
   })

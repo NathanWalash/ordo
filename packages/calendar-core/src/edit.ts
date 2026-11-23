@@ -4,8 +4,9 @@
 // Ordo last saw, and on a conflict refreshes the calendar and says so instead of overwriting.
 import { CalendarWriteError } from './caldav'
 import { checkDraft, type EventDraft } from './draft'
+import { READ_ONLY_PROP } from './google-map'
 import { parseIcs } from './ics'
-import { ICLOUD, type CalendarStore } from './store'
+import { GOOGLE_PREFIX, ICLOUD, type CalendarStore } from './store'
 import type { CalendarResource, DateRange, WritableCalendarProvider } from './types'
 import {
   createEventIcs,
@@ -57,32 +58,67 @@ const CONFLICT =
   'This event was changed somewhere else, so Ordo didn’t save your change. It now shows the latest version: make your change again if you still need it.'
 const GONE = 'This event was deleted somewhere else.'
 
+const isGoogle = (provider: string | undefined) => !!provider?.startsWith(GOOGLE_PREFIX)
+
+/** Where the user can make a change Ordo won't: Google Calendar, or Apple's Calendar. */
+function elsewhere(store: CalendarStore, calendarId: string): string {
+  return isGoogle(store.calendar(calendarId)?.provider)
+    ? 'in Google Calendar'
+    : 'in Calendar on your Mac or iPhone'
+}
+
 /** Why a calendar can't be written to, or null if it can. */
 function refusal(store: CalendarStore, calendarId: string): EventChangeError | null {
   const cal = store.calendar(calendarId)
   if (!cal)
     return new EventChangeError('not-found', 'That calendar isn’t in Ordo any more. Sync and try again.')
-  if (cal.provider !== ICLOUD || cal.source === 'link' || cal.source === 'file')
+  if ((cal.provider !== ICLOUD && !isGoogle(cal.provider)) || cal.source === 'link' || cal.source === 'file')
     return new EventChangeError(
       'read-only',
       `“${cal.name}” was added by ${cal.source === 'file' ? 'file' : 'link'}, so it’s read-only in Ordo.`,
     )
   if (cal.readOnly)
-    return new EventChangeError('read-only', `“${cal.name}” is read-only, so its events can’t be changed.`)
+    return new EventChangeError(
+      'read-only',
+      isGoogle(cal.provider)
+        ? `“${cal.name}” is shared with you to see, not to change, so its events can’t be changed.`
+        : `“${cal.name}” is read-only, so its events can’t be changed.`,
+    )
   return null
 }
 
-/** Why Ordo won't change this particular event (someone else's invitation, a zone it can't read). */
-function invitation(facts: EventFacts, me: string | undefined): EventChangeError | null {
+const SPECIAL_KINDS: Record<string, string> = {
+  outOfOffice: 'an out-of-office',
+  focusTime: 'a focus time',
+  birthday: 'a birthday',
+  fromGmail: 'a Gmail',
+}
+
+/**
+ * Why Ordo won't change this particular event: someone else's invitation, a zone it can't read, or
+ * one of Google Calendar's own kinds of event (out of office, focus time, birthdays).
+ */
+function invitation(
+  facts: EventFacts,
+  me: string | undefined,
+  where: string,
+  ics: string,
+): EventChangeError | null {
   if (facts.unknownZone)
     return new EventChangeError(
       'read-only',
       `This event uses a time zone Ordo doesn’t know (“${facts.unknownZone.slice(0, 60)}”), so Ordo won’t change it. Change it in the app that made it.`,
     )
+  const special = new RegExp(`^${READ_ONLY_PROP}:(\\w+)`, 'im').exec(ics)?.[1]
+  if (special)
+    return new EventChangeError(
+      'read-only',
+      `This is ${SPECIAL_KINDS[special] ?? 'a special'} event, so change it ${where}.`,
+    )
   if (!facts.organizer || !me || facts.organizer.toLowerCase() === me.toLowerCase()) return null
   return new EventChangeError(
     'invitation',
-    `This is an invitation from ${facts.organizer}. Change it in Calendar on your Mac or iPhone, so they hear about it.`,
+    `This is an invitation from ${facts.organizer}. Change it ${where}, so they hear about it.`,
   )
 }
 
@@ -100,7 +136,8 @@ export function eventDetails(store: CalendarStore, ref: CalendarEventRef, me?: s
   } catch {
     return null
   }
-  const blocked = refusal(store, ref.calendarId) ?? invitation(facts, me)
+  const blocked =
+    refusal(store, ref.calendarId) ?? invitation(facts, me, elsewhere(store, ref.calendarId), res.ics)
   return {
     ...facts,
     calendarId: ref.calendarId,
@@ -219,7 +256,7 @@ async function guarded<T>(
     if (err.kind === 'forbidden')
       throw new EventChangeError(
         'read-only',
-        'iCloud didn’t allow that change. The calendar may be read-only.',
+        `${isGoogle(store.calendar(calendarId)?.provider) ? 'Google Calendar' : 'iCloud'} didn’t allow that change. The calendar may be read-only.`,
       )
     throw err
   }
@@ -267,7 +304,7 @@ export async function updateEvent(
   checked(draft)
   await guarded(provider, store, ref.calendarId, window, async () => {
     const res = await loadResource(provider, store, ref, window)
-    const refused = invitation(readEvent(res.ics, ref), me)
+    const refused = invitation(readEvent(res.ics, ref), me, elsewhere(store, ref.calendarId), res.ics)
     if (refused) throw refused
     await save(provider, store, ref, res, updateEventIcs(res.ics, ref, draft, scope, { now }), window)
   })
@@ -285,7 +322,7 @@ export async function deleteEvent(
   if (blocked) throw blocked
   await guarded(provider, store, ref.calendarId, window, async () => {
     const res = await loadResource(provider, store, ref, window)
-    const refused = invitation(readEvent(res.ics, ref), me)
+    const refused = invitation(readEvent(res.ics, ref), me, elsewhere(store, ref.calendarId), res.ics)
     if (refused) throw refused
     try {
       await save(provider, store, ref, res, deleteFromIcs(res.ics, ref, scope, { now }), window)

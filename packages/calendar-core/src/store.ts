@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { overlaps } from './time'
 import type { FeedKind } from './feeds'
+import type { GoogleEvent } from './google-map'
 import type {
   CalendarEvent,
   CalendarInfo,
@@ -13,6 +14,12 @@ import type {
 /** A cached calendar, with the user's choice of whether to show it. */
 export interface StoredCalendar extends CalendarInfo {
   visible: boolean
+  /** Which provider owns it: `icloud`, `feeds`, or `google:<account id>`. */
+  provider?: string
+  /** When it was last fetched without an error (Google calendars), ms since 1970. */
+  syncedAt?: number
+  /** Why the last fetch failed, if it did (Google calendars). */
+  syncError?: string
 }
 
 /**
@@ -39,8 +46,12 @@ export interface CalendarSyncState {
 type CalendarRow = {
   id: string
   source: string
+  provider: string
   name: string
   color: string | null
+  custom_color: string | null
+  synced_at: number | null
+  sync_error: string | null
   read_only: number
   visible: number
   version: string | null
@@ -105,6 +116,20 @@ CREATE TABLE IF NOT EXISTS resources (
   PRIMARY KEY (calendar_id, href)
 );
 CREATE INDEX IF NOT EXISTS resources_uid ON resources (calendar_id, uid);
+CREATE TABLE IF NOT EXISTS google_items (
+  calendar_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  master_id TEXT,
+  json TEXT NOT NULL,
+  PRIMARY KEY (calendar_id, id)
+);
+CREATE INDEX IF NOT EXISTS google_items_master ON google_items (calendar_id, master_id);
+CREATE TABLE IF NOT EXISTS calendar_state (
+  calendar_id TEXT PRIMARY KEY,
+  sync_token TEXT,
+  synced_at INTEGER,
+  error TEXT
+);
 `
 
 /**
@@ -116,6 +141,15 @@ const SCHEMA_VERSION = '2'
 /** Calendars from the iCloud account; subscribed links and files belong to FEEDS. */
 export const ICLOUD = 'icloud'
 export const FEEDS = 'feeds'
+/** Google accounts' calendars belong to `google:<account id>`. */
+export const GOOGLE_PREFIX = 'google:'
+
+/** iCloud first, then Google accounts, then links and files; each in the provider's own order. */
+const ORDER = `CASE WHEN c.provider = '${ICLOUD}' THEN 0 WHEN c.provider = '${FEEDS}' THEN 2 ELSE 1 END, c.provider, c.position`
+const SOURCE = `CASE WHEN f.kind IS NOT NULL THEN f.kind WHEN c.provider LIKE '${GOOGLE_PREFIX}%' THEN 'google' ELSE '${ICLOUD}' END`
+const SELECT_CALENDARS =
+  `SELECT c.*, ${SOURCE} AS source, s.synced_at, s.error AS sync_error FROM calendars c ` +
+  'LEFT JOIN feeds f ON f.id = c.id LEFT JOIN calendar_state s ON s.calendar_id = c.id'
 
 const DAY_MS = 86_400_000
 
@@ -142,6 +176,8 @@ export class CalendarStore {
     const cols = this.db.prepare('PRAGMA table_info(calendars)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'provider'))
       this.db.exec(`ALTER TABLE calendars ADD COLUMN provider TEXT NOT NULL DEFAULT '${ICLOUD}'`)
+    if (!cols.some((c) => c.name === 'custom_color'))
+      this.db.exec('ALTER TABLE calendars ADD COLUMN custom_color TEXT')
     if (this.meta('schema') !== SCHEMA_VERSION) {
       // Calendars cached before resources were kept: make the next sync fetch them again, and
       // forget when the last sync was so the app syncs as soon as it opens.
@@ -153,40 +189,14 @@ export class CalendarStore {
 
   /** One calendar, with which provider owns it. */
   calendar(id: string): (StoredCalendar & { provider: string }) | null {
-    const r = this.db
-      .prepare(
-        `SELECT c.*, COALESCE(f.kind, '${ICLOUD}') AS source FROM calendars c ` +
-          'LEFT JOIN feeds f ON f.id = c.id WHERE c.id = ?',
-      )
-      .get(id) as (CalendarRow & { provider: string }) | undefined
-    if (!r) return null
-    return {
-      id: r.id,
-      name: r.name,
-      color: r.color ?? undefined,
-      readOnly: r.read_only === 1,
-      visible: r.visible === 1,
-      source: r.source as CalendarSource,
-      provider: r.provider,
-    }
+    const r = this.db.prepare(`${SELECT_CALENDARS} WHERE c.id = ?`).get(id) as CalendarRow | undefined
+    return r ? { ...toStored(r), provider: r.provider } : null
   }
 
-  /** iCloud calendars first, then subscriptions in the order they were added. */
+  /** iCloud calendars first, then Google accounts', then subscriptions in the order they were added. */
   calendars(): StoredCalendar[] {
-    const rows = this.db
-      .prepare(
-        `SELECT c.*, COALESCE(f.kind, '${ICLOUD}') AS source FROM calendars c ` +
-          `LEFT JOIN feeds f ON f.id = c.id ORDER BY c.provider = '${FEEDS}', c.position`,
-      )
-      .all() as CalendarRow[]
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      color: r.color ?? undefined,
-      readOnly: r.read_only === 1,
-      visible: r.visible === 1,
-      source: r.source as CalendarSource,
-    }))
+    const rows = this.db.prepare(`${SELECT_CALENDARS} ORDER BY ${ORDER}`).all() as CalendarRow[]
+    return rows.map(toStored)
   }
 
   /**
@@ -196,7 +206,7 @@ export class CalendarStore {
    */
   setCalendars(list: RemoteCalendar[], provider: string = ICLOUD): void {
     const upsert = this.db.prepare(
-      'INSERT INTO calendars (id, name, color, read_only, position, provider) VALUES (?, ?, ?, ?, ?, ?) ' +
+      'INSERT INTO calendars (id, name, color, read_only, position, provider, visible) VALUES (?, ?, ?, ?, ?, ?, ?) ' +
         'ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, ' +
         'read_only = excluded.read_only, position = excluded.position, provider = excluded.provider',
     )
@@ -205,7 +215,17 @@ export class CalendarStore {
       this.db.prepare('SELECT id FROM calendars WHERE provider = ?').all(provider) as { id: string }[]
     ).filter((c) => !ids.has(c.id))
     this.transaction(() => {
-      list.forEach((c, i) => upsert.run(c.id, c.name, c.color ?? null, c.readOnly ? 1 : 0, i, provider))
+      list.forEach((c, i) =>
+        upsert.run(
+          c.id,
+          c.name,
+          c.color ?? null,
+          c.readOnly ? 1 : 0,
+          i,
+          provider,
+          c.visible === false ? 0 : 1,
+        ),
+      )
       for (const c of gone) this.dropCalendar(c.id)
     })
   }
@@ -273,11 +293,18 @@ export class CalendarStore {
   private dropCalendar(id: string): void {
     this.db.prepare('DELETE FROM events WHERE calendar_id = ?').run(id)
     this.db.prepare('DELETE FROM resources WHERE calendar_id = ?').run(id)
+    this.db.prepare('DELETE FROM google_items WHERE calendar_id = ?').run(id)
+    this.db.prepare('DELETE FROM calendar_state WHERE calendar_id = ?').run(id)
     this.db.prepare('DELETE FROM calendars WHERE id = ?').run(id)
   }
 
   setVisible(calendarId: string, visible: boolean): void {
     this.db.prepare('UPDATE calendars SET visible = ? WHERE id = ?').run(visible ? 1 : 0, calendarId)
+  }
+
+  /** Show a calendar in a colour of the user's choosing (`#rrggbb`), or its own again with null. */
+  setColor(calendarId: string, color: string | null): void {
+    this.db.prepare('UPDATE calendars SET custom_color = ? WHERE id = ?').run(color, calendarId)
   }
 
   syncState(calendarId: string): CalendarSyncState | null {
@@ -318,10 +345,18 @@ export class CalendarStore {
       .prepare(
         'SELECT c.id FROM calendars c WHERE EXISTS (SELECT 1 FROM events e WHERE e.calendar_id = c.id AND e.uid = ?) ' +
           'OR EXISTS (SELECT 1 FROM resources r WHERE r.calendar_id = c.id AND r.uid = ?) ' +
-          `ORDER BY c.provider = '${FEEDS}', c.position`,
+          `ORDER BY ${ORDER}`,
       )
       .all(uid, uid) as { id: string }[]
     return rows.map((r) => r.id)
+  }
+
+  /** The cached resource at `href`, if any. */
+  resourceAt(calendarId: string, href: string): CalendarResource | null {
+    const r = this.db
+      .prepare('SELECT href, uid, etag, ics FROM resources WHERE calendar_id = ? AND href = ?')
+      .get(calendarId, href) as { href: string; uid: string; etag: string | null; ics: string } | undefined
+    return r ? { href: r.href, uid: r.uid, etag: r.etag ?? undefined, ics: r.ics } : null
   }
 
   /** The cached CalDAV resources holding event `uid` (normally one). */
@@ -403,6 +438,92 @@ export class CalendarStore {
       .sort((a, b) => a.start.getTime() - b.start.getTime())
   }
 
+  // ---- Google Calendar: the events as the API sent them, and where incremental sync is up to ----
+
+  /** Every Google event cached for a calendar (series masters, exceptions and single events). */
+  googleItems(calendarId: string): GoogleEvent[] {
+    const rows = this.db.prepare('SELECT json FROM google_items WHERE calendar_id = ?').all(calendarId) as {
+      json: string
+    }[]
+    return rows.map((r) => JSON.parse(r.json) as GoogleEvent)
+  }
+
+  /** One series as cached: its master (if Ordo can see it) and its exceptions. */
+  googleGroup(calendarId: string, masterId: string): { master?: GoogleEvent; exceptions: GoogleEvent[] } {
+    const rows = this.db
+      .prepare('SELECT json FROM google_items WHERE calendar_id = ? AND (id = ? OR master_id = ?)')
+      .all(calendarId, masterId, masterId) as { json: string }[]
+    const items = rows.map((r) => JSON.parse(r.json) as GoogleEvent)
+    return {
+      master: items.find((e) => e.id === masterId && !e.recurringEventId),
+      exceptions: items.filter((e) => e.recurringEventId === masterId),
+    }
+  }
+
+  /**
+   * Apply events from the API. `full`: they're everything (a full sync), so forget the rest.
+   * A cancelled series or single event is forgotten with its exceptions; a cancelled exception is
+   * kept, as it hides that occurrence.
+   */
+  applyGoogleItems(calendarId: string, items: GoogleEvent[], full = false): void {
+    const upsert = this.db.prepare(
+      'INSERT OR REPLACE INTO google_items (calendar_id, id, master_id, json) VALUES (?, ?, ?, ?)',
+    )
+    const drop = this.db.prepare(
+      'DELETE FROM google_items WHERE calendar_id = ? AND (id = ? OR master_id = ?)',
+    )
+    this.transaction(() => {
+      if (full) this.db.prepare('DELETE FROM google_items WHERE calendar_id = ?').run(calendarId)
+      for (const e of items) {
+        if (e.status === 'cancelled' && !e.recurringEventId) drop.run(calendarId, e.id, e.id)
+        else upsert.run(calendarId, e.id, e.recurringEventId ?? null, JSON.stringify(e))
+      }
+    })
+  }
+
+  /** Forget some cached Google events (and, for a series, its exceptions). */
+  dropGoogleItems(calendarId: string, ids: string[]): void {
+    const drop = this.db.prepare(
+      'DELETE FROM google_items WHERE calendar_id = ? AND (id = ? OR master_id = ?)',
+    )
+    this.transaction(() => ids.forEach((id) => drop.run(calendarId, id, id)))
+  }
+
+  /** The `nextSyncToken` from the last sync of a Google calendar, or null to sync it in full. */
+  syncToken(calendarId: string): string | null {
+    const r = this.db
+      .prepare('SELECT sync_token FROM calendar_state WHERE calendar_id = ?')
+      .get(calendarId) as { sync_token: string | null } | undefined
+    return r?.sync_token ?? null
+  }
+
+  setSyncToken(calendarId: string, token: string | null): void {
+    this.db
+      .prepare(
+        'INSERT INTO calendar_state (calendar_id, sync_token) VALUES (?, ?) ' +
+          'ON CONFLICT(calendar_id) DO UPDATE SET sync_token = excluded.sync_token',
+      )
+      .run(calendarId, token)
+  }
+
+  /** Record how a calendar's last sync went: when it succeeded, or why it failed (keeping the last success). */
+  setSyncOutcome(calendarId: string, outcome: { at: Date } | { error: string }): void {
+    if ('at' in outcome)
+      this.db
+        .prepare(
+          'INSERT INTO calendar_state (calendar_id, synced_at, error) VALUES (?, ?, NULL) ' +
+            'ON CONFLICT(calendar_id) DO UPDATE SET synced_at = excluded.synced_at, error = NULL',
+        )
+        .run(calendarId, outcome.at.getTime())
+    else
+      this.db
+        .prepare(
+          'INSERT INTO calendar_state (calendar_id, error) VALUES (?, ?) ' +
+            'ON CONFLICT(calendar_id) DO UPDATE SET error = excluded.error',
+        )
+        .run(calendarId, outcome.error.slice(0, 500))
+  }
+
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n
   }
@@ -426,7 +547,8 @@ export class CalendarStore {
   /** Forget everything: every calendar, event, subscription and note. */
   clear(): void {
     this.db.exec(
-      'DELETE FROM events; DELETE FROM resources; DELETE FROM calendars; DELETE FROM meta; DELETE FROM feeds;',
+      'DELETE FROM events; DELETE FROM resources; DELETE FROM calendars; DELETE FROM meta; DELETE FROM feeds; ' +
+        'DELETE FROM google_items; DELETE FROM calendar_state;',
     )
     this.setMeta('schema', SCHEMA_VERSION)
   }
@@ -444,5 +566,19 @@ export class CalendarStore {
       this.db.exec('ROLLBACK')
       throw e
     }
+  }
+}
+
+function toStored(r: CalendarRow): StoredCalendar {
+  return {
+    id: r.id,
+    name: r.name,
+    color: r.custom_color ?? r.color ?? undefined,
+    readOnly: r.read_only === 1,
+    visible: r.visible === 1,
+    source: r.source as CalendarSource,
+    provider: r.provider,
+    ...(r.synced_at !== null && r.synced_at !== undefined && { syncedAt: r.synced_at }),
+    ...(r.sync_error && { syncError: r.sync_error }),
   }
 }
