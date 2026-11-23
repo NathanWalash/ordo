@@ -383,3 +383,44 @@ describe('hardening', () => {
     backup.update({ keep: 7 })
   })
 })
+
+describe('IPC handlers', () => {
+  it('run changes only for Ordo’s own page in its window', async () => {
+    const { ipcMain } = await import('electron')
+    const { BACKUP_IPC } = await import('@ordo/shared')
+    backup.registerBackup()
+    const handler = (channel: string) =>
+      vi.mocked(ipcMain.handle).mock.calls.find(([c]) => c === channel)![1] as (
+        e: unknown,
+        input?: unknown,
+      ) => unknown
+    const from = (url: string, parent: unknown = null) => ({ senderFrame: { url, parent }, sender: {} })
+    const app = 'file:///Applications/Ordo.app/Contents/Resources/app.asar/out/renderer/index.html'
+    const evil = from('https://evil.example/')
+    const refused = { ok: false, message: 'Ordo only accepts this from its own window.' }
+
+    const update = handler(BACKUP_IPC.update)
+    for (const event of [evil, from(app, {}), from('about:srcdoc'), { senderFrame: null, sender: {} }])
+      expect(await update(event, { auto: false })).toEqual(refused)
+    expect(backup.status().auto).toBe(true)
+    for (const channel of [
+      BACKUP_IPC.setPassphrase,
+      BACKUP_IPC.forgetPassphrase,
+      BACKUP_IPC.dismissNotice,
+      BACKUP_IPC.chooseFolder,
+      BACKUP_IPC.restoreConfirm,
+    ])
+      expect(await handler(channel)(evil, {})).toEqual(refused)
+    expect(await handler(BACKUP_IPC.run)(evil, {})).toMatchObject({ ok: false, error: 'invalid' })
+    expect(await handler(BACKUP_IPC.restoreOpen)(evil, {})).toMatchObject({ ok: false, error: 'invalid' })
+    expect(await handler(BACKUP_IPC.restorePick)(evil)).toEqual({ ok: false, cancelled: true })
+
+    expect(await update(from(`${app}#/settings`), { auto: false })).toMatchObject({
+      ok: true,
+      status: { auto: false },
+    })
+    // Reading the status changes nothing, so it's answered for anyone.
+    expect(await handler(BACKUP_IPC.status)(evil)).toMatchObject({ auto: false })
+    backup.update({ auto: true })
+  })
+})

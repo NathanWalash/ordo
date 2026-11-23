@@ -40,6 +40,7 @@ import {
   type RestorePickResult,
 } from '@ordo/shared'
 import { pathProblem } from '../paths'
+import { fromAppWindow } from '../ipc-sender'
 import { closeMail } from '../mail'
 import { closeMailClient } from '../mail-client'
 import { closeCalendar } from '../calendar'
@@ -618,18 +619,57 @@ let quitBackupDone = false
 export function registerBackup(): void {
   // Before anything can open a database.
   const recovered = recoverInterruptedRestore()
-  const win = (e: Electron.IpcMainInvokeEvent) => BrowserWindow.fromWebContents(e.sender)
+  type Event = Electron.IpcMainInvokeEvent
+  const win = (e: Event) => BrowserWindow.fromWebContents(e.sender)
+  /**
+   * Calls that change something run only for Ordo's own page in its window (on top of the
+   * preload's user-activation check), never for content in another frame.
+   */
+  const fromApp =
+    <T>(refusal: T, fn: (e: Event, input: unknown) => T | Promise<T>) =>
+    (e: Event, input: unknown) =>
+      fromAppWindow(e) ? fn(e, input) : refusal
+  const refused = { ok: false as const, message: 'Ordo only accepts this from its own window.' }
+  const refusedWith = { ...refused, error: 'invalid' as const }
+
   ipcMain.handle(BACKUP_IPC.status, () => status())
-  ipcMain.handle(BACKUP_IPC.chooseFolder, (e) => chooseFolder(win(e)))
-  ipcMain.handle(BACKUP_IPC.setPassphrase, (_e, input: unknown) => setPassphrase(input))
-  ipcMain.handle(BACKUP_IPC.forgetPassphrase, () => forgetPassphrase())
-  ipcMain.handle(BACKUP_IPC.dismissNotice, () => dismissNotice())
-  ipcMain.handle(BACKUP_IPC.update, (_e, input: unknown) => update(input))
-  ipcMain.handle(BACKUP_IPC.run, (_e, input: unknown) => run(input))
-  ipcMain.handle(BACKUP_IPC.restorePick, (e) => restorePick(win(e)))
-  ipcMain.handle(BACKUP_IPC.restoreOpen, (_e, input: unknown) => restoreOpen(input))
   ipcMain.handle(BACKUP_IPC.restoreCancel, () => restoreCancel())
-  ipcMain.handle(BACKUP_IPC.restoreConfirm, (_e, input: unknown) => restoreConfirm(input))
+  ipcMain.handle(
+    BACKUP_IPC.chooseFolder,
+    fromApp(refused, (e) => chooseFolder(win(e))),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.setPassphrase,
+    fromApp(refused, (_e, input) => setPassphrase(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.forgetPassphrase,
+    fromApp(refused, () => forgetPassphrase()),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.dismissNotice,
+    fromApp(refused, () => dismissNotice()),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.update,
+    fromApp(refused, (_e, input) => update(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.run,
+    fromApp(refusedWith, (_e, input) => run(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restorePick,
+    fromApp({ ok: false as const, cancelled: true as const }, (e) => restorePick(win(e))),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restoreOpen,
+    fromApp(refusedWith, (_e, input) => restoreOpen(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restoreConfirm,
+    fromApp(refused, (_e, input) => restoreConfirm(input)),
+  )
 
   void app.whenReady().then(() => {
     tidy()

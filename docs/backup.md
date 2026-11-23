@@ -108,6 +108,11 @@ old.
 4. Type `restore` to enable **Restore and Restart** (and press it: the preload only passes a
    restore on after a click or key press in the window).
 
+Every Backup call that changes something (folder, passphrase, settings, backing up, each restore
+step) is passed on by the preload only after a click or key press, and the main process also
+checks it came from Ordo's own page in the window's top-level frame (`main/ipc-sender.ts`), never
+from content in another frame.
+
 Then Ordo refuses if anything (this window, a headless command or an agent) holds the write lock,
 takes it, stops the assistant and Ask Ordo, closes every database and the IMAP connection, moves
 the current files (with their `-wal` and `-shm` files, so no stale log sits beside a restored
