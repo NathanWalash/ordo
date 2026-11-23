@@ -18,6 +18,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  statfsSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, isAbsolute } from 'node:path'
@@ -421,6 +422,20 @@ const LABELS: Record<Manifest['files'][number]['name'], string> = {
   'assistant.json': 'Assistant settings',
 }
 
+/**
+ * How much the restored files may add up to: the free space on the profile's disk, less a margin
+ * for Ordo to keep working. (The swap only renames, so the files need room just once.)
+ */
+function restoreSpace(): number {
+  const margin = 256 * 1024 * 1024
+  try {
+    const { bavail, bsize } = statfsSync(profile())
+    return Math.max(0, Number(bavail) * Number(bsize) - margin)
+  } catch {
+    return 64 * 1024 ** 3
+  }
+}
+
 export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
   const parsed = RestoreOpenSchema.safeParse(raw)
   if (!parsed.success) return { ok: false, error: 'invalid', message: firstIssue(parsed.error) }
@@ -430,7 +445,10 @@ export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
   clearStaging()
   let manifest: Manifest
   try {
-    manifest = await openBackup(picked, parsed.data.passphrase, { into: stagingDir() })
+    manifest = await openBackup(picked, parsed.data.passphrase, {
+      into: stagingDir(),
+      maxBytes: restoreSpace(),
+    })
   } catch (err) {
     clearStaging()
     if (err instanceof BackupError) return { ok: false, error: err.code, message: err.message }

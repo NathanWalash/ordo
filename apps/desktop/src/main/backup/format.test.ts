@@ -225,9 +225,14 @@ describe('backup format', () => {
     expect(readFileSync(join(into, 'settings.json'), 'utf8')).toBe('mine')
   })
 
-  it('caps how much a backup may decompress to', async () => {
+  it('refuses, before writing anything, a backup bigger than the space it may use', async () => {
     const { out } = await backup()
-    await expectError(openBackup(out, PASS, { into: join(dir, 'r'), maxBytes: 1000 }), 'damaged')
+    const into = join(dir, 'r')
+    // The files add up to 300,016 bytes.
+    await expectError(openBackup(out, PASS, { into, maxBytes: 300_015 }), 'no-space')
+    expect(readdirSync(into)).toEqual([])
+    await openBackup(out, PASS, { into, maxBytes: 300_016 })
+    expect(readdirSync(into).sort()).toEqual(['assistant.json', 'mail.sqlite', 'settings.json'])
   })
 })
 

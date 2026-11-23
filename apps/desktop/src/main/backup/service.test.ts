@@ -16,7 +16,21 @@ import type { MessageHeader } from '@ordo/mail-core'
 
 // The Backup service as the IPC handlers call it, with Electron replaced by a temp profile, a
 // fake keychain, a fake Trash and scripted dialogs. Synthetic data only.
-const env = vi.hoisted(() => ({ profile: '', trash: '', pick: [] as string[] }))
+const env = vi.hoisted(() => ({
+  profile: '',
+  trash: '',
+  pick: [] as string[],
+  freeBytes: null as number | null,
+}))
+// Free disk space, when a test wants to pretend the disk is nearly full.
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>()
+  const statfsSync = ((path: string) =>
+    env.freeBytes === null
+      ? fs.statfsSync(path)
+      : { ...fs.statfsSync(path), bavail: env.freeBytes, bsize: 1 }) as typeof fs.statfsSync
+  return { ...fs, default: { ...fs, statfsSync }, statfsSync }
+})
 const electron = vi.hoisted(() => ({
   relaunch: vi.fn(),
   exit: vi.fn(),
@@ -274,6 +288,22 @@ describe('restoring', () => {
 })
 
 describe('hardening', () => {
+  it('refuses to restore a backup bigger than the free disk space, writing nothing', async () => {
+    const copy = join(root, 'copy.ordobackup')
+    copyFileSync(firstBackup, copy)
+    env.pick = [copy]
+    await backup.restorePick(null)
+    env.freeBytes = 256 * 1024 * 1024 + 1000 // a 1,000-byte margin over Ordo's reserve
+    try {
+      expect(await backup.restoreOpen({ passphrase: PASS })).toMatchObject({ ok: false, error: 'no-space' })
+    } finally {
+      env.freeBytes = null
+    }
+    expect(existsSync(join(env.profile, 'restore-staging', 'mail.sqlite'))).toBe(false)
+    expect(await backup.restoreOpen({ passphrase: PASS })).toMatchObject({ ok: true })
+    backup.restoreCancel()
+  })
+
   it('records a backup as made even if tidying old ones fails', async () => {
     const { shell } = await import('electron')
     backup.update({ keep: 3 })

@@ -64,7 +64,8 @@ function scryptProblem({ logN, r, p }: ScryptParams): string | null {
   return null
 }
 
-export type BackupErrorCode = 'not-backup' | 'newer-version' | 'wrong-passphrase' | 'damaged' | 'truncated'
+export type BackupErrorCode =
+  'not-backup' | 'newer-version' | 'wrong-passphrase' | 'damaged' | 'truncated' | 'no-space'
 
 const MESSAGES: Record<BackupErrorCode, string> = {
   'not-backup': 'That file isn’t an Ordo backup.',
@@ -73,6 +74,7 @@ const MESSAGES: Record<BackupErrorCode, string> = {
   damaged: 'This backup is damaged or has been changed since Ordo made it, so it can’t be restored.',
   truncated:
     'This backup file is incomplete. If it’s in a cloud folder it may still be downloading: wait for it to finish, then try again.',
+  'no-space': 'There isn’t enough free disk space to restore this backup. Free some space, then try again.',
 }
 
 /** A backup that can't be opened, with a message to show as it is. */
@@ -360,7 +362,11 @@ class PayloadWriter extends Writable {
   private current: { fh: FileHandle; hash: ReturnType<typeof createHash> } | null = null
   private left = 0
 
-  constructor(private readonly dir: string) {
+  constructor(
+    private readonly dir: string,
+    /** The most the files together may be, checked against the manifest before any is written. */
+    private readonly maxBytes: number,
+  ) {
     super()
   }
 
@@ -390,6 +396,8 @@ class PayloadWriter extends Writable {
       }
       const result = ManifestSchema.safeParse(parsed)
       if (!result.success) throw new BackupError('damaged')
+      if (result.data.files.reduce((sum, f) => sum + f.size, 0) > this.maxBytes)
+        throw new BackupError('no-space')
       this.manifest = result.data
       data = this.buffered.subarray(4 + this.manifestLength)
       this.buffered = Buffer.alloc(0)
@@ -459,7 +467,11 @@ function limit(maxBytes: number): Transform {
 export interface OpenBackupOptions {
   /** A folder to write the restored files into. Created if missing; existing files are never replaced. */
   into: string
-  /** The most the payload may decompress to. Default 64 GiB. */
+  /**
+   * The most the restored files may add up to, such as the free space where they go. A manifest
+   * declaring more is refused (`no-space`) before anything is written, and no file may be longer
+   * than the manifest says. Default 64 GiB.
+   */
   maxBytes?: number
 }
 
@@ -487,14 +499,16 @@ export async function openBackup(
   decipher.setAuthTag(tail.subarray(0, TAG_SIZE))
 
   await mkdir(options.into, { recursive: true, mode: 0o700 })
-  const writer = new PayloadWriter(options.into)
+  const maxBytes = options.maxBytes ?? 64 * 1024 ** 3
+  const writer = new PayloadWriter(options.into, maxBytes)
   try {
     const end = size - TAG_SIZE - END_MARKER.length - 1
     await pipeline(
       end >= HEADER_SIZE ? createReadStream(path, { start: HEADER_SIZE, end }) : Readable.from([]),
       decipher,
       createGunzip(),
-      limit(options.maxBytes ?? 64 * 1024 ** 3),
+      // The writer holds each file to its declared size; this also caps the manifest part.
+      limit(maxBytes + 4 + MAX_MANIFEST_BYTES),
       writer,
     )
   } catch (err) {

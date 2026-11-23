@@ -127,6 +127,8 @@ export type RestoreOpenResult =
         | 'wrong-passphrase'
         | 'damaged'
         | 'truncated'
+        | 'no-space'
+        | 'busy'
         | 'invalid'
         | 'failed'
       message: string
