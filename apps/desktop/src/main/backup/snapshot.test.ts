@@ -122,6 +122,12 @@ describe('snapshots', () => {
     expect(accountEmail(profile)).toBe('someone@ordo.test')
     writeFileSync(join(profile, 'account.json'), 'not json')
     expect(accountEmail(profile)).toBeNull()
+    // Several accounts: the first account's email, from the list, which wins over account.json.
+    writeFileSync(
+      join(profile, 'accounts.json'),
+      '{"version":1,"accounts":[{"id":"acc-1","email":"first@ordo.test","secret":"ZW5j"},{"id":"acc-2","email":"work@ordo.test"}]}',
+    )
+    expect(accountEmail(profile)).toBe('first@ordo.test')
   })
 })
 
@@ -197,6 +203,27 @@ describe('applyRestore', () => {
     })
     expect(existsSync(join(profile, 'account.json'))).toBe(false)
     expect(readFileSync(join(asideDir, 'account.json'), 'utf8')).toBe('this mac’s account')
+  })
+
+  it('moves the accounts list aside too, or keeps it with the same account', () => {
+    for (const keepAccount of [true, false]) {
+      rmSync(profile, { recursive: true, force: true })
+      mkdirSync(profile)
+      current()
+      writeFileSync(join(profile, 'accounts.json'), 'this mac’s accounts')
+      writeFileSync(join(profile, 'account.json.migrated'), 'its old account')
+      const asideDir = join(profile, 'before-restore-x')
+      applyRestore({
+        profileDir: profile,
+        stagingDir: staged(['mail.sqlite']),
+        asideDir,
+        manifest: manifestOf(['mail.sqlite']),
+        keepAccount,
+      })
+      const where = keepAccount ? profile : asideDir
+      expect(readFileSync(join(where, 'accounts.json'), 'utf8')).toBe('this mac’s accounts')
+      expect(readFileSync(join(where, 'account.json.migrated'), 'utf8')).toBe('its old account')
+    }
   })
 
   it('changes nothing if a restored file is missing', () => {

@@ -19,17 +19,17 @@ Settings → Backup:
 
 | Included                                                    | Left out                                                    |
 | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| `mail.sqlite`: downloaded headers, bodies, clean-up history | `account.json`: the iCloud app password (see below)         |
+| `mail.sqlite`: downloaded headers, bodies, clean-up history | `accounts.json`: mail account passwords (see below)         |
 | `calendar.sqlite`                                           | `backup.json`: this computer's backup settings              |
 | `money.sqlite` (including what Ordo has learned)            | Electron's own folders (caches, the window's local storage) |
 | `boards.sqlite`                                             | `ordo-write.lock`, `before-restore-*` folders               |
 | `settings.json`, `assistant.json`                           |                                                             |
 
-**Passwords are never backed up.** The iCloud app-specific password is encrypted with this
+**Passwords are never backed up.** Each mail account's app password is encrypted with this
 computer's keychain (Electron `safeStorage`) and couldn't be decrypted on another computer anyway.
 Re-encrypting it under the backup passphrase would put a working credential in the cloud, so Ordo
-doesn't. After restoring on another computer, connect iCloud again. Restoring on the same
-computer, for the same account, keeps you connected. The manifest records the account's email
+doesn't. After restoring on another computer, add your accounts again. Restoring on the same
+computer, for the same account, keeps you connected. The manifest records the first account's email
 address (inside the encryption) so Ordo can tell.
 
 Databases are copied with SQLite's `VACUUM INTO`, while the app runs, holding Ordo's write lock
@@ -132,7 +132,8 @@ happened, also shown in Settings → Backup until dismissed. A marker Ordo can't
 
 A module that isn't in the backup (say Boards, if you hadn't used it then) is moved aside too, so
 you get exactly the backup. Your account stays only if the backup's mail is for the same email;
-otherwise `account.json` is moved aside as well and you connect again. This computer's backup
+otherwise your mail accounts (`accounts.json`, and an older install's `account.json`) are moved aside
+as well and you connect again. The email compared is the first mail account's. This computer's backup
 settings (`backup.json`) always stay.
 
 Quit any headless Ordo or MCP server before restoring: the write lock stops one that's writing,

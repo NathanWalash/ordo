@@ -280,7 +280,7 @@ describe('restoring', () => {
     expect(asideFiles).toContain('mail.sqlite')
     expect(asideFiles).toContain('settings.json')
     // This Mac's account (same email) and backup settings stay.
-    expect(JSON.parse(readFileSync(join(env.profile, 'account.json'), 'utf8')).email).toBe(
+    expect(JSON.parse(readFileSync(join(env.profile, 'accounts.json'), 'utf8')).accounts[0].email).toBe(
       'someone@ordo.test',
     )
     expect(backup.status()).toMatchObject({ folder, passphraseSet: true })

@@ -3,7 +3,7 @@
  * a day, and on quit), pruning, and restoring. The file format and the file moves are in
  * format.ts and snapshot.ts; this adds Electron (dialogs, safeStorage, Trash, relaunch).
  *
- * Credentials are never backed up: the iCloud app password in account.json is encrypted with
+ * Credentials are never backed up: the mail accounts' passwords in accounts.json are encrypted with
  * this Mac's keychain and couldn't be decrypted anywhere else. After restoring on another Mac (or
  * for another account) you connect again.
  */
@@ -334,7 +334,7 @@ async function backUp(passphrase: string, automatic: boolean): Promise<BackupRun
       appVersion: app.getVersion(),
       createdAt: now,
       account: email ? { email } : null,
-      excluded: ['account.json: passwords stay in this computer’s keychain'],
+      excluded: ['accounts.json: passwords stay in this computer’s keychain'],
     })
     // The backup is safely written: a problem tidying old ones mustn't make it look failed.
     let pruned = 0
