@@ -42,7 +42,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Light, dark or system theme, with frosted glass surfaces                     | Done   |
 | Connect iCloud (app-specific password in the Keychain)                       | Done   |
 | Several accounts: iCloud, Gmail, Yahoo, Fastmail or any IMAP, unified inbox  | Done   |
-| Sign in with Google (Gmail and Workspace without an app password)            | Next   |
+| Sign in with Google (Gmail and Workspace without an app password)            | Done   |
 | Scan inbox headers and group by sender                                       | Done   |
 | Sort senders with rules                                                      | Done   |
 | AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test        | Done   |

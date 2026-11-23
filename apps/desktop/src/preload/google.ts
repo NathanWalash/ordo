@@ -25,8 +25,10 @@ export const googleApi: GoogleApi = {
       ? ipcRenderer.invoke(GOOGLE_IPC.googleConnect, input)
       : Promise.resolve({ ...refused, error: 'unknown' as const }),
   cancelConnect: () => ipcRenderer.invoke(GOOGLE_IPC.googleCancel),
-  signOut: (accountId) =>
-    userActed() ? ipcRenderer.invoke(GOOGLE_IPC.googleSignOut, accountId) : Promise.resolve(refused),
+  signOut: (accountId, options) =>
+    userActed()
+      ? ipcRenderer.invoke(GOOGLE_IPC.googleSignOut, accountId, ...(options ? [options] : []))
+      : Promise.resolve(refused),
   setCalendarColor: (input) => ipcRenderer.invoke(GOOGLE_IPC.googleSetColor, input),
   feedMatches: () => ipcRenderer.invoke(GOOGLE_IPC.googleFeedMatches),
   replaceFeed: (input) =>

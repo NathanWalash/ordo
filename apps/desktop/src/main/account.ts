@@ -15,15 +15,18 @@ import {
   ACCOUNT_COLORS,
   AccountIdSchema,
   FIRST_ACCOUNT_ID,
+  GoogleAccountIdSchema,
+  type AccountAuth,
   type AccountColor,
   type MailAccount,
 } from '@ordo/shared'
 
 /**
- * The mail accounts, in `accounts.json` in the profile. Each account's secret (an app-specific
- * password today; an OAuth refresh token once Sign in with Google lands) is encrypted with the
- * OS keychain (safeStorage) and stored as base64; nothing else in the file is secret. The window
- * never sees a secret: `listAccounts` leaves it out.
+ * The mail accounts, in `accounts.json` in the profile. A password account's secret (an
+ * app-specific password) is encrypted with the OS keychain (safeStorage) and stored as base64;
+ * nothing else in the file is secret. An account that signs in with Google keeps no secret here at
+ * all: it names its Google account (`auth.googleAccountId`), whose tokens the Google module keeps
+ * in `google.json`. The window never sees a secret: `listAccounts` leaves it out.
  *
  * Durability:
  * - Every write goes to a temp file that is flushed to disk, then renamed over the old file, and
@@ -46,8 +49,8 @@ import {
 export const ACCOUNTS_FILE_VERSION = 1
 
 export interface StoredAccount extends MailAccount {
-  /** The secret for `auth.kind`, encrypted with safeStorage, base64. */
-  secret: string
+  /** The password, encrypted with safeStorage, base64. None for a Google sign-in. */
+  secret?: string
 }
 
 export interface AccountsFile {
@@ -115,6 +118,21 @@ export function fromLegacy(legacy: unknown): AccountsFile | null {
   }
 }
 
+/** How a stored account signs in, if this version understands it. */
+function parseAuth(auth: unknown, provider: string, secret: unknown): AccountAuth | null {
+  if (!isObject(auth)) return null
+  if (auth['kind'] === 'password') return typeof secret === 'string' ? { kind: 'password' } : null
+  // Sign in with Google: Gmail only, and its tokens are the Google module's, never in this file.
+  if (
+    auth['kind'] === 'oauth' &&
+    auth['provider'] === 'google' &&
+    provider === 'gmail' &&
+    GoogleAccountIdSchema.safeParse(auth['googleAccountId']).success
+  )
+    return { kind: 'oauth', provider: 'google', googleAccountId: auth['googleAccountId'] as string }
+  return null
+}
+
 /** One stored account this version understands, or null (it's then kept as it is, unused). */
 function parseStored(v: unknown): StoredAccount | null {
   if (!isObject(v)) return null
@@ -123,32 +141,35 @@ function parseStored(v: unknown): StoredAccount | null {
   if (
     !AccountIdSchema.safeParse(a.id).success ||
     typeof a.email !== 'string' ||
-    typeof a.secret !== 'string' ||
     !a.provider ||
     !(a.provider in PROVIDERS) ||
     !server(a.imap) ||
-    !server(a.smtp) ||
-    !isObject(a.auth) ||
-    a.auth.kind !== 'password'
+    !server(a.smtp)
   )
     return null
+  const auth = parseAuth(a.auth, a.provider, a.secret)
+  if (!auth) return null
+  // A Google access token only ever goes to Gmail's own servers, whatever the file says.
+  const gmail = auth.kind === 'oauth' ? PROVIDERS.gmail : null
+  const imap = gmail ? gmail.imap! : a.imap!
+  const smtp = gmail ? gmail.smtp! : a.smtp!
   return {
     id: a.id!,
     label: typeof a.label === 'string' && a.label.trim() ? a.label : PROVIDERS[a.provider].name,
     email: a.email,
     color: ACCOUNT_COLORS.includes(a.color as AccountColor) ? (a.color as AccountColor) : 'blue',
     provider: a.provider,
-    imap: { host: a.imap!.host, port: a.imap!.port, secure: a.imap!.secure !== false },
+    imap: { host: imap.host, port: imap.port, secure: imap.secure !== false },
     smtp: {
-      host: a.smtp!.host,
-      port: a.smtp!.port,
-      secure: a.smtp!.secure === true,
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure === true,
       // Never plain text: without TLS from the start, STARTTLS is required.
-      requireTLS: a.smtp!.secure === true ? a.smtp!.requireTLS === true : true,
+      requireTLS: smtp.secure === true ? smtp.requireTLS === true : true,
     },
-    auth: { kind: 'password' },
+    auth,
     lastScan: typeof a.lastScan === 'string' ? a.lastScan : null,
-    secret: a.secret,
+    ...(auth.kind === 'password' && { secret: a.secret! }),
   }
 }
 
@@ -319,7 +340,7 @@ export function defaultAccount(): MailAccount | null {
 /** An account's secret, decrypted, or null (no account, no keychain, or it can't be read). */
 export function readSecret(id: string): string | null {
   const a = storedAccounts().find((x) => x.id === id)
-  if (!a || !canStoreSecrets()) return null
+  if (!a?.secret || !canStoreSecrets()) return null
   try {
     return safeStorage.decryptString(Buffer.from(a.secret, 'base64'))
   } catch {
@@ -359,15 +380,23 @@ export function nextAccountId(loaded: Loaded, inUse: readonly string[] = []): st
 /**
  * Save a new account at the end of the list, with a fresh id that's never been used and isn't in
  * `inUse`. A new iCloud account becomes Calendar's when Calendar has none (or its was removed).
+ * `secret` is the password; null for a Google sign-in, which keeps nothing secret here.
  */
 export function addStoredAccount(
   account: Omit<MailAccount, 'id' | 'lastScan'>,
-  secret: string,
+  secret: string | null,
   inUse: readonly string[] = [],
 ): MailAccount {
+  if ((account.auth.kind === 'password') !== (secret !== null))
+    throw new Error('A password account needs its password, and a Google sign-in keeps none here')
   const loaded = load()
   const id = nextAccountId(loaded, inUse)
-  const stored: StoredAccount = { ...account, id, lastScan: null, secret: encrypt(secret) }
+  const stored: StoredAccount = {
+    ...account,
+    id,
+    lastScan: null,
+    ...(secret !== null && { secret: encrypt(secret) }),
+  }
   const calendar = loaded.top['calendarAccount']
   const calendarGone = typeof calendar !== 'string' || !loaded.entries.some((e) => e.account?.id === calendar)
   save({
@@ -407,10 +436,20 @@ export function updateStoredAccount(
   return next ? withoutSecret(next) : null
 }
 
-/** Replace an account's secret (a new app-specific password). */
+/** Replace an account's secret (a new app-specific password). Never for a Google sign-in. */
 export function setSecret(id: string, secret: string): boolean {
   const encrypted = encrypt(secret)
-  return change(id, (a) => ({ ...a, secret: encrypted })) !== null
+  return (
+    change(id, (a) => {
+      if (a.auth.kind !== 'password') throw new Error('This account signs in with Google, not a password.')
+      return { ...a, secret: encrypted }
+    }) !== null
+  )
+}
+
+/** The mail accounts that sign in with this Google account (by its id, `sub`). */
+export function accountsSignedInWith(googleAccountId: string): MailAccount[] {
+  return listAccounts().filter((a) => a.auth.kind === 'oauth' && a.auth.googleAccountId === googleAccountId)
 }
 
 /**

@@ -82,7 +82,7 @@ describe('Google calendars in the Calendar service', () => {
     expect(calendar.events(WINDOW).filter((e) => e.title === 'Standup').length).toBeGreaterThan(10)
     expect(calendar.status()).toMatchObject({ connected: false, google: 1 })
     expect(calendar.googleStatus().accounts).toEqual([
-      { id: fake.account.sub, email: ME, needsReauth: false, calendars: 2 },
+      { id: fake.account.sub, email: ME, needsReauth: false, calendars: 2, calendar: true, mailAccounts: [] },
     ])
   })
 

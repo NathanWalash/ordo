@@ -17,11 +17,11 @@ import {
   type MessageContent,
   type MessageHeader,
 } from '@ordo/mail-core'
+import type { ImapMailProvider } from '@ordo/mail-core/node'
 import {
   buildMessage,
   checkOutgoing,
   createGuardedFetch,
-  ImapMailProvider,
   loadRemoteImages,
   MailAuthError,
   RecipientsRefused,
@@ -68,16 +68,17 @@ import {
   accountStore,
   allowLoopbackHttp,
   explain,
-  imapConfigFor,
+  connectImap,
   INBOX,
   mailStore,
   onAccountRemoved,
   resolveAccount,
   scan,
-  smtpConfigFor,
+  withSmtp,
   syncSchedule,
   trackMailWork,
 } from './mail'
+import { SignInAgainError } from './auth'
 import { closeImapSession, NotConnected, withImap } from './mail-session'
 import { markAsDownloaded } from './quarantine'
 import { Locked, toRenderer, withWriteLock } from './writes'
@@ -299,9 +300,8 @@ async function refreshOne(
       changing(
         'checking for new mail',
         async () => {
-          const provider = new ImapMailProvider(await imapConfigFor(account))
+          const provider = await connectImap(account)
           try {
-            await provider.connect()
             const list = await provider.listMailboxes()
             if (ctrl.signal.aborted) return STOPPED
             store.saveMailboxes(list)
@@ -890,7 +890,7 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
       if ('ok' in built) return built
       let sent: { sentCopy: Buffer; rejected: string[] }
       try {
-        sent = await sendMessage(await smtpConfigFor(account), built.message)
+        sent = await withSmtp(account, (cfg) => sendMessage(cfg, built.message))
       } catch (err) {
         if (err instanceof RecipientsRefused)
           return fail(
@@ -900,12 +900,15 @@ export async function send(input: unknown): Promise<MailOutcome<{ warning?: stri
               : `${name} refused the recipients. Check the addresses. Nothing was sent.`,
           )
         const e = err as { code?: string; message?: string }
+        if (err instanceof SignInAgainError) return fail('auth', `${err.message} Nothing was sent.`)
         if (err instanceof MailAuthError || e.code === 'EAUTH' || /\b(535|534)\b/.test(String(e.message)))
           return fail(
             'auth',
-            account.provider === 'icloud'
-              ? 'iCloud didn’t accept your app-specific password for sending. Reconnect your account and try again.'
-              : `${name} didn’t accept your password for sending. Enter it again in Settings → Accounts and try again.`,
+            account.auth.kind === 'oauth'
+              ? 'Gmail didn’t accept Ordo’s Google sign-in for sending. Choose Sign in again in Settings → Accounts and try again. Nothing was sent.'
+              : account.provider === 'icloud'
+                ? 'iCloud didn’t accept your app-specific password for sending. Reconnect your account and try again.'
+                : `${name} didn’t accept your password for sending. Enter it again in Settings → Accounts and try again.`,
           )
         return fail(
           'network',

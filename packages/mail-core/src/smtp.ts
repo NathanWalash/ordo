@@ -20,11 +20,22 @@ export interface SmtpConfig {
   accessToken?: string
 }
 
-/** Nodemailer's auth for a config: OAuth 2 with an access token, or a plain login. */
-function smtpAuth(cfg: SmtpConfig) {
+/**
+ * Nodemailer's auth for a config: OAuth 2 with an access token (sent as `AUTH XOAUTH2`), or a
+ * plain login. When the server refuses a token, nodemailer would try the very same token again
+ * (it has no way to get another), so `provisionCallback` refuses to renew: the send fails at once
+ * with EAUTH, and the caller refreshes the token and tries once more (the app's withCredentials).
+ */
+export function smtpAuth(cfg: SmtpConfig) {
   const a = authOf(cfg)
   return 'accessToken' in a
-    ? { type: 'OAuth2' as const, user: a.user, accessToken: a.accessToken }
+    ? {
+        type: 'OAuth2' as const,
+        user: a.user,
+        accessToken: a.accessToken,
+        provisionCallback: (_user: string, _renew: boolean, done: (err: Error | null) => void) =>
+          done(new Error('The server refused the access token')),
+      }
     : { user: a.user, pass: a.pass }
 }
 

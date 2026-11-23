@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, ExternalLink } from 'lucide-react'
-import type { CalendarListItem, GoogleFeedMatch, GoogleStatus } from '@ordo/shared'
+import { AlertCircle, ExternalLink, LogOut } from 'lucide-react'
+import type { CalendarListItem, GoogleAccountStatus, GoogleFeedMatch, GoogleStatus } from '@ordo/shared'
 import { Button } from './Button'
 import { Row, Section } from './SettingsSection'
+import { Sheet } from './Sheet'
 import { TextField } from './TextField'
 
 /** The step-by-step guide to creating your own OAuth client. */
@@ -14,9 +15,19 @@ const when = (iso: string) =>
 /**
  * Settings → Google: your own OAuth client (Ordo has no shared Google Cloud project), connected
  * accounts, which of their calendars to show and in what colour, and signing out. Also offers to
- * replace a calendar added by its Google link with the live, editable connection.
+ * replace a calendar added by its Google link with the live, editable connection. An account can
+ * also be Mail's (a Gmail account added with Sign in with Google): signing out of it asks first,
+ * and removes those mail accounts too.
  */
-export function GoogleSettings() {
+export function GoogleSettings({
+  onAccountsChanged,
+  accountsKey,
+}: {
+  /** Signing out removed mail accounts. */
+  onAccountsChanged?: () => void
+  /** Changes when mail accounts are added or removed, so which Google sign-ins Mail uses is fresh. */
+  accountsKey?: string
+} = {}) {
   const [status, setStatus] = useState<GoogleStatus | null>(null)
   const [calendars, setCalendars] = useState<CalendarListItem[]>([])
   const [matches, setMatches] = useState<GoogleFeedMatch[]>([])
@@ -26,6 +37,8 @@ export function GoogleSettings() {
   const [clientError, setClientError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  /** Signing out of an account that mail accounts use: confirm removing them first. */
+  const [confirmSignOut, setConfirmSignOut] = useState<GoogleAccountStatus | null>(null)
 
   const load = useCallback(async () => {
     const [s, c, m] = await Promise.all([
@@ -55,7 +68,7 @@ export function GoogleSettings() {
       live = false
       off()
     }
-  }, [load])
+  }, [load, accountsKey])
 
   if (!status) return null
 
@@ -68,11 +81,13 @@ export function GoogleSettings() {
     await load()
   }
 
-  const connect = async (accountId?: string) => {
+  const connect = async (accountId?: string, addCalendar = false) => {
     setBusy(accountId ?? 'new')
     setMessage(null)
     try {
-      const r = await window.ordo.google.connect(accountId ? { accountId } : undefined)
+      const r = await window.ordo.google.connect(
+        accountId ? { accountId, ...(addCalendar && { addCalendar }) } : undefined,
+      )
       if (!r.ok && r.error !== 'cancelled') setMessage(r.message)
     } finally {
       setBusy(null)
@@ -80,13 +95,16 @@ export function GoogleSettings() {
     }
   }
 
-  const signOut = async (id: string) => {
-    setBusy(id)
+  /** Sign out; the mail accounts listed (which the user confirmed) are removed too. */
+  const signOut = async (a: GoogleAccountStatus, removeMail: string[] = []) => {
+    setBusy(a.id)
     try {
-      const r = await window.ordo.google.signOut(id)
+      const r = await window.ordo.google.signOut(a.id, removeMail.length ? { removeMail } : undefined)
       if (!r.ok) setMessage(r.message)
+      else if (removeMail.length) onAccountsChanged?.()
     } finally {
       setBusy(null)
+      setConfirmSignOut(null)
       await load()
     }
   }
@@ -188,7 +206,14 @@ export function GoogleSettings() {
                   updating.
                 </span>
               ) : (
-                `${a.calendars} calendar${a.calendars === 1 ? '' : 's'}. Changes show up within a few minutes.`
+                [
+                  a.calendar
+                    ? `${a.calendars} calendar${a.calendars === 1 ? '' : 's'}. Changes show up within a few minutes.`
+                    : 'Calendar isn’t connected.',
+                  a.mailAccounts.length ? `Mail: ${a.mailAccounts.map((m) => m.label).join(', ')}.` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
               )
             }
             control={
@@ -198,7 +223,15 @@ export function GoogleSettings() {
                     {busy === a.id ? 'Waiting for browser…' : 'Sign in again'}
                   </Button>
                 )}
-                <Button disabled={busy !== null} onClick={() => void signOut(a.id)}>
+                {!a.needsReauth && !a.calendar && (
+                  <Button disabled={busy !== null} onClick={() => void connect(a.id, true)}>
+                    {busy === a.id ? 'Waiting for browser…' : 'Add Calendar'}
+                  </Button>
+                )}
+                <Button
+                  disabled={busy !== null}
+                  onClick={() => (a.mailAccounts.length ? setConfirmSignOut(a) : void signOut(a))}
+                >
                   Sign out
                 </Button>
               </span>
@@ -286,6 +319,75 @@ export function GoogleSettings() {
           {message}
         </p>
       )}
+      {confirmSignOut && (
+        <SignOutSheet
+          account={confirmSignOut}
+          busy={busy === confirmSignOut.id}
+          onClose={() => setConfirmSignOut(null)}
+          onConfirm={() =>
+            void signOut(
+              confirmSignOut,
+              confirmSignOut.mailAccounts.map((m) => m.id),
+            )
+          }
+        />
+      )}
     </Section>
+  )
+}
+
+/**
+ * Signing out of a Google account that Mail uses: revoking Ordo's access ends the sign-in for Mail
+ * too, so its mail accounts go as well, exactly as removing them in Settings → Accounts does.
+ */
+function SignOutSheet(props: {
+  account: GoogleAccountStatus
+  busy: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const a = props.account
+  const many = a.mailAccounts.length > 1
+  return (
+    <Sheet
+      title={`Sign out of ${a.email}?`}
+      subtitle={many ? 'Mail accounts use this sign-in.' : 'A mail account uses this sign-in.'}
+      icon={<LogOut size={20} />}
+      iconTone="warning"
+      busy={props.busy}
+      onClose={props.onClose}
+      onSubmit={props.onConfirm}
+      initialFocus="[data-cancel]"
+      footer={
+        <>
+          <span className="flex-1" />
+          <Button data-cancel disabled={props.busy} onClick={props.onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="destructive" disabled={props.busy}>
+            {props.busy ? 'Signing out…' : many ? 'Sign out and remove them' : 'Sign out and remove it'}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2 text-[13px] leading-snug">
+        <p>
+          Signing out takes away Ordo’s access to this Google account
+          {a.calendar ? ', removes its calendars from Calendar' : ''} and removes{' '}
+          {many ? 'these mail accounts' : 'this mail account'} from Ordo:
+        </p>
+        <ul className="list-disc pl-5 text-ink-2">
+          {a.mailAccounts.map((m) => (
+            <li key={m.id}>
+              {m.label} ({m.email}): its downloaded mail and clean-up history
+            </li>
+          ))}
+        </ul>
+        <p>
+          Nothing changes in Gmail: your mail stays where it is, and you can add the account again at any
+          time.
+        </p>
+      </div>
+    </Sheet>
   )
 }

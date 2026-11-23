@@ -27,7 +27,7 @@ import {
 import {
   accountStore,
   explain,
-  imapConfigFor,
+  testAccountLogin,
   imapConfigForTest,
   INBOX,
   mailStore,
@@ -35,11 +35,13 @@ import {
   syncSchedule,
 } from './mail'
 import { fromAppWindow } from './ipc-sender'
+import { addGoogle, cancelGoogleSignIn, googleMailOptions, signInAgain } from './google-mail'
 
 /**
- * Settings → Accounts: add, test, rename, recolour, re-enter a password, remove. Every input from
- * the window is checked with zod here. Adding an account or a new password signs in first, so
- * nothing is saved that doesn't work.
+ * Settings → Accounts: add, test, rename, recolour, re-enter a password (or sign in to Google
+ * again), remove. Every input from the window is checked with zod here. Adding an account or a new
+ * password signs in first, so nothing is saved that doesn't work. Gmail with Sign in with Google
+ * is in google-mail.ts.
  */
 
 const invalid = (message: string): AccountResult => ({ ok: false, error: 'invalid', message })
@@ -124,7 +126,7 @@ export async function test(input: unknown): Promise<AccountResult> {
     const account = getAccount(parsed.data.id)
     if (!account) return invalid('There’s no such account.')
     try {
-      await testImapLogin(await imapConfigFor(account))
+      await testAccountLogin(account)
       syncSchedule.reset(account.id)
       return { ok: true, account }
     } catch (err) {
@@ -145,8 +147,13 @@ export async function add(input: unknown): Promise<AccountResult> {
   const draft = draftAccount(parsed.data)
   if (!draft) return invalid(PROVIDERS[parsed.data.provider].notes[0] ?? 'Ordo can’t connect to this yet.')
   const email = draft.email.toLowerCase()
-  if (listAccounts().some((a) => a.email.toLowerCase() === email && a.imap.host === draft.imap.host))
-    return invalid('That account is already in Ordo. Enter its password again from its row instead.')
+  const same = listAccounts().find((a) => a.email.toLowerCase() === email && a.imap.host === draft.imap.host)
+  if (same)
+    return invalid(
+      same.auth.kind === 'oauth'
+        ? 'That account is already in Ordo, signing in with Google. Choose Sign in again from its row if it stopped working.'
+        : 'That account is already in Ordo. Enter its password again from its row instead.',
+    )
   const problem = await signIn(draft, parsed.data.password)
   if (problem) return problem
   try {
@@ -180,6 +187,8 @@ export async function setPassword(input: unknown): Promise<AccountResult> {
   if (!parsed.success) return invalid(parsed.error.issues[0]?.message || 'Check the password.')
   const account = getAccount(parsed.data.id)
   if (!account) return invalid('There’s no such account.')
+  if (account.auth.kind !== 'password')
+    return invalid('This account signs in with Google, not a password. Choose Sign in again instead.')
   const problem = await signIn(account, parsed.data.password)
   if (problem) return problem
   try {
@@ -216,6 +225,11 @@ export function registerAccountsIpc(onRemoved?: (id: string) => void): void {
   ipcMain.handle(ACCOUNTS_IPC.add, own(add, NOT_FROM_APP))
   ipcMain.handle(ACCOUNTS_IPC.update, own(update, NOT_FROM_APP))
   ipcMain.handle(ACCOUNTS_IPC.setPassword, own(setPassword, NOT_FROM_APP))
+  // Reading what Google sign-in can offer, and cancelling a browser sign-in, change nothing.
+  ipcMain.handle(ACCOUNTS_IPC.googleOptions, () => googleMailOptions())
+  ipcMain.handle(ACCOUNTS_IPC.cancelGoogle, () => cancelGoogleSignIn())
+  ipcMain.handle(ACCOUNTS_IPC.addGoogle, own(addGoogle, NOT_FROM_APP))
+  ipcMain.handle(ACCOUNTS_IPC.signInAgain, own(signInAgain, NOT_FROM_APP))
   ipcMain.handle(
     ACCOUNTS_IPC.remove,
     own(async (id: unknown) => {

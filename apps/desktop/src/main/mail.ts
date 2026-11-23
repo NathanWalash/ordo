@@ -2,9 +2,11 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import {
   analyseSenders,
+  MAILTO_PER_CLEANUP_MAX,
   PROVIDERS,
   SyncSchedule,
   withUnsubscribed,
+  type MailtoMessage,
   type SyncFailureKind,
 } from '@ordo/mail-core'
 import {
@@ -14,6 +16,7 @@ import {
   MailUnavailableError,
   MailStore,
   classifyImapError,
+  createMailtoSender,
   serverWords,
   type MailConnectionReason,
   scanMailbox,
@@ -43,7 +46,13 @@ import {
   removeStoredAccount,
   setSecret,
 } from './account'
-import { getCredentials } from './auth'
+import {
+  getCredentials,
+  isAuthFailure,
+  SignInAgainError,
+  withCredentials,
+  type AccountToSignIn,
+} from './auth'
 import { Locked, withWriteLock } from './writes'
 
 export const INBOX = 'INBOX'
@@ -122,11 +131,26 @@ function testSmtpServer(): Omit<SmtpConfig, 'user'> | null {
  * IMAP settings for servers and credentials. Without TLS from the start, STARTTLS is required, so
  * a password never crosses the network in the clear.
  */
+const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|\[::1\])$/i
+
+/**
+ * A Google access token goes only to Gmail's own servers (auth.ts checks the account), or in an
+ * unpackaged build to a test server on this computer: never to another host a test variable names,
+ * where it might also travel without TLS.
+ */
+function checkTestServer(host: string, creds: object): void {
+  if ('accessToken' in creds && !LOOPBACK.test(host.trim()))
+    throw new Error(
+      `Ordo won’t send a Google sign-in to the test server ${host}: only one on this computer (127.0.0.1) can stand in for Gmail.`,
+    )
+}
+
 function imapSettings(
   server: MailAccount['imap'],
   creds: { user: string; pass: string } | { user: string; accessToken: string },
 ): ImapConfig {
   const test = testImapServer()
+  if (test) checkTestServer(test.host, creds)
   if (test) return { ...test, ...creds }
   return { host: server.host, port: server.port, secure: server.secure, requireTLS: !server.secure, ...creds }
 }
@@ -136,18 +160,83 @@ function smtpSettings(
   creds: { user: string; pass: string } | { user: string; accessToken: string },
 ): SmtpConfig {
   const test = testSmtpServer()
+  if (test) checkTestServer(test.host, creds)
   if (test) return { ...test, ...creds }
   return { ...server, requireTLS: server.secure ? server.requireTLS : true, ...creds }
 }
 
-/** How to reach and sign in to an account's IMAP server, now (an OAuth token is refreshed here). */
-export async function imapConfigFor(account: MailAccount): Promise<ImapConfig> {
-  return imapSettings(account.imap, await getCredentials(account))
+/**
+ * Connect and sign in to an account's IMAP server. A Google sign-in whose token Gmail refuses is
+ * refreshed and tried once more (see withCredentials). Close the provider when done.
+ */
+export async function connectImap(account: AccountToSignIn): Promise<ImapMailProvider> {
+  return withCredentials(account, async (creds) => {
+    const provider = new ImapMailProvider(imapSettings(account.imap, creds))
+    try {
+      await provider.connect()
+      return provider
+    } catch (err) {
+      await provider.close().catch(() => {})
+      throw err
+    }
+  })
 }
 
-/** How to reach and sign in to an account's SMTP server, now. */
-export async function smtpConfigFor(account: MailAccount): Promise<SmtpConfig> {
-  return smtpSettings(account.smtp, await getCredentials(account))
+/** Sign in to an account's IMAP server and out again. */
+export async function testAccountLogin(account: AccountToSignIn): Promise<void> {
+  const provider = await connectImap(account)
+  await provider.close().catch(() => {})
+}
+
+/**
+ * Run `fn` (one send) with the account's SMTP settings. A refused Google token is refreshed and
+ * the send tried once more: SMTP refuses a login before any message is accepted, so nothing is
+ * sent twice.
+ */
+export async function withSmtp<T>(account: AccountToSignIn, fn: (cfg: SmtpConfig) => Promise<T>): Promise<T> {
+  return withCredentials(account, (creds) => fn(smtpSettings(account.smtp, creds)))
+}
+
+/**
+ * The sender for a clean-up's mailto: unsubscribes from this account: one SMTP connection, opened
+ * on the first message, at most MAILTO_PER_CLEANUP_MAX messages in all. Like withSmtp, a Google
+ * token the server refuses is refreshed and that message tried once more on a new connection; a
+ * refused sign-in comes before any message is accepted, so nothing is sent twice. Anything else
+ * (including a failure after the message was handed over) is never retried.
+ */
+export function mailtoSenderFor(account: AccountToSignIn): {
+  send(msg: MailtoMessage): Promise<void>
+  close(): void
+} {
+  let sender: ReturnType<typeof createMailtoSender> | null = null
+  let sent = 0
+  const open = async (refresh: boolean) => {
+    sender?.close()
+    sender = null
+    const creds = await getCredentials(account, { refresh })
+    // The limit is for the whole clean-up, across a reconnect.
+    sender = createMailtoSender(
+      smtpSettings(account.smtp, creds),
+      account.email,
+      MAILTO_PER_CLEANUP_MAX - sent,
+    )
+    return sender
+  }
+  return {
+    async send(msg) {
+      const s = sender ?? (await open(false))
+      try {
+        await s.send(msg)
+      } catch (err) {
+        if (account.auth.kind !== 'oauth' || !isAuthFailure(err)) throw err
+        await (await open(true)).send(msg)
+      }
+      sent++
+    },
+    close() {
+      sender?.close()
+    },
+  }
 }
 
 /** Settings for details being tested, before there's an account. */
@@ -162,12 +251,19 @@ function providerName(account?: Pick<MailAccount, 'provider' | 'imap'> | null): 
   return account.provider === 'other' ? account.imap.host : PROVIDERS[account.provider].name
 }
 
+/** What explain() needs to know about the account. */
+type ExplainAccount = Pick<MailAccount, 'provider' | 'imap'> & Partial<Pick<MailAccount, 'auth' | 'email'>>
+
 /** Why a wrong-password error happened, and what to do, for each provider. */
-function authMessage(
-  account: Pick<MailAccount, 'provider' | 'imap'> | null | undefined,
-  email?: string,
-): string {
+function authMessage(account: ExplainAccount | null | undefined, email?: string): string {
   const provider = account?.provider ?? 'icloud'
+  if (account?.auth?.kind === 'oauth')
+    // Google gave Ordo a fresh token and Gmail still refused it: not something a new token fixes.
+    return (
+      `Gmail didn't accept Ordo's Google sign-in${account.email ? ` for ${account.email}` : ''}. ` +
+      'For a work or school account, your admin may have turned off IMAP, or allow only some mail apps: ' +
+      'ask them. Otherwise choose Sign in again in Settings → Accounts.'
+    )
   if (provider === 'icloud')
     return (
       "iCloud didn't accept that email and app-specific password. Make sure it's an app-specific password " +
@@ -195,11 +291,13 @@ function authMessage(
 export function explain(
   err: unknown,
   email?: string,
-  account?: Pick<MailAccount, 'provider' | 'imap'> | null,
+  account?: ExplainAccount | null,
 ): { error: ConnectError; message: string } {
   const e = classifyImapError(err)
   const name = providerName(account)
   const mailName = account && account.provider !== 'icloud' ? name : 'iCloud Mail'
+  // Google itself refused (revoked, expired, no mail access): its own words say what to do.
+  if (e instanceof SignInAgainError) return { error: 'auth', message: e.message }
   if (e instanceof MailAuthError) return { error: 'auth', message: authMessage(account, email) }
   if (e instanceof MailUnavailableError)
     return {
@@ -478,8 +576,7 @@ async function fetchHeaders(
 ): Promise<ScanOutcome> {
   let provider: ImapMailProvider | null = null
   try {
-    provider = new ImapMailProvider(await imapConfigFor(a))
-    await provider.connect()
+    provider = await connectImap(a)
     const result = await scanMailbox(provider, accountStore(a.id), { mailbox: INBOX, signal, onProgress })
     if (!result.stopped) recordScan(new Date(), a.id)
     if (!result.stopped) await then?.(provider)

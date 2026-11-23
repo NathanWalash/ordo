@@ -6,14 +6,8 @@ import {
   type CleanupPlan,
   type CleanupRecord,
 } from '@ordo/mail-core'
-import {
-  createGuardedFetch,
-  createMailtoSender,
-  ImapMailProvider,
-  runCleanup,
-  scanMailbox,
-  undoCleanup,
-} from '@ordo/mail-core/node'
+import type { ImapMailProvider } from '@ordo/mail-core/node'
+import { createGuardedFetch, runCleanup, scanMailbox, undoCleanup } from '@ordo/mail-core/node'
 import {
   CLEANUP_IPC,
   CleanupIdSchema,
@@ -33,10 +27,10 @@ import {
   allowLoopbackHttp,
   exclusively,
   explain,
-  imapConfigFor,
+  connectImap,
   INBOX,
   mailStore,
-  smtpConfigFor,
+  mailtoSenderFor,
 } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
@@ -115,13 +109,11 @@ async function runAccount(
       const store = accountStore(account.id)
       const loopback = allowLoopbackHttp()
       let provider: ImapMailProvider | null = null
-      // Opened on the first mailto unsubscribe only.
-      const smtp: { sender?: ReturnType<typeof createMailtoSender> } = {}
+      // Connects on the first mailto unsubscribe only, refreshing a refused Google token once.
+      const mailto = mailtoSenderFor(account)
       const fetch = createGuardedFetch({ allowLoopback: loopback })
       try {
-        provider = new ImapMailProvider(await imapConfigFor(account))
-        await provider.connect()
-        const smtpConfig = await smtpConfigFor(account)
+        provider = await connectImap(account)
         const record = await runCleanup(provider, store, plan.senders, {
           mailbox: INBOX,
           onProgress,
@@ -132,7 +124,7 @@ async function runAccount(
                 fetch,
                 allowLoopbackHttp: loopback,
                 openExternal: (url) => shell.openExternal(url),
-                sendMail: (msg) => (smtp.sender ??= createMailtoSender(smtpConfig, account.email)).send(msg),
+                sendMail: (msg) => mailto.send(msg),
               },
               { insecureLinkConfirmed: s.insecureLinkConfirmed, mailto: s.mailto ?? undefined },
             ),
@@ -141,7 +133,7 @@ async function runAccount(
       } catch (err) {
         return { ok: false, ...explain(err, undefined, account) }
       } finally {
-        smtp.sender?.close()
+        mailto.close()
         await provider?.close().catch(() => {})
       }
     }),
@@ -218,8 +210,7 @@ export async function undo(input: unknown): Promise<UndoOutcome> {
     withWriteLock('undoing a clean-up', async (): Promise<UndoOutcome> => {
       let provider: ImapMailProvider | null = null
       try {
-        provider = new ImapMailProvider(await imapConfigFor(account))
-        await provider.connect()
+        provider = await connectImap(account)
         const res = await undoCleanup(provider, store, id.data)
         // Restored emails have new UIDs in the inbox; a quick incremental scan caches them again.
         if (res.restored) await scanMailbox(provider, store, { mailbox: INBOX }).catch(() => {})

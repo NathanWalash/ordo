@@ -28,12 +28,20 @@ vi.mock('electron', () => ({
 const logins = vi.hoisted(() => ({ good: new Set<string>(), seen: [] as Record<string, unknown>[] }))
 vi.mock('@ordo/mail-core/node', async (importOriginal) => {
   const real = await importOriginal<{ MailAuthError: new (message: string) => Error }>()
+  const login = async (cfg: Record<string, unknown>) => {
+    logins.seen.push(cfg)
+    if (!logins.good.has(String(cfg['pass']))) throw new real.MailAuthError('Authentication failed')
+  }
   return {
     ...real,
-    testImapLogin: vi.fn(async (cfg: Record<string, unknown>) => {
-      logins.seen.push(cfg)
-      if (!logins.good.has(String(cfg['pass']))) throw new real.MailAuthError('Authentication failed')
-    }),
+    testImapLogin: vi.fn(login),
+    // A saved account signs in through connectImap: the same check, on a connection that does nothing.
+    ImapMailProvider: class {
+      usable = true
+      constructor(private cfg: Record<string, unknown>) {}
+      connect = () => login(this.cfg)
+      close = async () => {}
+    },
   }
 })
 
@@ -198,6 +206,52 @@ describe('moving a single-account install to the accounts list', () => {
     // A new account never takes an id an unknown entry has.
     const added = await accounts.add({ provider: 'gmail', email: 'x@gmail.com', password: GMAIL_PASSWORD })
     expect(added.ok && added.account.id).toBe('acc-8')
+  })
+
+  it('reads and writes back a Gmail account that signs in with Google, with no secret', async () => {
+    const good = account.fromLegacy({ email: 'me@icloud.com', password: 'abc', lastScan: null })!.accounts[0]!
+    const google = {
+      id: 'acc-2',
+      label: 'Work',
+      email: 'jo@corp.example',
+      color: 'green',
+      provider: 'gmail',
+      // Whatever servers the file names, a Google token only ever goes to Gmail's.
+      imap: { host: 'imap.evil.example', port: 143, secure: false },
+      smtp: { host: 'smtp.evil.example', port: 25, secure: false, requireTLS: false },
+      auth: { kind: 'oauth', provider: 'google', googleAccountId: '1234567890' },
+      lastScan: null,
+    }
+    // Not this version's kinds of Google sign-in: kept, unused, exactly as they were.
+    const notGmail = { ...google, id: 'acc-3', provider: 'yahoo' }
+    const noGoogleId = { ...google, id: 'acc-4', auth: { kind: 'oauth', provider: 'google' } }
+    const microsoft = { ...google, id: 'acc-5', auth: { kind: 'oauth', provider: 'microsoft', id: 'x' } }
+    writeFileSync(
+      at('accounts.json'),
+      JSON.stringify({ version: 1, lastId: 5, accounts: [good, google, notGmail, noGoogleId, microsoft] }),
+    )
+    expect(account.listAccounts().map((a) => [a.id, a.auth])).toEqual([
+      ['acc-1', { kind: 'password' }],
+      ['acc-2', { kind: 'oauth', provider: 'google', googleAccountId: '1234567890' }],
+    ])
+    expect(account.getAccount('acc-2')).toMatchObject({
+      imap: { host: 'imap.gmail.com', port: 993, secure: true },
+      smtp: { host: 'smtp.gmail.com', port: 465, secure: true },
+    })
+    expect(account.readSecret('acc-2')).toBeNull()
+    expect(account.accountsSignedInWith('1234567890').map((a) => a.id)).toEqual(['acc-2'])
+    expect(() => account.setSecret('acc-2', 'a password')).toThrow(/Google/)
+    expect(accounts.update({ id: 'acc-2', label: 'Office' })).toMatchObject({ ok: true })
+    const written = JSON.parse(readFileSync(at('accounts.json'), 'utf8'))
+    expect(written.accounts[1]).toMatchObject({ label: 'Office', auth: google.auth })
+    expect(written.accounts[1]).not.toHaveProperty('secret')
+    expect(written.accounts.slice(2)).toEqual([notGmail, noGoogleId, microsoft])
+    // A Google sign-in is saved without a secret, a password account never without one.
+    const draft = { ...account.getAccount('acc-2')!, email: 'new@corp.example' }
+    const { id: _id, lastScan: _l, ...rest } = draft
+    expect(() => account.addStoredAccount(rest, 'a secret')).toThrow()
+    expect(() => account.addStoredAccount({ ...rest, auth: { kind: 'password' } }, null)).toThrow()
+    expect(account.addStoredAccount(rest, null)).toMatchObject({ id: 'acc-6', auth: google.auth })
   })
 
   it('reads a list written by a newer Ordo, but never writes it', async () => {
@@ -578,7 +632,14 @@ describe('account IPC', () => {
     const h = handlers()
     const input = { provider: 'gmail', email: 'jo@gmail.com', password: GMAIL_PASSWORD }
     for (const e of [frame, other, { senderFrame: null }]) {
-      for (const channel of ['accounts:add', 'accounts:test', 'accounts:update', 'accounts:set-password'])
+      for (const channel of [
+        'accounts:add',
+        'accounts:test',
+        'accounts:update',
+        'accounts:set-password',
+        'accounts:add-google',
+        'accounts:sign-in-again',
+      ])
         expect(
           await h.get(channel)!(e, channel === 'accounts:add' ? input : { id: 'acc-1', label: 'x' }),
         ).toMatchObject({

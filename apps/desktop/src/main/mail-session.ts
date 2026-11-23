@@ -1,6 +1,6 @@
-import { ImapMailProvider, MailConnectionError } from '@ordo/mail-core/node'
+import { type ImapMailProvider, MailConnectionError } from '@ordo/mail-core/node'
 import type { MailAccount } from '@ordo/shared'
-import { imapConfigFor, onAccountRemoved, resolveAccount } from './mail'
+import { connectImap, onAccountRemoved, resolveAccount } from './mail'
 
 /**
  * One IMAP connection per account that the mail client keeps open while you read, so opening a
@@ -16,9 +16,11 @@ interface Session {
   account: string
   /** The sign-in it was opened with, so a changed address or server opens a new one. */
   key: string
-  provider: ImapMailProvider
+  /** Set once signed in (connecting may refresh a Google token and try again). */
+  provider: ImapMailProvider | null
   ready: Promise<void>
-  connected: boolean
+  /** Closed or replaced while still connecting: close the connection as soon as it's made. */
+  dropped: boolean
   users: number
   idle: ReturnType<typeof setTimeout> | null
 }
@@ -34,32 +36,37 @@ const keyOf = (a: MailAccount) => JSON.stringify([a.email, a.imap.host, a.imap.p
 function drop(s: Session): void {
   if (sessions.get(s.account) === s) sessions.delete(s.account)
   if (s.idle) clearTimeout(s.idle)
-  void s.provider.close().catch(() => {})
+  s.dropped = true
+  void s.provider?.close().catch(() => {})
 }
 
 async function open(accountId: string): Promise<Session> {
   const account = resolveAccount(accountId)
   if (!account) throw new NotConnected('Connect your iCloud account first.')
   const s = sessions.get(account.id)
-  if (s && s.key === keyOf(account) && (!s.connected || s.provider.usable)) {
+  if (s && s.key === keyOf(account) && (!s.provider || s.provider.usable)) {
     // Still connecting (another call started it), or connected and fine.
     await s.ready
     return s
   }
   if (s) drop(s)
-  const provider = new ImapMailProvider(await imapConfigFor(account))
   const fresh: Session = {
     account: account.id,
     key: keyOf(account),
-    provider,
+    provider: null,
     ready: Promise.resolve(),
-    connected: false,
+    dropped: false,
     users: 0,
     idle: null,
   }
-  fresh.ready = provider.connect().then(
-    () => {
-      fresh.connected = true
+  fresh.ready = connectImap(account).then(
+    (provider) => {
+      fresh.provider = provider
+      // Removed or replaced while it was connecting: don't keep it open.
+      if (fresh.dropped) {
+        void provider.close().catch(() => {})
+        throw new MailConnectionError('The connection was closed', 'dropped')
+      }
     },
     (err: unknown) => {
       drop(fresh)
@@ -80,10 +87,11 @@ export async function withImap<T>(
   s.users++
   if (s.idle) clearTimeout(s.idle)
   s.idle = null
+  const provider = s.provider!
   try {
-    return await fn(s.provider)
+    return await fn(provider)
   } catch (err) {
-    if (!s.provider.usable || err instanceof MailConnectionError) drop(s)
+    if (!provider.usable || err instanceof MailConnectionError) drop(s)
     throw err
   } finally {
     s.users--

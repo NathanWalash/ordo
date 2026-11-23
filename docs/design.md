@@ -97,7 +97,8 @@ process through the typed `window.ordo` API exposed by the preload script
   refresh token are kept with `safeStorage` in `google.json`; access tokens only in memory.
   `invalid_grant` marks the account "needs sign-in again". Scopes: `openid email
 calendar.calendarlist.readonly calendar.events`. The module (`main/google/`) is shared:
-  Gmail's XOAUTH2 can use `getGoogleAccessToken(accountId, scopes)`.
+  Gmail (IMAP/SMTP with XOAUTH2) uses the same accounts with `https://mail.google.com/`, through
+  `getGoogleAccessToken(accountId, scopes)` in `main/auth.ts` (see google.md, "How Gmail uses it").
 - Every Google request goes through an allow-list: `oauth2.googleapis.com` and
   `www.googleapis.com` only in packaged builds (a loopback fake in tests), https, no redirects,
   and the guarded connect that refuses private addresses.

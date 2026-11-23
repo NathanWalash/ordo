@@ -22,6 +22,7 @@ import {
   readIdToken,
   refreshAccessToken,
   revokeToken,
+  SCOPES,
   type FetchFn,
   type GoogleEndpoints,
 } from './oauth'
@@ -193,14 +194,18 @@ export class GoogleAuth {
 
   /**
    * Sign in through the browser and save (or update) the account. Every scope in `scopes` must be
-   * granted (Google lets people untick some), or nothing is saved.
+   * granted (Google lets people untick some), or nothing is saved. An account Ordo already has is
+   * only updated when the new grant covers everything it allowed before, and with `expectAccount`
+   * (Google's id of the account being signed in to again) a different account changes nothing.
    */
   async signIn({
     scopes,
     loginHint,
+    expectAccount,
   }: {
     scopes: readonly string[]
     loginHint?: string
+    expectAccount?: string
   }): Promise<GoogleAccountInfo> {
     this.requireBox()
     const client = this.client()
@@ -238,6 +243,15 @@ export class GoogleAuth {
       const missing = scopes.filter((s) => !has(s))
       const f = this.read()
       const existing = f.accounts.find((a) => a.id === who.sub)
+      if (expectAccount && who.sub !== expectAccount) {
+        // Signed in as someone else. An account Ordo already has keeps its sign-in exactly as it
+        // was; one that's new to Ordo had nothing before, so its new grant is revoked.
+        if (!existing) await revokeToken(this.o.endpoints, this.o.fetch, t.refreshToken ?? t.accessToken)
+        throw new OAuthError(
+          'wrong-account',
+          `You signed in to Google as ${who.email}${loginHint ? `, not ${loginHint}` : ''}. Nothing changed: sign in again and choose ${loginHint ?? 'the same account'}.`,
+        )
+      }
       if (missing.length) {
         // Revoking any token revokes the account's whole grant to this client, so only a brand-new
         // account's is revoked. For one already connected, the new tokens are just dropped and its
@@ -250,15 +264,30 @@ export class GoogleAuth {
         await revokeToken(this.o.endpoints, this.o.fetch, t.refreshToken ?? t.accessToken)
         throw new OAuthError(
           'scopes',
-          'Ordo needs every permission on Google’s screen to show and change your calendars. Connect again and leave them all ticked.',
+          scopes.includes(SCOPES.mail)
+            ? 'Ordo needs every permission on Google’s screen to read and send your mail. Sign in again and leave them all ticked.'
+            : 'Ordo needs every permission on Google’s screen to show and change your calendars. Connect again and leave them all ticked.',
         )
       }
+      // An account Ordo already has, signed in to for less than it allows now (a sign-in for Mail
+      // that picked Calendar's account, say): Google doesn't add to an installed app's grant, so
+      // keeping the new token would take the other feature's access away. Keep the stored sign-in
+      // exactly as it was (and revoke nothing: that would end it too).
+      const lost = existing?.scopes.filter((s) => !has(s)) ?? []
+      if (existing && lost.length)
+        throw new OAuthError(
+          'already-connected',
+          scopes.includes(SCOPES.mail)
+            ? `Nothing changed: ${existing.email} is already connected to Ordo. To add its mail, choose ${existing.email} in the list instead of another account.`
+            : `Nothing changed: ${existing.email} is already connected to Ordo. To show its calendars, choose Add Calendar on its row in Settings → Google.`,
+        )
       const refresh = t.refreshToken ? this.o.box.seal(t.refreshToken) : existing?.refresh
       if (!refresh) throw new OAuthError('server', 'Google didn’t give Ordo a lasting sign-in. Try again.')
       const account: StoredAccount = {
         id: who.sub,
         email: who.email,
-        scopes: [...scopes],
+        // What was asked for (the grant covers everything the account had: checked above).
+        scopes: [...new Set([...scopes, ...(existing?.scopes ?? [])])],
         refresh,
         added: existing?.added ?? new Date(this.now()).toISOString(),
       }

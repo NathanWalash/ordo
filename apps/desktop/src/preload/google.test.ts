@@ -31,6 +31,11 @@ const changes: [string, () => Promise<unknown>, unknown[]][] = [
   ],
   ['signOut', () => googleApi.signOut('123'), [GOOGLE_IPC.googleSignOut, '123']],
   [
+    'signOut with its mail accounts',
+    () => googleApi.signOut('123', { removeMail: ['acc-2'] }),
+    [GOOGLE_IPC.googleSignOut, '123', { removeMail: ['acc-2'] }],
+  ],
+  [
     'replaceFeed',
     () => googleApi.replaceFeed({ feedId: 'feed:1' }),
     [GOOGLE_IPC.googleReplaceFeed, { feedId: 'feed:1' }],

@@ -58,6 +58,7 @@ import {
   IPC,
   ReplaceFeedSchema,
   SetVisibleSchema,
+  SignOutGoogleOptionsSchema,
   UpdateEventSchema,
   type AddCalendarOutcome,
   type GoogleAccountStatus,
@@ -77,8 +78,8 @@ import {
 } from '@ordo/shared'
 import { createGuardedFetch } from '@ordo/mail-core/node'
 import { hostRefusal } from '@ordo/mail-core'
-import { canStoreSecrets, loadAccount } from './account'
-import { allowLoopbackHttp } from './mail'
+import { accountsSignedInWith, canStoreSecrets, loadAccount } from './account'
+import { allowLoopbackHttp, removeAccount } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
 import { fromAppWindow } from './ipc-sender'
 import {
@@ -87,6 +88,7 @@ import {
   googleEndpoints,
   googleFetchFn,
   GoogleReauthError,
+  hasCalendarScopes,
   OAuthError,
   SCOPES,
   type GoogleAccountInfo,
@@ -125,13 +127,18 @@ function storeFor(email: string | null): CalendarStore {
   return s
 }
 
-/** Connected Google accounts, or none if the account file can't be read. */
-function googleAccounts(): GoogleAccountInfo[] {
+/** Every connected Google account (Calendar's and Mail's), or none if the file can't be read. */
+function allGoogleAccounts(): GoogleAccountInfo[] {
   try {
     return googleAuth().accounts()
   } catch {
     return []
   }
+}
+
+/** The connected Google accounts that gave Ordo Calendar access (not those added for Mail only). */
+function googleAccounts(): GoogleAccountInfo[] {
+  return allGoogleAccounts().filter((g) => hasCalendarScopes(g.scopes))
 }
 
 /** Calendar needs to list calendars and change events; sign-in asked for these and openid/email. */
@@ -845,6 +852,8 @@ function accountStatus(g: GoogleAccountInfo): GoogleAccountStatus {
     calendars: openStore()
       .calendars()
       .filter((c) => c.provider === provider).length,
+    calendar: hasCalendarScopes(g.scopes),
+    mailAccounts: accountsSignedInWith(g.id).map((a) => ({ id: a.id, label: a.label, email: a.email })),
   }
 }
 
@@ -861,7 +870,7 @@ export function googleStatus(): GoogleStatus {
   return {
     secureStorage: canStoreSecrets(),
     client: client ? { clientId: client.clientId, hasSecret: !!client.clientSecret } : null,
-    accounts: googleAccounts().map(accountStatus),
+    accounts: allGoogleAccounts().map(accountStatus),
     signingIn,
   }
 }
@@ -890,6 +899,8 @@ function connectFailure(err: unknown): GoogleConnectOutcome {
       'invalid-client': 'invalid-client',
       network: 'network',
       server: 'unknown',
+      'wrong-account': 'unknown',
+      'already-connected': 'unknown',
     }
     return { ok: false, error: map[err.code], message: err.message }
   }
@@ -898,7 +909,9 @@ function connectFailure(err: unknown): GoogleConnectOutcome {
 
 /**
  * Sign in to Google in the browser: a new account, or `accountId` again (after Google stopped
- * accepting Ordo's sign-in). Then sync its calendars straight away.
+ * accepting Ordo's sign-in, or with `addCalendar` to give an account added for Mail only Calendar
+ * access too). Signing in again asks for everything the account has already given (so Mail keeps
+ * working) and, for Calendar's accounts, Calendar. Then sync its calendars straight away.
  */
 export async function connectGoogle(input: unknown): Promise<GoogleConnectOutcome> {
   const parsed = ConnectGoogleSchema.safeParse(input)
@@ -919,9 +932,12 @@ export async function connectGoogle(input: unknown): Promise<GoogleConnectOutcom
   const again = parsed.data?.accountId ? auth.account(parsed.data.accountId) : null
   signingIn = true
   try {
+    const calendarToo = !again || hasCalendarScopes(again.scopes) || parsed.data?.addCalendar === true
     const g = await auth.signIn({
-      scopes: again ? [...new Set([...again.scopes, ...CALENDAR_SCOPES])] : CALENDAR_SCOPES,
-      ...(again && { loginHint: again.email }),
+      scopes: again
+        ? [...new Set([...again.scopes, ...(calendarToo ? CALENDAR_SCOPES : [])])]
+        : CALENDAR_SCOPES,
+      ...(again && { loginHint: again.email, expectAccount: again.id }),
     })
     googleHealth.delete(g.id)
     // Show its calendars as soon as they're listed.
@@ -936,10 +952,36 @@ export async function connectGoogle(input: unknown): Promise<GoogleConnectOutcom
   }
 }
 
-/** Revoke Ordo's access at Google and forget the account and its calendars. */
-export async function signOutGoogle(accountId: unknown): Promise<GoogleSimpleOutcome> {
+const listNames = (accounts: { label: string; email: string }[]) =>
+  accounts.map((a) => `${a.label} (${a.email})`).join(', ')
+
+/**
+ * Revoke Ordo's access at Google and forget the account and its calendars. Revoking ends the whole
+ * grant, so mail accounts that sign in with it would stop working: they're removed first, as
+ * Settings → Accounts removes an account (downloaded mail cleared, nothing changed in Gmail), but
+ * only the ones the user confirmed (`removeMail`). Any other refuses the sign-out, naming them.
+ */
+export async function signOutGoogle(accountId: unknown, options?: unknown): Promise<GoogleSimpleOutcome> {
   const id = GoogleAccountIdSchema.safeParse(accountId)
   if (!id.success) return { ok: false, message: 'That account wasn’t found.' }
+  const opts = SignOutGoogleOptionsSchema.safeParse(options)
+  if (!opts.success) return { ok: false, message: 'That account wasn’t found.' }
+  const linked = accountsSignedInWith(id.data)
+  const confirmed = new Set(opts.data?.removeMail ?? [])
+  const unconfirmed = linked.filter((a) => !confirmed.has(a.id))
+  if (unconfirmed.length) {
+    const email = googleAuth().account(id.data)?.email ?? 'this Google account'
+    return {
+      ok: false,
+      message: `Mail in Ordo signs in with ${email}: ${listNames(unconfirmed)}. Signing out would stop it working, so remove ${unconfirmed.length === 1 ? 'it' : 'them'} too, or remove ${unconfirmed.length === 1 ? 'it' : 'them'} in Settings → Accounts first.`,
+    }
+  }
+  // Before taking the write lock: removing an account waits for its running syncs, which take it.
+  try {
+    for (const a of linked) await removeAccount(a.id)
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : 'Couldn’t remove the mail account.' }
+  }
   running?.abort()
   const r = await withWriteLock('signing out of Google', async () => {
     const done = await googleAuth().signOut(id.data)
@@ -1024,8 +1066,8 @@ export function registerCalendarIpc(): void {
     fromAppWindow(e) ? connectGoogle(input) : { ...refused, error: 'unknown' as const },
   )
   ipcMain.handle(GOOGLE_IPC.googleCancel, () => googleAuth().cancelSignIn())
-  ipcMain.handle(GOOGLE_IPC.googleSignOut, (e, id: unknown) =>
-    fromAppWindow(e) ? signOutGoogle(id) : refused,
+  ipcMain.handle(GOOGLE_IPC.googleSignOut, (e, id: unknown, options?: unknown) =>
+    fromAppWindow(e) ? signOutGoogle(id, options) : refused,
   )
   ipcMain.handle(GOOGLE_IPC.googleSetColor, (_e, input: unknown) => setCalendarColor(input))
   ipcMain.handle(GOOGLE_IPC.googleFeedMatches, () => googleFeedMatches())

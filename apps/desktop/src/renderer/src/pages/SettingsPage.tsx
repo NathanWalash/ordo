@@ -58,7 +58,10 @@ export function SettingsPage({ account, onConnect, onAccountsChanged }: Props) {
           onChanged={() => onAccountsChanged?.()}
         />
       )}
-      <GoogleSettings />
+      <GoogleSettings
+        accountsKey={account?.connected ? account.accounts.map((a) => a.id).join() : 'none'}
+        onAccountsChanged={() => onAccountsChanged?.()}
+      />
       <Section title="Appearance">
         <Row
           label="Theme"

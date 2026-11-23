@@ -12,42 +12,53 @@ when its last check failed (a wrong password, a server that's down). From there 
 
 - **Add account…**: pick a provider, enter the address and an app password, and optionally a name
   ("Work", "Personal"). **Test connection** signs in and out without saving anything; **Add
-  account** signs in first, so nothing is saved that doesn't work. **Connect iCloud** (shown until
+  account** signs in first, so nothing is saved that doesn't work. For Gmail, **Sign in with Google**
+  (the default) needs no app password: see [Gmail](#gmail). **Connect iCloud** (shown until
   you have an account, and on Mail, Unclutter and Calendar) is the same for iCloud.
 - **Edit…**: rename it, change its colour, enter a new password (Ordo signs in with it before
   saving it) or test it. When an account's password stops working, its button says **Enter
-  password…**.
+  password…**; for a Gmail account that signs in with Google, **Sign in again** appears instead.
 - **Remove…**: a sheet says exactly what goes: the account's password, the mail Ordo downloaded for
   it (headers, folders and the text of messages you opened) and its clean-up history; for the
   iCloud account Calendar uses, its iCloud calendars too (calendars added by link stay). Nothing
   changes on the server: your mail stays where it is, and you can add the account again.
 
 Passwords are encrypted with the system keychain (`safeStorage`) and kept in `accounts.json` in
-Ordo's profile, readable only by you. The window never sees a password: it gets each account's
+Ordo's profile, readable only by you. An account that signs in with Google keeps nothing secret
+there: its tokens are in `google.json`, encrypted the same way (see [google.md](google.md)). The
+window never sees a password or a token: it gets each account's
 name, colour, address, provider and servers. Ordo always uses an encrypted connection: TLS from the
 start, or STARTTLS that must succeed before signing in or sending (Ordo refuses to fall back to
 plain text).
 
 ### Providers
 
-| Provider    | Servers                                                         | Password                                            |
-| ----------- | --------------------------------------------------------------- | --------------------------------------------------- |
-| iCloud      | `imap.mail.me.com:993` (TLS), `smtp.mail.me.com:587` (STARTTLS) | App-specific password from account.apple.com        |
-| Gmail       | `imap.gmail.com:993` (TLS), `smtp.gmail.com:465` (TLS)          | App password from myaccount.google.com/apppasswords |
-| Yahoo Mail  | `imap.mail.yahoo.com:993`, `smtp.mail.yahoo.com:465`            | App password from Yahoo Account Security            |
-| Fastmail    | `imap.fastmail.com:993`, `smtp.fastmail.com:465`                | App password with IMAP and SMTP access              |
-| Outlook.com | Not supported yet                                               | Microsoft turned off password sign-in for IMAP      |
-| Other       | The IMAP and SMTP servers, ports and security you type          | Your password, or an app password if offered        |
+| Provider    | Servers                                                         | Password                                       |
+| ----------- | --------------------------------------------------------------- | ---------------------------------------------- |
+| iCloud      | `imap.mail.me.com:993` (TLS), `smtp.mail.me.com:587` (STARTTLS) | App-specific password from account.apple.com   |
+| Gmail       | `imap.gmail.com:993` (TLS), `smtp.gmail.com:465` (TLS)          | Sign in with Google, or an app password        |
+| Yahoo Mail  | `imap.mail.yahoo.com:993`, `smtp.mail.yahoo.com:465`            | App password from Yahoo Account Security       |
+| Fastmail    | `imap.fastmail.com:993`, `smtp.fastmail.com:465`                | App password with IMAP and SMTP access         |
+| Outlook.com | Not supported yet                                               | Microsoft turned off password sign-in for IMAP |
+| Other       | The IMAP and SMTP servers, ports and security you type          | Your password, or an app password if offered   |
 
 Outlook.com, Hotmail and Live are listed but can't be added yet: Microsoft has turned off password
 sign-in for IMAP, so Ordo needs Microsoft sign-in, which is coming later.
 
 ### Gmail
 
+- **Sign in with Google** (recommended) adds the account without an app password: your browser opens
+  Google's consent page and Ordo gets a token for IMAP and SMTP (XOAUTH2). It needs your own OAuth
+  client in Settings → Google first (the same one Calendar uses), can use a Google account already
+  connected there, and asks for mail access only. When Google stops accepting the sign-in (revoked,
+  password changed, or weekly with an app in Testing), the account offers **Sign in again**.
+  Removing the account leaves the Google sign-in in Settings → Google; signing out there removes the
+  mail accounts that use it, after asking. Setup, scopes and what Workspace admins can block are in
+  [google.md](google.md#gmail-with-sign-in-with-google).
 - **App passwords need 2-Step Verification** on your Google Account. Your Google password won't
   work.
-- **Work and school accounts** (Google Workspace) may not allow app passwords or IMAP at all: that's
-  your admin's choice. Sign in with Google is coming, and will work for those too.
+- **Work and school accounts** (Google Workspace) may not allow app passwords, and their admin may
+  have turned IMAP off or allowed only some mail apps. Use Sign in with Google, and ask your admin.
 - **Folders are labels.** Ordo finds Gmail's special folders by their SPECIAL-USE flags, never by
   name, so `[Gmail]/Sent Mail`, `[Gmail]/Bin` (`[Gmail]/Trash` in American English),
   `[Gmail]/Spam` and `[Gmail]/All Mail` work like iCloud's Sent Messages, Deleted Messages and Junk.
@@ -216,7 +227,9 @@ New message, Reply, Reply all and Forward open a compose sheet. Messages are pla
   message. Header fields are single lines, so a subject or name can't add hidden headers. Send with
   a mistake puts the cursor in the field to fix.
 - Mail goes through the From account's own SMTP server (iCloud: `smtp.mail.me.com:587`, STARTTLS
-  required; Gmail: `smtp.gmail.com:465`) with its password. A copy with your Bcc list is kept in that
+  required; Gmail: `smtp.gmail.com:465`) with its password, or a Google token (XOAUTH2, refreshed and
+  tried once more if Gmail refuses it: Gmail refuses a sign-in before taking any mail, so nothing is
+  sent twice). A copy with your Bcc list is kept in that
   account's Sent; the copy that is sent leaves Bcc out. If the server refuses some recipients, Ordo
   says which; if it refuses them all, nothing is sent and Ordo says so.
 - Replies are threaded (`In-Reply-To` and `References`) and the original is marked as replied. Reply
@@ -293,5 +306,7 @@ place, keeping the folder you're in. See [assistant.md](assistant.md#email).
 Unpackaged builds can point IMAP and SMTP at a local server with `ORDO_IMAP_HOST`,
 `ORDO_IMAP_PORT`, `ORDO_SMTP_HOST` and `ORDO_SMTP_PORT` (with `ORDO_SMTP_SECURE=1` or
 `ORDO_SMTP_REQUIRE_TLS=1` if needed), for every account at once: each still signs in with its own
-user and password. `ORDO_TEST_ALLOW_LOOPBACK_HTTP=1` lets Load images reach an
+user and password (or Google token: `test/fake-xoauth2.ts` is a local server that speaks XOAUTH2,
+with `ORDO_GOOGLE_BASE_URL` pointing at the fake Google; see [google.md](google.md#testing-against-a-fake-google); a Google token is only ever sent to a test
+server on 127.0.0.1, ::1 or localhost). `ORDO_TEST_ALLOW_LOOPBACK_HTTP=1` lets Load images reach an
 http server on 127.0.0.1. Packaged builds ignore all of these.
