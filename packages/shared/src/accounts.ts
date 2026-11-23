@@ -80,6 +80,8 @@ export interface AccountSummary extends MailAccount {
   /** Cached inbox messages. */
   messageCount: number
   sync: AccountSyncState
+  /** It's the iCloud account Calendar uses. */
+  calendar?: boolean
 }
 
 const host = z

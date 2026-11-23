@@ -24,7 +24,6 @@ import {
 import {
   ConnectInputSchema,
   defaultLabel,
-  FIRST_ACCOUNT_ID,
   nextColor,
   type AccountStatus,
   type ConnectError,
@@ -36,8 +35,8 @@ import {
 } from '@ordo/shared'
 import {
   addStoredAccount,
+  assertAccountsWritable,
   canStoreSecrets,
-  defaultAccount,
   getAccount,
   listAccounts,
   recordScan,
@@ -83,9 +82,13 @@ export async function exclusively<T>(account: string, fn: () => Promise<T>): Pro
  */
 export const allowLoopbackHttp = () => !app.isPackaged && process.env['ORDO_TEST_ALLOW_LOOPBACK_HTTP'] === '1'
 
+/** Accounts being removed: no new work starts on them while their running work settles. */
+const removing = new Set<string>()
+
 /** The account named, or the first one when none is named. Null if there's no such account. */
 export function resolveAccount(id?: string): MailAccount | null {
-  return id ? getAccount(id) : defaultAccount()
+  const a = id ? getAccount(id) : (listAccounts().find((x) => !removing.has(x.id)) ?? null)
+  return a && !removing.has(a.id) ? a : null
 }
 
 /** Tests can point an unpackaged build at a local IMAP server, for every account. */
@@ -271,10 +274,12 @@ export async function connect(input: ConnectInput): Promise<ConnectResult> {
   const same = listAccounts().find(
     (a) => a.provider === 'icloud' && a.email.toLowerCase() === result.email.toLowerCase(),
   )
-  if (same) {
-    setSecret(same.id, result.password!)
-    syncSchedule.reset(same.id)
-  } else {
+  try {
+    if (same) {
+      setSecret(same.id, result.password!)
+      syncSchedule.reset(same.id)
+      return { ok: true, email: result.email }
+    }
     const icloud = PROVIDERS.icloud
     const taken = listAccounts()
     addStoredAccount(
@@ -291,9 +296,11 @@ export async function connect(input: ConnectInput): Promise<ConnectResult> {
         auth: { kind: 'password' },
       },
       result.password!,
-      // An empty profile's first account gets the id an old cache's rows already have.
-      taken.length === 0 ? FIRST_ACCOUNT_ID : undefined,
+      // Never an id that still has mail in the cache.
+      mailStore().cachedAccounts(),
     )
+  } catch (err) {
+    return { ok: false, error: 'unavailable', message: err instanceof Error ? err.message : String(err) }
   }
   return { ok: true, email: result.email }
 }
@@ -334,16 +341,27 @@ const DISCONNECT_WAIT_MS = 10_000
  * for it (mail, folders, clean-up history). Nothing on the server changes. Other accounts carry on.
  */
 export async function removeAccount(account: string): Promise<void> {
-  running.get(account)?.abort()
-  for (const stop of stoppers.get(account) ?? []) stop()
-  removeStoredAccount(account)
-  for (const listener of removedListeners) listener(account)
-  syncSchedule.reset(account)
-  // A sync that was running would otherwise write old mail into the cache after it's cleared.
-  const pending = [...(inflight.get(account) ?? [])].map((p) => p.catch(() => {}))
-  await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, DISCONNECT_WAIT_MS))])
-  accountStore(account).clear()
-  if (!listAccounts().length) mailStore().clearAll()
+  // A newer Ordo's accounts file can't be changed: refuse before stopping or clearing anything.
+  assertAccountsWritable()
+  // No new work starts on it from here on.
+  removing.add(account)
+  try {
+    running.get(account)?.abort()
+    for (const stop of stoppers.get(account) ?? []) stop()
+    for (const listener of removedListeners) listener(account)
+    syncSchedule.reset(account)
+    // A sync that was running would otherwise write old mail into the cache after it's cleared.
+    const pending = [...(inflight.get(account) ?? [])].map((p) => p.catch(() => {}))
+    await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, DISCONNECT_WAIT_MS))])
+    // The cache first, then the list: a crash in between leaves the account listed with nothing
+    // cached (it downloads again), never rows that a later account could inherit. Ids are never
+    // reused either.
+    accountStore(account).clear()
+    removeStoredAccount(account)
+    if (!listAccounts().length) mailStore().clearAll()
+  } finally {
+    removing.delete(account)
+  }
 }
 
 /** Forget every account (and anything cached for one that's gone). */
@@ -476,7 +494,9 @@ export function stopScan(account?: string): void {
 
 /** Account ids to read: one (if it exists), or every account. */
 export function accountIds(account?: string | 'all'): string[] {
-  const all = listAccounts().map((a) => a.id)
+  const all = listAccounts()
+    .map((a) => a.id)
+    .filter((id) => !removing.has(id))
   if (!account || account === 'all') return all
   return all.includes(account) ? [account] : []
 }

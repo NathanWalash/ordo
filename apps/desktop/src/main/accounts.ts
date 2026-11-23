@@ -6,7 +6,6 @@ import {
   AccountIdSchema,
   AddAccountSchema,
   defaultLabel,
-  FIRST_ACCOUNT_ID,
   nextColor,
   SetPasswordSchema,
   TestAccountSchema,
@@ -18,6 +17,7 @@ import {
 } from '@ordo/shared'
 import {
   addStoredAccount,
+  calendarAccountId,
   canStoreSecrets,
   getAccount,
   listAccounts,
@@ -30,6 +30,7 @@ import {
   imapConfigFor,
   imapConfigForTest,
   INBOX,
+  mailStore,
   removeAccount,
   syncSchedule,
 } from './mail'
@@ -41,6 +42,12 @@ import {
  */
 
 const invalid = (message: string): AccountResult => ({ ok: false, error: 'invalid', message })
+/** A save that couldn't happen (a newer Ordo's accounts file, a disk that won't take it). */
+const refused = (err: unknown): AccountResult => ({
+  ok: false,
+  error: 'unavailable',
+  message: err instanceof Error ? err.message : String(err),
+})
 const NO_KEYCHAIN: AccountResult = {
   ok: false,
   error: 'unavailable',
@@ -60,10 +67,12 @@ function syncState(id: string): AccountSyncState {
 }
 
 export function list(): AccountSummary[] {
+  const calendar = calendarAccountId()
   return listAccounts().map((a) => ({
     ...a,
     messageCount: accountStore(a.id).count(INBOX),
     sync: syncState(a.id),
+    ...(a.id === calendar && { calendar: true }),
   }))
 }
 
@@ -139,24 +148,28 @@ export async function add(input: unknown): Promise<AccountResult> {
     return invalid('That account is already in Ordo. Enter its password again from its row instead.')
   const problem = await signIn(draft, parsed.data.password)
   if (problem) return problem
-  // An empty profile's first account gets the id an old mail cache's rows already belong to.
-  const account = addStoredAccount(
-    draft,
-    parsed.data.password,
-    listAccounts().length === 0 ? FIRST_ACCOUNT_ID : undefined,
-  )
-  return { ok: true, account }
+  try {
+    // A fresh id, never one that still has mail in the cache.
+    const account = addStoredAccount(draft, parsed.data.password, mailStore().cachedAccounts())
+    return { ok: true, account }
+  } catch (err) {
+    return refused(err)
+  }
 }
 
 export function update(input: unknown): AccountResult {
   const parsed = UpdateAccountSchema.safeParse(input)
   if (!parsed.success) return invalid(parsed.error.issues[0]?.message || 'Check the details.')
   const { id, label, color } = parsed.data
-  const account = updateStoredAccount(id, {
-    ...(label !== undefined && label.trim() && { label: label.trim() }),
-    ...(color && { color }),
-  })
-  return account ? { ok: true, account } : invalid('There’s no such account.')
+  try {
+    const account = updateStoredAccount(id, {
+      ...(label !== undefined && label.trim() && { label: label.trim() }),
+      ...(color && { color }),
+    })
+    return account ? { ok: true, account } : invalid('There’s no such account.')
+  } catch (err) {
+    return refused(err)
+  }
 }
 
 /** Check a new password by signing in with it, then save it. */
@@ -168,7 +181,11 @@ export async function setPassword(input: unknown): Promise<AccountResult> {
   if (!account) return invalid('There’s no such account.')
   const problem = await signIn(account, parsed.data.password)
   if (problem) return problem
-  setSecret(account.id, parsed.data.password)
+  try {
+    setSecret(account.id, parsed.data.password)
+  } catch (err) {
+    return refused(err)
+  }
   syncSchedule.reset(account.id)
   return { ok: true, account }
 }

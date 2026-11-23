@@ -1,7 +1,6 @@
 import { ImapMailProvider, MailConnectionError } from '@ordo/mail-core/node'
 import type { MailAccount } from '@ordo/shared'
-import { getAccount } from './account'
-import { imapConfigFor, onAccountRemoved } from './mail'
+import { imapConfigFor, onAccountRemoved, resolveAccount } from './mail'
 
 /**
  * One IMAP connection per account that the mail client keeps open while you read, so opening a
@@ -39,7 +38,7 @@ function drop(s: Session): void {
 }
 
 async function open(accountId: string): Promise<Session> {
-  const account = getAccount(accountId)
+  const account = resolveAccount(accountId)
   if (!account) throw new NotConnected('Connect your iCloud account first.')
   const s = sessions.get(account.id)
   if (s && s.key === keyOf(account) && (!s.connected || s.provider.usable)) {

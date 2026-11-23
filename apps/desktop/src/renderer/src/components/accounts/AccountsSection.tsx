@@ -73,9 +73,7 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
                   <div className="truncate text-[12px] leading-snug text-ink-2">
                     {a.email} · {providerName(a)}
                     {a.messageCount > 0 && ` · ${a.messageCount.toLocaleString()} in the inbox`}
-                    {a.provider === 'icloud' && accounts.find((x) => x.provider === 'icloud')?.id === a.id
-                      ? ' · Calendar'
-                      : ''}
+                    {a.calendar ? ' · Calendar' : ''}
                   </div>
                   {a.sync.message && (
                     <p className="mt-1 flex items-start gap-1 text-[12px] leading-snug text-danger-text">
@@ -128,7 +126,7 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
       {removing && (
         <RemoveAccountSheet
           account={removing}
-          calendar={accounts.find((x) => x.provider === 'icloud')?.id === removing.id}
+          calendar={removing.calendar === true}
           onClose={() => setRemoving(null)}
           onRemoved={() => {
             setRemoving(null)
