@@ -272,3 +272,21 @@ describe('restoring', () => {
     expect(existsSync(join(env.profile, 'restore-staging'))).toBe(false)
   })
 })
+
+describe('hardening', () => {
+  it('records a backup as made even if tidying old ones fails', async () => {
+    const { shell } = await import('electron')
+    backup.update({ keep: 3 })
+    // The folder vanishes while old backups are being moved to the Trash (a drive unplugged).
+    vi.mocked(shell.trashItem).mockImplementationOnce(async () => {
+      rmSync(folder, { recursive: true, force: true })
+      throw new Error('gone')
+    })
+    const r = await backup.run({})
+    expect(r).toMatchObject({ ok: true, note: expect.stringMatching(/^Older backups weren’t tidied up/) })
+    if (!r.ok) return
+    expect(backup.status()).toMatchObject({ lastSuccessAt: r.at, last: { ok: true, note: r.note } })
+    mkdirSync(folder, { recursive: true })
+    backup.update({ keep: 7 })
+  })
+})

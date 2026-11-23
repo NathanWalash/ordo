@@ -86,6 +86,7 @@ const LastSchema = z.discriminatedUnion('ok', [
     file: z.string(),
     size: z.number(),
     automatic: z.boolean(),
+    note: z.string().optional(),
   }),
   z.object({ at: z.string(), ok: z.literal(false), message: z.string(), automatic: z.boolean() }),
 ])
@@ -324,9 +325,16 @@ async function backUp(passphrase: string, automatic: boolean): Promise<BackupRun
       account: email ? { email } : null,
       excluded: ['account.json: passwords stay in this computer’s keychain'],
     })
-    const pruned = await prune(folder, config.keep, name)
-    record({ at: now.toISOString(), ok: true, file: name, size, automatic })
-    return { ok: true, file: name, size, at: now.toISOString(), pruned }
+    // The backup is safely written: a problem tidying old ones mustn't make it look failed.
+    let pruned = 0
+    let note: string | undefined
+    try {
+      pruned = await prune(folder, config.keep, name)
+    } catch (err) {
+      note = `Older backups weren’t tidied up: ${friendly(err)}`
+    }
+    record({ at: now.toISOString(), ok: true, file: name, size, automatic, ...(note ? { note } : {}) })
+    return { ok: true, file: name, size, at: now.toISOString(), pruned, ...(note ? { note } : {}) }
   } catch (err) {
     const message = friendly(err)
     record({ at: now.toISOString(), ok: false, message, automatic })

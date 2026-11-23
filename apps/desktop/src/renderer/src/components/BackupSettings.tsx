@@ -172,7 +172,10 @@ export function BackupSettings() {
             ) : last.ok ? (
               <>
                 <CircleCheck size={13} className="mt-px shrink-0 text-success" />
-                {when(last.at)} · {formatBytes(last.size)}
+                <span>
+                  {when(last.at)} · {formatBytes(last.size)}
+                  {last.note && <span className="block text-[var(--promotions)]">{last.note}</span>}
+                </span>
               </>
             ) : (
               <>

@@ -59,7 +59,15 @@ export const RestoreConfirmSchema = z.strictObject({
 export type RestoreConfirm = z.infer<typeof RestoreConfirmSchema>
 
 export type BackupLast =
-  | { at: string; ok: true; file: string; size: number; automatic: boolean }
+  | {
+      at: string
+      ok: true
+      file: string
+      size: number
+      automatic: boolean
+      /** Something worth knowing that didn't stop the backup, such as old ones not being tidied. */
+      note?: string
+    }
   | { at: string; ok: false; message: string; automatic: boolean }
 
 export interface BackupStatus {
@@ -82,7 +90,7 @@ export interface BackupStatus {
 }
 
 export type BackupRunResult =
-  | { ok: true; file: string; size: number; at: string; pruned: number }
+  | { ok: true; file: string; size: number; at: string; pruned: number; note?: string }
   | {
       ok: false
       error: 'not-set-up' | 'needs-passphrase' | 'wrong-passphrase' | 'locked' | 'invalid' | 'failed'
