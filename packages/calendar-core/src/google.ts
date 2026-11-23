@@ -380,9 +380,17 @@ export class GoogleCalendarProvider implements CalendarProvider, WritableCalenda
           'GET',
           this.eventsPath(calendarId),
           {
-            // The same parameters every time, as Google asks: with singleEvents=false a series comes
-            // as one event with its RRULE, plus its changed and cancelled occurrences.
-            query: { maxResults: '2500', singleEvents: 'false', syncToken: token ?? undefined, pageToken },
+            // The same parameters every time (full sync, deltas, every page), as Google asks. With
+            // singleEvents=false a series comes as one event with its RRULE plus its changed
+            // occurrences; showDeleted=true also brings its cancelled occurrences in a full sync,
+            // without which a deleted occurrence would come back after a full resync.
+            query: {
+              maxResults: '2500',
+              singleEvents: 'false',
+              showDeleted: 'true',
+              syncToken: token ?? undefined,
+              pageToken,
+            },
           },
         )
       } catch (err) {

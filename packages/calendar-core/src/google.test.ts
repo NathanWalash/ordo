@@ -180,6 +180,35 @@ describe('syncing', () => {
     expect(titles()).toEqual(['C'])
   })
 
+  it('asks for deleted events on every page of every sync, so a full sync keeps cancelled occurrences hidden', async () => {
+    fake.pageSize = 1
+    const m = fake.put(ME, {
+      summary: 'Standup',
+      start: { dateTime: '2026-11-02T09:00:00Z', timeZone: 'Europe/London' },
+      end: { dateTime: '2026-11-02T09:15:00Z', timeZone: 'Europe/London' },
+      recurrence: ['RRULE:FREQ=WEEKLY;COUNT=3'],
+    })
+    fake.put(ME, {
+      id: `${m.id}_20261109T090000Z`,
+      recurringEventId: m.id,
+      iCalUID: m.iCalUID,
+      status: 'cancelled',
+      originalStartTime: { dateTime: '2026-11-09T09:00:00Z', timeZone: 'Europe/London' },
+    })
+    const starts = () => store.events(WINDOW).map((e) => e.start.toISOString().slice(0, 10))
+    await sync()
+    expect(starts()).toEqual(['2026-11-02', '2026-11-16'])
+    fake.expireSyncTokens()
+    await sync()
+    await sync({ force: true })
+    expect(starts()).toEqual(['2026-11-02', '2026-11-16'])
+    const lists = fake.apiRequests().filter((r) => r.path.endsWith(`${encodeURIComponent(ME)}/events`))
+    expect(lists.length).toBeGreaterThan(4)
+    expect(lists.some((r) => r.query['syncToken'])).toBe(true)
+    expect(lists.some((r) => r.query['pageToken'])).toBe(true)
+    for (const r of lists) expect(r.query['showDeleted']).toBe('true')
+  })
+
   it('expands a series with changed and cancelled occurrences, and hides declined ones', async () => {
     const m = fake.put(ME, {
       summary: 'Standup',
@@ -442,9 +471,14 @@ describe('changing events', () => {
         '2026-11-09T09:00:00.000Z',
         '2026-11-23T09:00:00.000Z',
       ])
-      // And a sync agrees.
+      // And a sync agrees, a full one too (forced, or after Google expires the sync token).
       await sync()
       expect(store.events(WINDOW)).toHaveLength(3)
+      await sync({ force: true })
+      expect(store.events(WINDOW)).toHaveLength(3)
+      fake.expireSyncTokens()
+      await sync()
+      expect(store.events(WINDOW).map((e) => e.start.toISOString())).not.toContain('2026-11-16T09:00:00.000Z')
     })
 
     it('renames every occurrence by changing the series only', async () => {

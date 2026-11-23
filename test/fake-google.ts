@@ -426,8 +426,11 @@ export class FakeGoogle {
         return apiError(res, 410, 'fullSyncRequired', 'Sync token is no longer valid')
       since = Number(t[2])
     }
+    // A full sync lists cancelled events (deleted ones, and cancelled occurrences of a series)
+    // only with showDeleted=true; a sync with a token always lists what changed, deletions too.
+    const deleted = q.get('showDeleted') === 'true'
     const all = [...cal.events.values()]
-      .filter((e) => (token ? e.seq >= since : e.status !== 'cancelled' || !!e.recurringEventId))
+      .filter((e) => (token ? e.seq >= since : deleted || e.status !== 'cancelled'))
       .sort((a, b) => a.seq - b.seq)
     const size = Math.min(Number(q.get('maxResults') ?? 250), this.pageSize, 2500)
     const offset = Number(/^page-(\d+)$/.exec(q.get('pageToken') ?? '')?.[1] ?? 0)
