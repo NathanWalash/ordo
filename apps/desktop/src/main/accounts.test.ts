@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
 /** Sign-ins: only these passwords work. Every login is recorded, never sent anywhere. */
 const logins = vi.hoisted(() => ({ good: new Set<string>(), seen: [] as Record<string, unknown>[] }))
 vi.mock('@ordo/mail-core/node', async (importOriginal) => {
-  const real = await importOriginal<typeof import('@ordo/mail-core/node')>()
+  const real = await importOriginal<{ MailAuthError: new (message: string) => Error }>()
   return {
     ...real,
     testImapLogin: vi.fn(async (cfg: Record<string, unknown>) => {
