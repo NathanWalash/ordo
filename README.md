@@ -66,6 +66,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Boards: local kanban with drag and drop, custom fields and templates         | Done   |
 | Boards: link cards to events, emails, bills and cards; due on Calendar       | Done   |
 | Boards: Suggest with AI (due date, checklist, labels and links)              | Done   |
+| Encrypted backup to a cloud-synced folder you choose, and restore            | Done   |
 
 ## Headless mode and MCP
 
@@ -162,6 +163,7 @@ Playwright, electron-builder, pnpm workspaces.
 
 How the mail client keeps you safe, and its keyboard shortcuts, are in [docs/mail.md](docs/mail.md). More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
 Boards are described in [docs/boards.md](docs/boards.md). Update checks, installing from source and releasing are in [docs/updates.md](docs/updates.md).
+Backups (what's in them, the encryption and restoring) are in [docs/backup.md](docs/backup.md).
 
 ## Contributing
 

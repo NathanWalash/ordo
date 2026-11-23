@@ -1,0 +1,691 @@
+/**
+ * Settings → Backup in the main process: where backups go, the passphrase, backing up (now, once
+ * a day, and on quit), pruning, and restoring. The file format and the file moves are in
+ * format.ts and snapshot.ts; this adds Electron (dialogs, safeStorage, Trash, relaunch).
+ *
+ * Credentials are never backed up: the iCloud app password in account.json is encrypted with
+ * this Mac's keychain and couldn't be decrypted anywhere else. After restoring on another Mac (or
+ * for another account) you connect again.
+ */
+import { randomUUID } from 'node:crypto'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  statfsSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join, relative, isAbsolute } from 'node:path'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { z } from 'zod'
+import {
+  BACKUP_IPC,
+  BackupRunSchema,
+  BackupUpdateSchema,
+  RestoreConfirmSchema,
+  RestoreOpenSchema,
+  SetBackupPassphraseSchema,
+  type BackupActionResult,
+  type BackupLast,
+  type BackupRunResult,
+  type BackupStatus,
+  type RestoreConfirmResult,
+  type RestoreOpenResult,
+  type RestorePickResult,
+} from '@ordo/shared'
+import { pathProblem } from '../paths'
+import { fromAppWindow } from '../ipc-sender'
+import { closeMail } from '../mail'
+import { closeMailClient } from '../mail-client'
+import { closeCalendar } from '../calendar'
+import { closeMoney } from '../money'
+import { stopAsk } from '../money-memory'
+import { closeBoards } from '../boards'
+import { stop as stopAssistant } from '../assistant'
+import { Locked, lockHolder, withWriteLock } from '../writes'
+import { busyMessage } from '../lock'
+import {
+  BackupError,
+  PassphraseCheckSchema,
+  makePassphraseCheck,
+  openBackup,
+  passphraseMatches,
+  readHeader,
+  writeBackup,
+  type Manifest,
+} from './format'
+import {
+  BACKUP_EXTENSION,
+  DAY_MS,
+  DEFAULT_KEEP,
+  backupDue,
+  backupFileName,
+  backupsToPrune,
+  beforeRestoreName,
+  compareVersions,
+  isOrdoBackupName,
+} from './policy'
+import { RESTORE_MARKER, accountEmail, applyRestore, recoverRestore, snapshotProfile } from './snapshot'
+
+const profile = () => app.getPath('userData')
+const configFile = () => join(profile(), 'backup.json')
+const stagingDir = () => join(profile(), 'restore-staging')
+const WORK_PREFIX = 'backup-work-'
+
+// ---------------------------------------------------------------------------------------------
+// Config: backup.json in the profile. Never backed up itself (it's about this Mac).
+
+const LastSchema = z.discriminatedUnion('ok', [
+  z.object({
+    at: z.string(),
+    ok: z.literal(true),
+    file: z.string(),
+    size: z.number(),
+    automatic: z.boolean(),
+    note: z.string().optional(),
+  }),
+  z.object({ at: z.string(), ok: z.literal(false), message: z.string(), automatic: z.boolean() }),
+])
+
+const DEFAULTS = {
+  folder: null,
+  auto: true,
+  keep: DEFAULT_KEEP,
+  check: null,
+  remembered: null,
+  last: null,
+  lastSuccessAt: null,
+  notice: null,
+}
+
+const ConfigSchema = z
+  .object({
+    folder: z.string().nullable().catch(null),
+    auto: z.boolean().catch(true),
+    keep: z.int().min(1).max(100).catch(DEFAULT_KEEP),
+    /** A salted scrypt hash, to check a typed passphrase is the one that was set. */
+    check: PassphraseCheckSchema.nullable().catch(null),
+    /** The passphrase encrypted with this Mac's keychain (safeStorage), base64, if remembered. */
+    remembered: z.string().nullable().catch(null),
+    last: LastSchema.nullable().catch(null),
+    lastSuccessAt: z.string().nullable().catch(null),
+    /** Something to tell you about a restore, shown in Settings until dismissed. */
+    notice: z.string().nullable().catch(null),
+  })
+  .catch(() => ({ ...DEFAULTS }))
+type Config = z.infer<typeof ConfigSchema>
+
+function readConfig(): Config {
+  try {
+    return ConfigSchema.parse(JSON.parse(readFileSync(configFile(), 'utf8')))
+  } catch {
+    return { ...DEFAULTS }
+  }
+}
+
+function writeConfig(patch: Partial<Config>): Config {
+  const next = { ...readConfig(), ...patch }
+  const file = configFile()
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+  renameSync(`${file}.tmp`, file)
+  return next
+}
+
+// ---------------------------------------------------------------------------------------------
+// The passphrase: typed this session (memory only), or remembered in the keychain.
+
+let sessionPassphrase: string | null = null
+const canRemember = () => safeStorage.isEncryptionAvailable()
+
+function availablePassphrase(config: Config): string | null {
+  if (sessionPassphrase) return sessionPassphrase
+  if (!config.remembered || !canRemember()) return null
+  try {
+    sessionPassphrase = safeStorage.decryptString(Buffer.from(config.remembered, 'base64'))
+    return sessionPassphrase
+  } catch {
+    return null
+  }
+}
+
+let running: Promise<BackupRunResult> | null = null
+
+export function status(): BackupStatus {
+  const c = readConfig()
+  return {
+    folder: c.folder,
+    passphraseSet: c.check !== null,
+    remembered: c.remembered !== null,
+    canRemember: canRemember(),
+    unlocked: c.check !== null && availablePassphrase(c) !== null,
+    auto: c.auto,
+    keep: c.keep,
+    running: running !== null,
+    last: c.last,
+    lastSuccessAt: c.lastSuccessAt,
+    notice: c.notice,
+  }
+}
+
+const ok = (): BackupActionResult => ({ ok: true, status: status() })
+const firstIssue = (e: z.ZodError) => e.issues[0]?.message ?? 'Check the details.'
+
+/** Inside (or the same as) another folder, following links. */
+function isInside(child: string, parent: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p)
+    } catch {
+      return p
+    }
+  }
+  const rel = relative(real(parent), real(child))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/** Why a folder can't hold backups, or null. */
+function folderProblem(folder: string): string | null {
+  const problem = pathProblem(folder, { requireAbsolute: true })
+  if (problem) return problem
+  try {
+    if (!statSync(folder).isDirectory()) return 'Choose a folder, not a file.'
+  } catch {
+    return 'That folder isn’t there any more. If it’s on a drive, connect it, or choose the folder again.'
+  }
+  if (isInside(folder, profile()) || isInside(profile(), folder))
+    return 'Choose a folder outside Ordo’s own data folder.'
+  return null
+}
+
+export async function chooseFolder(win: BrowserWindow | null): Promise<BackupActionResult> {
+  const options: Electron.OpenDialogOptions = {
+    title: 'Choose a folder for backups',
+    message: 'Choose a folder iCloud Drive, Google Drive or Dropbox syncs to keep a copy in the cloud.',
+    buttonLabel: 'Choose',
+    properties: ['openDirectory', 'createDirectory'],
+  }
+  const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  const folder = r.filePaths[0]
+  if (r.canceled || !folder) return ok()
+  const problem = folderProblem(folder)
+  if (problem) return { ok: false, message: problem }
+  writeConfig({ folder })
+  return ok()
+}
+
+export async function setPassphrase(raw: unknown): Promise<BackupActionResult> {
+  const parsed = SetBackupPassphraseSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
+  const { passphrase, remember, current } = parsed.data
+  // Replacing a passphrase needs the current one, so nothing (a script in the window, someone at
+  // an unlocked computer) can quietly switch future backups to a passphrase only they know.
+  const existing = readConfig().check
+  if (existing) {
+    if (!current) return { ok: false, message: 'Enter your current passphrase to change it.' }
+    if (!(await passphraseMatches(current, existing)))
+      return { ok: false, message: 'That isn’t your current passphrase.' }
+  }
+  if (remember && !canRemember())
+    return { ok: false, message: 'This computer can’t keep secrets securely, so Ordo can’t remember it.' }
+  const check = await makePassphraseCheck(passphrase)
+  const remembered = remember ? safeStorage.encryptString(passphrase).toString('base64') : null
+  sessionPassphrase = passphrase
+  writeConfig({ check, remembered })
+  return ok()
+}
+
+export function dismissNotice(): BackupActionResult {
+  writeConfig({ notice: null })
+  return ok()
+}
+
+export function forgetPassphrase(): BackupActionResult {
+  writeConfig({ remembered: null })
+  return ok()
+}
+
+export function update(raw: unknown): BackupActionResult {
+  const parsed = BackupUpdateSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) }
+  const patch: Partial<Config> = {}
+  if (parsed.data.auto !== undefined) patch.auto = parsed.data.auto
+  if (parsed.data.keep !== undefined) patch.keep = parsed.data.keep
+  writeConfig(patch)
+  return ok()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backing up
+
+function friendly(err: unknown): string {
+  if (err instanceof BackupError) return err.message
+  const code = (err as NodeJS.ErrnoException | null)?.code
+  if (code === 'ENOSPC') return 'There isn’t enough space for the backup. Free some space, then try again.'
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS')
+    return 'Ordo can’t write to the backup folder. Check its permissions, or choose another folder.'
+  if (code === 'ENOENT') return 'The backup folder isn’t there any more. Choose it again.'
+  return `The backup didn’t finish: ${err instanceof Error ? err.message : String(err)}`
+}
+
+/** Old backups Ordo made in this folder, beyond the newest `keep`, go to the Trash. */
+async function prune(folder: string, keep: number, made: string): Promise<number> {
+  let pruned = 0
+  for (const name of backupsToPrune(readdirSync(folder), keep)) {
+    if (name === made) continue
+    const path = join(folder, name)
+    try {
+      if (!lstatSync(path).isFile()) continue
+      // Named like ours is not enough: it must also start like an Ordo backup.
+      await readHeader(path).catch((err: unknown) => {
+        if (!(err instanceof BackupError) || err.code !== 'newer-version') throw err
+      })
+      await shell.trashItem(path)
+      pruned++
+    } catch {
+      // Leave anything Ordo can't check or move; it'll be looked at again next time.
+    }
+  }
+  // A half-written backup left by a crash or a forced quit, once it's a day old.
+  for (const name of readdirSync(folder)) {
+    if (!name.endsWith('.partial') || !isOrdoBackupName(name.slice(0, -'.partial'.length))) continue
+    const path = join(folder, name)
+    try {
+      const s = lstatSync(path)
+      if (s.isFile() && Date.now() - s.mtimeMs > DAY_MS) await shell.trashItem(path)
+    } catch {
+      // As above.
+    }
+  }
+  return pruned
+}
+
+async function backUp(passphrase: string, automatic: boolean): Promise<BackupRunResult> {
+  const config = readConfig()
+  const folder = config.folder!
+  const problem = folderProblem(folder)
+  const now = new Date()
+  const record = (last: BackupLast) => writeConfig({ last, ...(last.ok ? { lastSuccessAt: last.at } : {}) })
+  if (problem) {
+    record({ at: now.toISOString(), ok: false, message: problem, automatic })
+    return { ok: false, error: 'failed', message: problem }
+  }
+  const work = join(profile(), `${WORK_PREFIX}${randomUUID()}`)
+  try {
+    // Snapshots under the write lock, so no scan, sync or import is part way through a change.
+    const files = await withWriteLock('backing up', async () => snapshotProfile(profile(), work))
+    if (files instanceof Locked) {
+      record({ at: now.toISOString(), ok: false, message: files.message, automatic })
+      return { ok: false, error: 'locked', message: files.message }
+    }
+    const name = backupFileName(now, new Set(readdirSync(folder)))
+    const email = accountEmail(profile())
+    const { size } = await writeBackup({
+      sourceDir: work,
+      files,
+      out: join(folder, name),
+      passphrase,
+      appVersion: app.getVersion(),
+      createdAt: now,
+      account: email ? { email } : null,
+      excluded: ['account.json: passwords stay in this computer’s keychain'],
+    })
+    // The backup is safely written: a problem tidying old ones mustn't make it look failed.
+    let pruned = 0
+    let note: string | undefined
+    try {
+      pruned = await prune(folder, config.keep, name)
+    } catch (err) {
+      note = `Older backups weren’t tidied up: ${friendly(err)}`
+    }
+    record({ at: now.toISOString(), ok: true, file: name, size, automatic, ...(note ? { note } : {}) })
+    return { ok: true, file: name, size, at: now.toISOString(), pruned, ...(note ? { note } : {}) }
+  } catch (err) {
+    const message = friendly(err)
+    record({ at: now.toISOString(), ok: false, message, automatic })
+    return { ok: false, error: 'failed', message }
+  } finally {
+    rmSync(work, { recursive: true, force: true })
+  }
+}
+
+export async function run(raw: unknown, automatic = false): Promise<BackupRunResult> {
+  const parsed = BackupRunSchema.safeParse(raw ?? {})
+  if (!parsed.success) return { ok: false, error: 'invalid', message: firstIssue(parsed.error) }
+  if (running) return running
+  const config = readConfig()
+  if (!config.folder || !config.check)
+    return {
+      ok: false,
+      error: 'not-set-up',
+      message: 'Choose a backup folder and set a passphrase first.',
+    }
+  const typed = parsed.data.passphrase
+  if (typed !== undefined && !(await passphraseMatches(typed, config.check)))
+    return { ok: false, error: 'wrong-passphrase', message: 'That isn’t your backup passphrase.' }
+  if (typed !== undefined) sessionPassphrase = typed
+  const passphrase = availablePassphrase(config)
+  if (!passphrase)
+    return { ok: false, error: 'needs-passphrase', message: 'Enter your backup passphrase to back up.' }
+  if (running) return running
+  running = backUp(passphrase, automatic).finally(() => {
+    running = null
+  })
+  return running
+}
+
+const HOUR_MS = 60 * 60 * 1000
+
+/** Whether an automatic backup should run now. A failed one waits an hour before trying again. */
+function automaticDue(now = new Date()): boolean {
+  const c = readConfig()
+  if (!c.auto || !c.folder || !c.check || running || restoring) return false
+  if (!availablePassphrase(c)) return false
+  if (c.last && !c.last.ok && now.getTime() - Date.parse(c.last.at) < HOUR_MS) return false
+  return backupDue(c.lastSuccessAt ? new Date(c.lastSuccessAt) : null, now)
+}
+
+async function tick(): Promise<void> {
+  if (automaticDue()) await run({}, true)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restoring
+
+let picked: string | null = null
+let pending: { id: string; manifest: Manifest; keepsAccount: boolean } | null = null
+let restoring = false
+/** A backup is being decrypted into restore-staging: only one at a time may use it. */
+let opening = false
+/** Cancel was pressed while opening: throw the result away when it finishes. */
+let cancelOpening = false
+
+function clearStaging(): void {
+  pending = null
+  rmSync(stagingDir(), { recursive: true, force: true })
+}
+
+export async function restorePick(win: BrowserWindow | null): Promise<RestorePickResult> {
+  const options: Electron.OpenDialogOptions = {
+    title: 'Choose a backup to restore',
+    buttonLabel: 'Choose',
+    properties: ['openFile'],
+    filters: [{ name: 'Ordo backup', extensions: [BACKUP_EXTENSION.slice(1)] }],
+    ...(readConfig().folder ? { defaultPath: readConfig().folder! } : {}),
+  }
+  const r = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  const file = r.filePaths[0]
+  if (r.canceled || !file || opening) return { ok: false, cancelled: true }
+  clearStaging()
+  picked = file
+  return { ok: true, fileName: file.split(/[\\/]/).pop() ?? file }
+}
+
+const LABELS: Record<Manifest['files'][number]['name'], string> = {
+  'mail.sqlite': 'Mail: downloaded messages and clean-up history',
+  'calendar.sqlite': 'Calendar: calendars and events',
+  'money.sqlite': 'Money: transactions, bills and what Ordo has learned',
+  'boards.sqlite': 'Boards: boards and cards',
+  'settings.json': 'Settings: appearance and AI',
+  'assistant.json': 'Assistant settings',
+}
+
+/**
+ * How much the restored files may add up to: the free space on the profile's disk, less a margin
+ * for Ordo to keep working. (The swap only renames, so the files need room just once.)
+ */
+function restoreSpace(): number {
+  const margin = 256 * 1024 * 1024
+  try {
+    const { bavail, bsize } = statfsSync(profile())
+    return Math.max(0, Number(bavail) * Number(bsize) - margin)
+  } catch {
+    return 64 * 1024 ** 3
+  }
+}
+
+export async function restoreOpen(raw: unknown): Promise<RestoreOpenResult> {
+  const parsed = RestoreOpenSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, error: 'invalid', message: firstIssue(parsed.error) }
+  if (opening)
+    return { ok: false, error: 'busy', message: 'Ordo is already opening a backup. Wait for it to finish.' }
+  if (!picked) return { ok: false, error: 'no-file', message: 'Choose a backup file first.' }
+  const file = picked
+  const problem = pathProblem(file, { requireAbsolute: true })
+  if (problem) return { ok: false, error: 'invalid', message: problem }
+  opening = true
+  cancelOpening = false
+  let manifest: Manifest
+  try {
+    clearStaging()
+    manifest = await openBackup(file, parsed.data.passphrase, {
+      into: stagingDir(),
+      maxBytes: restoreSpace(),
+    })
+  } catch (err) {
+    clearStaging()
+    if (err instanceof BackupError) return { ok: false, error: err.code, message: err.message }
+    return { ok: false, error: 'failed', message: friendly(err) }
+  } finally {
+    opening = false
+  }
+  if (cancelOpening) {
+    clearStaging()
+    return { ok: false, error: 'failed', message: 'Cancelled.' }
+  }
+  if (compareVersions(manifest.appVersion, app.getVersion()) > 0) {
+    clearStaging()
+    return {
+      ok: false,
+      error: 'newer-version',
+      message: `This backup was made by Ordo ${manifest.appVersion}. Update Ordo to ${manifest.appVersion} or later, then restore it.`,
+    }
+  }
+  const current = accountEmail(profile())
+  const keepsAccount =
+    current !== null && (!manifest.account || manifest.account.email.toLowerCase() === current.toLowerCase())
+  const id = randomUUID()
+  pending = { id, manifest, keepsAccount }
+  return {
+    ok: true,
+    preview: {
+      id,
+      fileName: file.split(/[\\/]/).pop() ?? file,
+      createdAt: manifest.createdAt,
+      appVersion: manifest.appVersion,
+      files: manifest.files.map((f) => ({ name: f.name, label: LABELS[f.name], size: f.size })),
+      account: manifest.account?.email ?? null,
+      keepsAccount,
+      asideFolder: join(profile(), beforeRestoreName(new Date())),
+    },
+  }
+}
+
+export function restoreCancel(): void {
+  picked = null
+  // The open in progress still owns the staging folder; it tidies up when it sees this.
+  if (opening) cancelOpening = true
+  else clearStaging()
+}
+
+/** Close every store and stop anything running, so no database is open while files move. */
+function closeEverything(): void {
+  stopAssistant()
+  stopAsk()
+  closeMailClient()
+  closeMail()
+  closeCalendar()
+  closeMoney()
+  closeBoards()
+}
+
+export async function restoreConfirm(raw: unknown): Promise<RestoreConfirmResult> {
+  const parsed = RestoreConfirmSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, message: 'Type “restore” to confirm.' }
+  if (!pending || pending.id !== parsed.data.id)
+    return { ok: false, message: 'Open the backup again, then confirm.' }
+  if (running) return { ok: false, message: 'A backup is running. Try again when it finishes.' }
+  // Refuse while anything (in this window or another Ordo process) is writing.
+  const holder = lockHolder()
+  if (holder) return { ok: false, message: busyMessage(holder) }
+  const { manifest, keepsAccount } = pending
+  restoring = true
+  let asideDir = ''
+  const result = await withWriteLock('restoring a backup', async () => {
+    // Synchronous from here: nothing else in this process can reopen a database part way.
+    closeEverything()
+    asideDir = join(profile(), beforeRestoreName(new Date()))
+    applyRestore({
+      profileDir: profile(),
+      stagingDir: stagingDir(),
+      manifest,
+      asideDir,
+      keepAccount: keepsAccount,
+    })
+  }).catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))))
+  if (result instanceof Locked) {
+    restoring = false
+    return { ok: false, message: result.message }
+  }
+  if (result instanceof Error) {
+    restoring = false
+    return {
+      ok: false,
+      message: `Ordo couldn’t restore the backup, and your data is unchanged: ${result.message}`,
+    }
+  }
+  pending = null
+  picked = null
+  const made = new Date(manifest.createdAt).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+  writeConfig({ notice: `Restored the backup from ${made}. Your data from before is in ${asideDir}.` })
+  console.info(`Restored a backup; the previous data is in ${asideDir}`)
+  app.relaunch()
+  app.exit(0)
+  return { ok: false, message: 'Restarting…' }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Wiring
+
+/**
+ * A restore that was cut short (Ordo crashed or the computer lost power part way through moving
+ * files): finish it or put everything back, before any database is opened, and say what happened.
+ * Returns the message, or null when there was nothing to do.
+ */
+export function recoverInterruptedRestore(): string | null {
+  let message: string | null
+  try {
+    const r = recoverRestore(profile())
+    if (!r) return null
+    message =
+      r.outcome === 'finished'
+        ? `Ordo finished restoring a backup it was restoring when it last closed. Your data from before is in ${r.aside}.`
+        : r.outcome === 'rolled-back'
+          ? 'A restore was interrupted when Ordo last closed, so Ordo put your data back as it was before. Nothing was lost; you can restore again.'
+          : `Ordo found an unfinished restore it couldn’t read, so it left your files as they are. If something looks wrong, check the before-restore folders in ${profile()}.`
+  } catch (err) {
+    message = `Ordo couldn’t finish putting back an interrupted restore (${err instanceof Error ? err.message : String(err)}). Your data from before is in a before-restore folder in ${profile()}.`
+  }
+  console.warn(message)
+  writeConfig({ notice: message })
+  return message
+}
+
+/** Leftovers from a backup or restore that was cut short. */
+function tidy(): void {
+  try {
+    for (const name of readdirSync(profile()))
+      if (name.startsWith(WORK_PREFIX)) rmSync(join(profile(), name), { recursive: true, force: true })
+  } catch {
+    // No profile yet.
+  }
+  // While a restore marker is left (recovery failed), staging may hold files it still needs.
+  if (existsSync(stagingDir()) && !existsSync(join(profile(), RESTORE_MARKER)))
+    rmSync(stagingDir(), { recursive: true, force: true })
+}
+
+let quitBackupDone = false
+
+/** Register the IPC handlers, the daily schedule and the backup on quit. Windowed app only. */
+export function registerBackup(): void {
+  // Before anything can open a database.
+  const recovered = recoverInterruptedRestore()
+  type Event = Electron.IpcMainInvokeEvent
+  const win = (e: Event) => BrowserWindow.fromWebContents(e.sender)
+  /**
+   * Calls that change something run only for Ordo's own page in its window (on top of the
+   * preload's user-activation check), never for content in another frame.
+   */
+  const fromApp =
+    <T>(refusal: T, fn: (e: Event, input: unknown) => T | Promise<T>) =>
+    (e: Event, input: unknown) =>
+      fromAppWindow(e) ? fn(e, input) : refusal
+  const refused = { ok: false as const, message: 'Ordo only accepts this from its own window.' }
+  const refusedWith = { ...refused, error: 'invalid' as const }
+
+  ipcMain.handle(BACKUP_IPC.status, () => status())
+  ipcMain.handle(BACKUP_IPC.restoreCancel, () => restoreCancel())
+  ipcMain.handle(
+    BACKUP_IPC.chooseFolder,
+    fromApp(refused, (e) => chooseFolder(win(e))),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.setPassphrase,
+    fromApp(refused, (_e, input) => setPassphrase(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.forgetPassphrase,
+    fromApp(refused, () => forgetPassphrase()),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.dismissNotice,
+    fromApp(refused, () => dismissNotice()),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.update,
+    fromApp(refused, (_e, input) => update(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.run,
+    fromApp(refusedWith, (_e, input) => run(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restorePick,
+    fromApp({ ok: false as const, cancelled: true as const }, (e) => restorePick(win(e))),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restoreOpen,
+    fromApp(refusedWith, (_e, input) => restoreOpen(input)),
+  )
+  ipcMain.handle(
+    BACKUP_IPC.restoreConfirm,
+    fromApp(refused, (_e, input) => restoreConfirm(input)),
+  )
+
+  void app.whenReady().then(() => {
+    tidy()
+    if (recovered)
+      void dialog.showMessageBox({ type: 'info', message: 'About your last restore', detail: recovered })
+    // A couple of minutes after opening, then every half hour: back up once a day.
+    setTimeout(() => void tick(), 2 * 60 * 1000).unref()
+    setInterval(() => void tick(), 30 * 60 * 1000).unref()
+  })
+
+  // On quit, back up first if the last one is more than a day old (at most two minutes).
+  app.on('before-quit', (e) => {
+    if (quitBackupDone || restoring || !automaticDue()) return
+    e.preventDefault()
+    quitBackupDone = true
+    const limit = new Promise((resolve) => setTimeout(resolve, 2 * 60 * 1000).unref())
+    void Promise.race([run({}, true), limit]).finally(() => app.quit())
+  })
+}

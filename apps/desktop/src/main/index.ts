@@ -23,6 +23,7 @@ import { registerMemoryIpc, stopAsk } from './money-memory'
 import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
 import { registerUpdatesIpc, scheduleUpdateChecks } from './updates'
+import { registerBackup } from './backup'
 import { headlessArgs } from './headless/args'
 import { runHeadless } from './headless/run'
 
@@ -174,6 +175,7 @@ function startApp(): void {
   registerMemoryIpc()
   registerBoardsIpc()
   registerUpdatesIpc()
+  registerBackup()
 
   app.on('before-quit', () => mail.closeMail())
   app.on('before-quit', () => closeMailClient())
