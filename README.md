@@ -88,13 +88,22 @@ claude mcp add ordo -- /Applications/Ordo.app/Contents/MacOS/Ordo --headless --m
 From a checkout, `pnpm build` once, then `pnpm ordo -- status`. Commands, JSON output, MCP setup and
 the safety model are in [docs/headless.md](docs/headless.md).
 
-## Install
+## Install / update
 
 Installers for macOS, Windows and Linux are attached to each
 [release](https://github.com/NathanWalash/ordo/releases). Builds aren't code-signed yet, so the first time you open Ordo:
 
 - **macOS:** right-click Ordo in Applications and choose **Open**.
 - **Windows:** on the SmartScreen prompt, choose **More info**, then **Run anyway**.
+
+**Updating:** once a day Ordo asks GitHub whether there's a newer release and, if there is,
+shows "Ordo X.Y.Z is available" with a **Download** button that opens the installer in your
+browser. Nothing about you is sent and nothing is installed for you. Turn it off, or check now,
+in **Settings → Updates**.
+
+**From source (macOS):** `pnpm install-app` pulls main, builds Ordo for your Mac and replaces
+`/Applications/Ordo.app`, keeping your data. Both paths, and how to cut a release, are in
+[docs/updates.md](docs/updates.md).
 
 ## Development
 
@@ -110,6 +119,8 @@ IMAP_TEST_PORT=3143 pnpm test:integration
 pnpm caldav:start # local CalDAV test server (Docker), then:
 CALDAV_TEST_PORT=5232 pnpm test:integration
 pnpm package      # build an installer for your OS into apps/desktop/release
+pnpm install-app  # build main and install it into /Applications (macOS)
+pnpm release 0.2.0  # cut a release (see docs/updates.md)
 ```
 
 ### How it fits together
@@ -127,6 +138,7 @@ packages/calendar-core  CalDAV and calendar links, iCalendar parsing and recurre
 packages/money-core   Bank statements, bills, splits and Money's AI sorting
 packages/boards-core  Kanban boards: ordering, store, fields, notes, filters, links and AI suggestions
 e2e/                  Playwright tests that launch the built app
+scripts/              pnpm release, pnpm install-app and other build helpers
 docs/design.md        Design decisions and roadmap
 ```
 
@@ -149,7 +161,7 @@ Playwright, electron-builder, pnpm workspaces.
    events from calendar entries, and reconciling settle-ups with paybacks.
 
 How the mail client keeps you safe, and its keyboard shortcuts, are in [docs/mail.md](docs/mail.md). More detail in [docs/design.md](docs/design.md). How AI sorting works, and what it sends, is in [docs/ai.md](docs/ai.md). The assistant, its tools and its safety design are in [docs/assistant.md](docs/assistant.md).
-Boards are described in [docs/boards.md](docs/boards.md).
+Boards are described in [docs/boards.md](docs/boards.md). Update checks, installing from source and releasing are in [docs/updates.md](docs/updates.md).
 
 ## Contributing
 
