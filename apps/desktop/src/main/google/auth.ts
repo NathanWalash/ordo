@@ -236,15 +236,23 @@ export class GoogleAuth {
       const has = (s: string) =>
         granted.has(s) || (s === 'email' && granted.has('https://www.googleapis.com/auth/userinfo.email'))
       const missing = scopes.filter((s) => !has(s))
+      const f = this.read()
+      const existing = f.accounts.find((a) => a.id === who.sub)
       if (missing.length) {
+        // Revoking any token revokes the account's whole grant to this client, so only a brand-new
+        // account's is revoked. For one already connected, the new tokens are just dropped and its
+        // stored sign-in carries on working as before.
+        if (existing)
+          throw new OAuthError(
+            'scopes',
+            `Nothing changed: ${existing.email} is still connected as before. To give Ordo the new permission, sign in again and leave every box ticked.`,
+          )
         await revokeToken(this.o.endpoints, this.o.fetch, t.refreshToken ?? t.accessToken)
         throw new OAuthError(
           'scopes',
           'Ordo needs every permission on Google’s screen to show and change your calendars. Connect again and leave them all ticked.',
         )
       }
-      const f = this.read()
-      const existing = f.accounts.find((a) => a.id === who.sub)
       const refresh = t.refreshToken ? this.o.box.seal(t.refreshToken) : existing?.refresh
       if (!refresh) throw new OAuthError('server', 'Google didn’t give Ordo a lasting sign-in. Try again.')
       const account: StoredAccount = {

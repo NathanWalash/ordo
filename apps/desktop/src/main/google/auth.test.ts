@@ -132,6 +132,36 @@ describe('GoogleAuth', () => {
     expect(fake.revoked).toHaveLength(1)
   })
 
+  it('keeps an account’s working sign-in when signing in again comes back short of a permission', async () => {
+    const a = await auth.signIn({ scopes: CALENDAR_SCOPES })
+    const ep = endpointsAt(fake.base)
+    // The same profile, with the user unticking the new permission on Google's screen.
+    const unticked = new GoogleAuth({
+      file: join(dir, 'google.json'),
+      box,
+      endpoints: ep,
+      fetch: googleFetch(ep, (u, i) => fetch(u, i)),
+      openExternal: async (url) => {
+        const u = new URL(url)
+        u.searchParams.set('scope', CALENDAR_SCOPES.join(' '))
+        await browser(u.href)
+      },
+    })
+    const err = await unticked
+      .signIn({ scopes: [...a.scopes, SCOPES.mail], loginHint: a.email })
+      .catch((e: unknown) => e)
+    expect(err).toMatchObject({
+      code: 'scopes',
+      message: expect.stringMatching(/Nothing changed: .* still connected/),
+    })
+    // Nothing revoked (that would end the stored grant), nothing saved, and the old sign-in works.
+    expect(fake.revoked).toEqual([])
+    expect(auth.account(a.id)).toEqual({ ...a, needsReauth: false })
+    await expect(auth.getAccessToken(a.id, [SCOPES.calendarEvents], { refresh: true })).resolves.toMatch(
+      /^at-/,
+    )
+  })
+
   it('stops at once, without opening the browser, when cancelled while the listener starts', async () => {
     const started = Date.now()
     const p = auth.signIn({ scopes: CALENDAR_SCOPES })
