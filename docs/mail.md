@@ -86,12 +86,31 @@ always tries every account, and entering the password again starts afresh.
 
 An install from before several accounts kept one iCloud account in `account.json`. The first time
 the new version starts, Ordo moves it into the list as account #1, named iCloud, copying the
-encrypted password as it is, then removes the old file. The mail cache (`mail.sqlite`) gains an
-account column, and every cached message, folder, body, sync state, "people you've written to" entry
-and clean-up is given to account #1, in one transaction. Nothing is fetched again and nothing is
-lost. Both steps are safe to run twice (the cache keeps a schema version, `PRAGMA user_version`, and
-checks it inside the transaction, so the app and a headless Ordo starting together migrate it once),
-and a failure part way leaves the old file exactly as it was.
+encrypted password as it is. The old file is renamed `account.json.migrated` and removed on a later
+launch, once the new list has been read back. The mail cache (`mail.sqlite`) gains an account
+column, and every cached message, folder, body, sync state, "people you've written to" entry and
+clean-up is given to account #1, in one transaction. Nothing is fetched again and nothing is lost.
+
+Before migrating the cache, Ordo makes a consistent copy of it as it was,
+`mail.sqlite.pre-accounts-v1` in its profile folder, once. If anything goes wrong, quit Ordo and put
+that copy back as `mail.sqlite` (and `account.json.migrated` back as `account.json`, with an older
+Ordo); you can delete the copy once you're happy.
+
+Both steps are safe to run twice (the cache keeps a schema version, `PRAGMA user_version`, and checks
+it inside the transaction, so the app and a headless Ordo starting together migrate it once), and a
+failure part way leaves the old file exactly as it was.
+
+### How the accounts list is kept safe
+
+`accounts.json` is written to a temp file that is flushed to disk and then renamed over the old one,
+so a crash leaves the old list or the new one. A list that can't be read is moved aside as
+`accounts.json.bak-<time>` (never overwritten) and Ordo falls back to the old single account, if
+there is one. Accounts this version doesn't understand (added by a newer Ordo, such as a future
+sign-in kind) are kept and written back untouched, and a list saved by a newer Ordo is read but never
+changed. Account ids are never reused, so a new account can't inherit another's downloaded mail, and
+removing an account clears its downloaded mail before it leaves the list. Calendar stays with the
+iCloud account it was set up with: when that account is removed its iCloud calendars go, rather than
+Calendar quietly using another iCloud account, until you add an iCloud account again.
 
 ## Folders and the message list
 

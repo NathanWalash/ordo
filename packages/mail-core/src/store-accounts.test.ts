@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -263,6 +263,27 @@ describe('migrating a cache from before accounts', () => {
     const check = new DatabaseSync(path)
     expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 0 })
     check.close()
+  })
+
+  it('copies the old cache once, consistently, before migrating it', () => {
+    const path = tmp()
+    const backup = `${path}.pre-accounts-v1`
+    singleAccountFixture(path)
+    const before = dump(path)
+    new MailStore(path, undefined, undefined, { backupTo: backup }).close()
+    // The copy is the file as it was: version 0, every row, no account column.
+    const copy = new DatabaseSync(backup)
+    expect(copy.prepare('PRAGMA user_version').get()).toEqual({ user_version: 0 })
+    copy.close()
+    expect(dump(backup)).toEqual(before)
+    // Opening again (already migrated) leaves the copy alone.
+    const mtime = statSync(backup).mtimeMs
+    new MailStore(path, undefined, undefined, { backupTo: backup }).close()
+    expect(statSync(backup).mtimeMs).toBe(mtime)
+    // A new, empty cache has nothing to keep a copy of.
+    const fresh = tmp()
+    new MailStore(fresh, undefined, undefined, { backupTo: `${fresh}.pre-accounts-v1` }).close()
+    expect(existsSync(`${fresh}.pre-accounts-v1`)).toBe(false)
   })
 
   it('starts a new file at the current version, with nothing in it', () => {

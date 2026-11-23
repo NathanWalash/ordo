@@ -20,6 +20,7 @@ export {
   MailStore,
   migrateMailDb,
   type MailboxState,
+  type MigrateOptions,
   type NewCleanup,
 } from './store'
 export { scanMailbox, type ScanOptions } from './scan'

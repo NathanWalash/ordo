@@ -54,7 +54,11 @@ const running = new Map<string, AbortController>()
 const changing = new Set<string>()
 
 /** The mail cache: every account's rows in one file. */
-export const mailStore = () => (store ??= new MailStore(join(app.getPath('userData'), 'mail.sqlite')))
+export const mailStore = () =>
+  (store ??= new MailStore(join(app.getPath('userData'), 'mail.sqlite'), undefined, undefined, {
+    // A cache from before several accounts is copied once before it's migrated: a way back.
+    backupTo: join(app.getPath('userData'), 'mail.sqlite.pre-accounts-v1'),
+  }))
 
 /** One account's part of the cache. */
 export const accountStore = (account: string) => mailStore().forAccount(account)

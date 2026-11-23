@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import type { AiCategoryCache, AiCategoryRecord } from './ai-sort'
 import type {
@@ -242,6 +243,32 @@ const columnsOf = (db: DatabaseSync, table: string) =>
 const hasTable = (db: DatabaseSync, table: string) =>
   db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined
 
+export interface MigrateOptions {
+  /**
+   * Before migrating a cache from before accounts, copy it here first (once: an existing copy is
+   * kept), so there's a way back if anything goes wrong.
+   */
+  backupTo?: string
+}
+
+const userVersion = (db: DatabaseSync) =>
+  (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+
+/**
+ * A consistent copy of a cache that's about to be migrated (VACUUM INTO reads one snapshot, so a
+ * write by another Ordo process can't tear it). Only for a file with data from before accounts,
+ * and only once. Another process making the same copy at the same moment is fine: one wins.
+ */
+function backupBeforeMigrating(db: DatabaseSync, to: string): void {
+  if (userVersion(db) >= MAIL_SCHEMA_VERSION || !hasTable(db, 'messages') || existsSync(to)) return
+  try {
+    db.prepare('VACUUM INTO ?').run(to)
+  } catch (err) {
+    // Made by another process in the meantime: that copy will do.
+    if (!existsSync(to)) throw err
+  }
+}
+
 /** Account ids are short and plain (see the accounts list): safe inside a DEFAULT clause. */
 const ACCOUNT_ID = /^[a-z0-9-]{1,40}$/
 
@@ -252,8 +279,13 @@ const ACCOUNT_ID = /^[a-z0-9-]{1,40}$/
  * the same file at once migrate it once) and all-or-nothing (a failure leaves the old file as it
  * was). Returns the version it found.
  */
-export function migrateMailDb(db: DatabaseSync, legacyAccount = DEFAULT_ACCOUNT_ID): number {
+export function migrateMailDb(
+  db: DatabaseSync,
+  legacyAccount = DEFAULT_ACCOUNT_ID,
+  options: MigrateOptions = {},
+): number {
   if (!ACCOUNT_ID.test(legacyAccount)) throw new Error('Not an account id')
+  if (options.backupTo) backupBeforeMigrating(db, options.backupTo)
   db.exec('BEGIN IMMEDIATE')
   try {
     const found = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
@@ -409,7 +441,12 @@ export class MailStore implements AiCategoryCache {
   /** The account this store reads and writes. */
   readonly accountId: string
 
-  constructor(path: string, accountId = DEFAULT_ACCOUNT_ID, shared?: DatabaseSync) {
+  constructor(
+    path: string,
+    accountId = DEFAULT_ACCOUNT_ID,
+    shared?: DatabaseSync,
+    options: MigrateOptions = {},
+  ) {
     this.accountId = accountId
     if (shared) {
       this.db = shared
@@ -421,7 +458,7 @@ export class MailStore implements AiCategoryCache {
     // The app and a headless Ordo may share this file: wait for the other's write instead of failing.
     this.db.exec('PRAGMA busy_timeout = 5000;')
     this.db.exec('PRAGMA journal_mode = WAL;')
-    migrateMailDb(this.db)
+    migrateMailDb(this.db, DEFAULT_ACCOUNT_ID, options)
   }
 
   /** The same cache, reading and writing another account's rows. Closing it closes nothing. */
