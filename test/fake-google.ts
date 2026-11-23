@@ -109,7 +109,7 @@ function normalise(t: Time): Time {
 export class FakeGoogle {
   server: Server
   base = ''
-  clientId = 'test-client.apps.googleusercontent.com'
+  clientId = '1234-testclient.apps.googleusercontent.com'
   clientSecret = 'test-secret'
   account: FakeAccount = { sub: '1234567890', email: 'me@work.example' }
   calendars = new Map<string, FakeCalendar>()
