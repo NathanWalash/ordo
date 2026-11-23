@@ -15,6 +15,7 @@ import type { MoneyMemoryApi } from './money-memory'
 export * from './money'
 export * from './money-memory'
 import type { BoardsApi } from './boards'
+import type { BackupApi } from './backup'
 
 export * from './money'
 export * from './boards'
@@ -68,6 +69,7 @@ export * from './cleanup'
 export * from './mail'
 export * from './assistant'
 export * from './updates'
+export * from './backup'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -106,6 +108,7 @@ export interface OrdoApi {
   mail: MailApi
   assistant: AssistantApi
   updates: UpdatesApi
+  backup: BackupApi
 }
 
 export const IPC = {

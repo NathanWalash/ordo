@@ -10,6 +10,7 @@ import { moneyApi } from './money'
 import { moneyMemoryApi } from './money-memory'
 import { boardsApi } from './boards'
 import { updatesApi } from './updates'
+import { backupApi } from './backup'
 
 const api: OrdoApi = {
   app: {
@@ -89,6 +90,7 @@ const api: OrdoApi = {
   boards: boardsApi,
   assistant: assistantApi,
   updates: updatesApi,
+  backup: backupApi,
 }
 
 contextBridge.exposeInMainWorld('ordo', api)

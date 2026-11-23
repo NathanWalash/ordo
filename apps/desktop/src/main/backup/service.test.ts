@@ -1,0 +1,249 @@
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import type { MessageHeader } from '@ordo/mail-core'
+
+// The Backup service as the IPC handlers call it, with Electron replaced by a temp profile, a
+// fake keychain, a fake Trash and scripted dialogs. Synthetic data only.
+const env = vi.hoisted(() => ({ profile: '', trash: '', pick: [] as string[] }))
+const electron = vi.hoisted(() => ({
+  relaunch: vi.fn(),
+  exit: vi.fn(),
+}))
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => env.profile,
+    getVersion: () => '0.1.0',
+    isPackaged: true,
+    on: vi.fn(),
+    whenReady: () => new Promise(() => {}),
+    relaunch: electron.relaunch,
+    exit: electron.exit,
+  },
+  ipcMain: { handle: vi.fn() },
+  shell: {
+    openExternal: vi.fn(),
+    trashItem: vi.fn(async (path: string) => renameSync(path, join(env.trash, basename(path)))),
+  },
+  dialog: {
+    showOpenDialog: vi.fn(async () => ({ canceled: env.pick.length === 0, filePaths: env.pick })),
+  },
+  BrowserWindow: { fromWebContents: () => null },
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    encryptString: (s: string) => Buffer.from(`enc:${s}`),
+    decryptString: (b: Buffer) => b.toString().slice('enc:'.length),
+  },
+}))
+
+const root = mkdtempSync(join(tmpdir(), 'ordo-backup-service-'))
+env.profile = join(root, 'profile')
+env.trash = join(root, 'trash')
+const folder = join(root, 'Cloud Drive', 'Ordo backups')
+for (const d of [env.profile, env.trash, folder]) mkdirSync(d, { recursive: true })
+
+const backup = await import('./index')
+const mail = await import('../mail')
+const { saveAccount } = await import('../account')
+
+afterAll(() => {
+  mail.closeMail()
+  rmSync(root, { recursive: true, force: true })
+})
+
+const PASS = 'synthetic passphrase for tests'
+const header = (uid: number): MessageHeader => ({
+  uid,
+  mailbox: 'INBOX',
+  date: new Date(1_790_000_000_000 + uid),
+  seen: false,
+  from: { address: `sender${uid}@news.example` },
+  subject: `Subject ${uid}`,
+})
+const inboxCount = () => mail.mailStore().count('INBOX')
+
+describe('setting up', () => {
+  it('needs a folder and a passphrase before it backs up', async () => {
+    expect(backup.status()).toMatchObject({ folder: null, passphraseSet: false, auto: true, keep: 7 })
+    expect(await backup.run({})).toMatchObject({ ok: false, error: 'not-set-up' })
+  })
+
+  it('refuses a folder inside Ordo’s own data folder', async () => {
+    env.pick = [join(env.profile)]
+    expect(await backup.chooseFolder(null)).toMatchObject({ ok: false })
+    env.pick = [join(root, 'does not exist')]
+    expect(await backup.chooseFolder(null)).toMatchObject({ ok: false })
+    expect(backup.status().folder).toBeNull()
+  })
+
+  it('saves the chosen folder; cancelling changes nothing', async () => {
+    env.pick = [folder]
+    expect(await backup.chooseFolder(null)).toMatchObject({ ok: true, status: { folder } })
+    env.pick = []
+    expect(await backup.chooseFolder(null)).toMatchObject({ ok: true, status: { folder } })
+  })
+
+  it('refuses a short passphrase, and never saves one in plain text', async () => {
+    expect(await backup.setPassphrase({ passphrase: 'short', remember: true })).toMatchObject({ ok: false })
+    expect(await backup.setPassphrase({ passphrase: PASS, remember: true, extra: 1 })).toMatchObject({
+      ok: false,
+    })
+    const r = await backup.setPassphrase({ passphrase: PASS, remember: true })
+    expect(r).toMatchObject({ ok: true, status: { passphraseSet: true, remembered: true, unlocked: true } })
+    const saved = readFileSync(join(env.profile, 'backup.json'), 'utf8')
+    expect(saved).not.toContain(PASS)
+    expect(JSON.parse(saved)).toMatchObject({ check: { logN: 17, r: 8, p: 1 } })
+  })
+
+  it('validates settings changes', () => {
+    expect(backup.update({ keep: 5 })).toMatchObject({ ok: false })
+    expect(backup.update({ auto: 'yes' })).toMatchObject({ ok: false })
+    expect(backup.update({ keep: 3, auto: false })).toMatchObject({
+      ok: true,
+      status: { keep: 3, auto: false },
+    })
+    expect(backup.update({ keep: 7, auto: true })).toMatchObject({ ok: true })
+  })
+})
+
+let firstBackup = ''
+
+describe('backing up', () => {
+  it('backs up the stores (WAL included) and settings, but never the account password', async () => {
+    mail.mailStore().saveHeaders([header(1), header(2), header(3)])
+    writeFileSync(join(env.profile, 'settings.json'), JSON.stringify({ theme: 'dark' }))
+    saveAccount('someone@ordo.test', 'abcd-efgh-ijkl-mnop')
+    expect(existsSync(join(env.profile, 'mail.sqlite-wal'))).toBe(true)
+
+    const r = await backup.run({})
+    expect(r).toMatchObject({ ok: true, pruned: 0 })
+    if (!r.ok) return
+    firstBackup = join(folder, r.file)
+    expect(r.file).toMatch(/^Ordo-backup-\d{4}-\d{2}-\d{2}-\d{4}\.ordobackup$/)
+    expect(readdirSync(folder)).toEqual([r.file])
+    const raw = readFileSync(firstBackup)
+    expect(raw.includes(Buffer.from('abcd-efgh-ijkl-mnop'))).toBe(false)
+    expect(raw.includes(Buffer.from('someone@ordo.test'))).toBe(false)
+    // No snapshot is left in the profile.
+    expect(readdirSync(env.profile).filter((n) => n.startsWith('backup-work-'))).toEqual([])
+    expect(backup.status()).toMatchObject({ last: { ok: true, file: r.file, automatic: false } })
+    expect(backup.status().lastSuccessAt).toBe(r.at)
+  })
+
+  it('checks a typed passphrase against the one that was set', async () => {
+    expect(await backup.run({ passphrase: 'not my passphrase' })).toMatchObject({
+      ok: false,
+      error: 'wrong-passphrase',
+    })
+    expect(await backup.run({ bogus: true })).toMatchObject({ ok: false, error: 'invalid' })
+  })
+
+  it('waits while another Ordo process is writing', async () => {
+    const lock = join(env.profile, 'ordo-write.lock')
+    writeFileSync(
+      lock,
+      JSON.stringify({ pid: process.ppid, owner: 'mcp', task: 'syncing', since: new Date().toISOString() }),
+    )
+    try {
+      expect(await backup.run({})).toMatchObject({ ok: false, error: 'locked' })
+      expect(backup.status().last).toMatchObject({ ok: false })
+    } finally {
+      rmSync(lock, { force: true })
+    }
+  })
+
+  it('keeps the newest N, moving only older Ordo backups to the Trash', async () => {
+    const older = [
+      'Ordo-backup-2020-01-01-0900.ordobackup',
+      'Ordo-backup-2020-01-02-0900.ordobackup',
+      'Ordo-backup-2020-01-03-0900.ordobackup',
+    ]
+    for (const name of older) copyFileSync(firstBackup, join(folder, name))
+    // Named like an Ordo backup but isn't one: never touched.
+    writeFileSync(join(folder, 'Ordo-backup-2019-01-01-0900.ordobackup'), 'my own file')
+    const yours = ['notes.txt', 'Ordo-backup-2018-01-01-0900 copy.ordobackup']
+    for (const name of yours) writeFileSync(join(folder, name), 'yours')
+
+    backup.update({ keep: 3 })
+    const r = await backup.run({})
+    expect(r).toMatchObject({ ok: true, pruned: 2 })
+    expect(readdirSync(env.trash).sort()).toEqual(older.slice(0, 2))
+    const left = readdirSync(folder)
+    for (const name of [...yours, older[2]!, basename(firstBackup), 'Ordo-backup-2019-01-01-0900.ordobackup'])
+      expect(left).toContain(name)
+    backup.update({ keep: 7 })
+  })
+})
+
+describe('restoring', () => {
+  it('needs a file, and the right passphrase', async () => {
+    expect(await backup.restoreOpen({ passphrase: PASS })).toMatchObject({ ok: false, error: 'no-file' })
+    env.pick = [firstBackup]
+    expect(await backup.restorePick(null)).toEqual({ ok: true, fileName: basename(firstBackup) })
+    expect(await backup.restoreOpen({ passphrase: 'wrong passphrase' })).toMatchObject({
+      ok: false,
+      error: 'wrong-passphrase',
+    })
+    expect(existsSync(join(env.profile, 'restore-staging', 'mail.sqlite'))).toBe(false)
+  })
+
+  it('refuses a damaged file with a clear message', async () => {
+    const bad = join(root, 'damaged.ordobackup')
+    const raw = readFileSync(firstBackup)
+    raw[200]! ^= 1
+    writeFileSync(bad, raw)
+    env.pick = [bad]
+    await backup.restorePick(null)
+    expect(await backup.restoreOpen({ passphrase: PASS })).toMatchObject({ ok: false, error: 'damaged' })
+  })
+
+  it('previews, then needs the typed word, then swaps the data in and restarts', async () => {
+    // Changes since the backup, which the restore will replace.
+    mail.mailStore().saveHeaders([header(4), header(5)])
+    expect(inboxCount()).toBe(5)
+
+    env.pick = [firstBackup]
+    await backup.restorePick(null)
+    const opened = await backup.restoreOpen({ passphrase: PASS })
+    expect(opened.ok).toBe(true)
+    if (!opened.ok) return
+    const { preview } = opened
+    expect(preview).toMatchObject({ appVersion: '0.1.0', account: 'someone@ordo.test', keepsAccount: true })
+    expect(preview.files.map((f) => f.name)).toEqual(['mail.sqlite', 'settings.json'])
+    // Opening changed nothing.
+    expect(inboxCount()).toBe(5)
+
+    expect(await backup.restoreConfirm({ id: preview.id, confirm: 'yes' })).toMatchObject({ ok: false })
+    expect(await backup.restoreConfirm({ id: 'other', confirm: 'restore' })).toMatchObject({ ok: false })
+    expect(electron.exit).not.toHaveBeenCalled()
+
+    await backup.restoreConfirm({ id: preview.id, confirm: 'restore' })
+    expect(electron.relaunch).toHaveBeenCalledOnce()
+    expect(electron.exit).toHaveBeenCalledWith(0)
+
+    // The store reopens on the restored file.
+    expect(inboxCount()).toBe(3)
+    const aside = readdirSync(env.profile).filter((n) => n.startsWith('before-restore-'))
+    expect(aside).toHaveLength(1)
+    const asideFiles = readdirSync(join(env.profile, aside[0]!))
+    expect(asideFiles).toContain('mail.sqlite')
+    expect(asideFiles).toContain('settings.json')
+    // This Mac's account (same email) and backup settings stay.
+    expect(JSON.parse(readFileSync(join(env.profile, 'account.json'), 'utf8')).email).toBe(
+      'someone@ordo.test',
+    )
+    expect(backup.status()).toMatchObject({ folder, passphraseSet: true })
+    expect(existsSync(join(env.profile, 'restore-staging'))).toBe(false)
+  })
+})
