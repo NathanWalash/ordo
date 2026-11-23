@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FileUp, Landmark, Sparkles } from 'lucide-react'
+import { FileUp, Landmark, Sparkles, X } from 'lucide-react'
 import { SPENDING_CATEGORIES, formatPence, type Transaction } from '@ordo/money-core'
 import {
   AI_PROVIDERS,
@@ -10,6 +10,11 @@ import {
 } from '@ordo/shared'
 import { Button } from '../components/Button'
 import { EmptyState } from '../components/EmptyState'
+import { CategoryBars } from '../components/money/charts/CategoryBars'
+import { CategoryTrendChart } from '../components/money/charts/CategoryTrendChart'
+import { FlowLegend, MonthlyFlowChart } from '../components/money/charts/MonthlyFlowChart'
+import { visibleRange } from '../components/money/charts/scale'
+import { usualTitle, VersusUsual } from '../components/money/charts/VersusUsual'
 import { formatDate, formatMonth, Notice, Panel, Select } from '../components/money/ui'
 import { useStatementImport } from '../components/money/useStatementImport'
 
@@ -48,6 +53,10 @@ export function FinancesPage({
   const [error, setError] = useState<string | null>(null)
   const [ai, setAi] = useState<AiSettings | null>(null)
   const [sorting, setSorting] = useState<MoneyAiProgress | null>(null)
+  /** Show only this category's transactions (picked from the category bars or the trend). */
+  const [focus, setFocus] = useState<string | null>(null)
+  /** The category the trend chart shows when no category is picked. */
+  const [trendPick, setTrendPick] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -128,10 +137,27 @@ export function FinancesPage({
       </div>
     )
 
-  const { summary } = page
+  const { summary, charts } = page
   const net = summary.moneyIn - summary.moneyOut
-  const biggest = summary.byCategory[0]?.amount ?? 0
   const showAccount = page.accounts.length > 1 && !account
+  const shown = focus ? page.transactions.filter((t) => (t.category ?? 'Other') === focus) : page.transactions
+
+  // The charts show up to two years, ending at the chosen month when it's older than that.
+  const allMonths = charts?.trends.months ?? []
+  const [from, to] = visibleRange(
+    allMonths.length,
+    allMonths.findIndex((m) => m.month === month),
+  )
+  const chartMonths = allMonths.slice(from, to)
+  const series = charts?.trends.categories ?? []
+  const trend = series.find((c) => c.category === (focus ?? trendPick)) ?? series[0]
+  const usual = charts?.usual ?? null
+  // Ticks for the usual month on the category bars, when they show that same month.
+  const usualTicks =
+    usual && month && usual.month === month
+      ? new Map(usual.categories.map((r) => [r.category, r.usual]))
+      : undefined
+  const pickMonth = (m: string) => setMonth((cur) => (cur === m ? '' : m))
 
   return (
     <div className="relative min-h-full px-6 pt-5 pb-8" {...importer.dropProps}>
@@ -203,50 +229,84 @@ export function FinancesPage({
         />
       </div>
 
+      {charts && (
+        <Panel
+          className="mt-3"
+          title={
+            chartMonths.length < allMonths.length
+              ? `Money in and out, last ${chartMonths.length} months`
+              : 'Money in and out'
+          }
+          actions={<FlowLegend />}
+        >
+          <div className="px-3 pt-3 pb-1">
+            <MonthlyFlowChart months={chartMonths} selected={month || undefined} onSelect={pickMonth} />
+          </div>
+        </Panel>
+      )}
+
       <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Panel title="Spending by category">
-          <ul className="flex flex-col gap-2 px-4 py-3">
-            {summary.byCategory.slice(0, 8).map((c) => (
-              <li key={c.category} className="grid grid-cols-[110px_1fr_auto] items-center gap-3">
-                <span className="truncate text-ink-2">{c.category}</span>
-                <span className="h-1.5 overflow-hidden rounded-full bg-selected" aria-hidden="true">
-                  <span
-                    className="block h-full rounded-full bg-accent"
-                    style={{ width: `${biggest ? Math.max(2, (c.amount / biggest) * 100) : 0}%` }}
-                  />
-                </span>
-                <span className="tabular-nums">{formatPence(c.amount)}</span>
-              </li>
-            ))}
-            {!summary.byCategory.length && <li className="text-ink-2">No spending in this period.</li>}
-          </ul>
+        <Panel title={month ? `Spending by category, ${formatMonth(month)}` : 'Spending by category'}>
+          <CategoryBars
+            categories={summary.byCategory}
+            usual={usualTicks}
+            selected={focus}
+            onSelect={setFocus}
+          />
         </Panel>
-        <Panel title="By month">
-          <table className="w-full border-collapse">
-            <thead className="text-left text-[11px] text-ink-3">
-              <tr>
-                <th className="py-1.5 pl-4 font-medium">Month</th>
-                <th className="pr-4 text-right font-medium">In</th>
-                <th className="pr-4 text-right font-medium">Out</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.byMonth.slice(0, 6).map((m) => (
-                <tr key={m.month} className="border-t border-sep">
-                  <td className="py-1.5 pl-4">{formatMonth(m.month)}</td>
-                  <td className="pr-4 text-right text-success tabular-nums">{formatPence(m.moneyIn)}</td>
-                  <td className="pr-4 text-right tabular-nums">{formatPence(m.moneyOut)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+        {charts && (
+          <Panel title={usual ? usualTitle(usual) : 'This month vs usual'}>
+            <VersusUsual comparison={usual} />
+          </Panel>
+        )}
       </div>
 
-      <h3 className="mt-6 mb-2 text-[13px] font-semibold">
-        Transactions{' '}
-        <span className="font-normal text-ink-3">{page.transactions.length.toLocaleString()}</span>
-      </h3>
+      {charts && trend && (
+        <Panel
+          className="mt-3"
+          title="Category by month"
+          actions={
+            <Select
+              label="Category to chart"
+              hideLabel
+              value={trend.category}
+              onChange={(e) => (focus ? setFocus(e.target.value) : setTrendPick(e.target.value))}
+            >
+              {series.map((c) => (
+                <option key={c.category} value={c.category}>
+                  {c.category}
+                </option>
+              ))}
+            </Select>
+          }
+        >
+          <div className="px-3 pt-3 pb-1">
+            <CategoryTrendChart
+              series={{ ...trend, monthly: trend.monthly.slice(from, to) }}
+              months={chartMonths}
+              selected={month || undefined}
+              onSelect={pickMonth}
+            />
+          </div>
+        </Panel>
+      )}
+
+      <div className="mt-6 mb-2 flex items-center gap-2">
+        <h3 className="text-[13px] font-semibold">
+          Transactions{focus && ` in ${focus}`}{' '}
+          <span className="font-normal text-ink-3">{shown.length.toLocaleString()}</span>
+        </h3>
+        {focus && (
+          <button
+            type="button"
+            onClick={() => setFocus(null)}
+            className="flex h-5 items-center gap-1 rounded-full bg-selected px-2 text-[11px] text-ink-2 outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            <X size={10} aria-hidden="true" />
+            Show all categories
+          </button>
+        )}
+      </div>
       <div className="overflow-hidden rounded-xl border border-sep">
         <table className="w-full table-fixed border-collapse" aria-label="Transactions">
           <thead className="text-left text-[11px] text-ink-3">
@@ -259,7 +319,7 @@ export function FinancesPage({
             </tr>
           </thead>
           <tbody>
-            {page.transactions.map((t, i) => (
+            {shown.map((t, i) => (
               <tr key={t.id} className={i % 2 ? 'bg-hover/50' : ''}>
                 <td className="py-1.5 pl-4 text-ink-2 tabular-nums">{formatDate(t.date, true)}</td>
                 <td className="truncate pr-3" title={t.description}>

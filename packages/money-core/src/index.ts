@@ -148,3 +148,16 @@ export {
   type AskStep,
   type AskTurn,
 } from './ask'
+export {
+  compareWithUsual,
+  median,
+  monthRange,
+  spendingTrends,
+  type CategorySeries,
+  type MonthFlow,
+  type PartialMonth,
+  type SpendingTrends,
+  type TrendOptions,
+  type UsualComparison,
+  type UsualRow,
+} from './trends'

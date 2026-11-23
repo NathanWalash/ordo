@@ -10,9 +10,11 @@ import {
   type DetectedBill,
   type Person,
   type Settlement,
+  type SpendingTrends,
   type Split,
   type Transaction,
   type TransactionSummary,
+  type UsualComparison,
 } from '@ordo/money-core'
 
 export type {
@@ -134,6 +136,11 @@ export interface TransactionPage {
   summary: TransactionSummary
   /** Merchants (in any account or month) still in Other that a model could categorise. */
   uncategorisedMerchants: number
+  /**
+   * For the charts: every month of the account filter (whatever the month filter), and the chosen
+   * month (or the latest) against the usual month. Optional so older callers and fakes still fit.
+   */
+  charts?: { trends: SpendingTrends; usual: UsualComparison | null }
 }
 
 /** Your own category for a transaction; null goes back to the bank's, the rules' or AI's. */

@@ -61,6 +61,7 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Money: change a transaction's category yourself                              | Done   |
 | Money: HSBC and Monzo app exports; transfers between your accounts           | Done   |
 | Money: Ask Ordo, which learns how your money works (exploratory)             | Done   |
+| Money: charts of money in and out, categories and your usual month           | Done   |
 | Headless mode: a CLI and an MCP server for scripts and AI agents             | Done   |
 | Boards: local kanban with drag and drop, custom fields and templates         | Done   |
 | Boards: link cards to events, emails, bills and cards; due on Calendar       | Done   |
