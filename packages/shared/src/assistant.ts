@@ -8,7 +8,10 @@ import type { AiProviderId } from './ai'
  */
 export const ASSISTANT_PAGES = {
   home: { title: 'Home', about: 'Home: an overview of every module' },
-  'mail/inbox': { title: 'Mail', about: 'Mail: the iCloud mail folders, message list and reader' },
+  'mail/inbox': {
+    title: 'Mail',
+    about: 'Mail: every account’s folders, the unified inbox, message list and reader',
+  },
   'mail/unclutter': {
     title: 'Unclutter',
     about: 'Mail → Unclutter: senders by category, to unsubscribe and clear',
@@ -78,6 +81,8 @@ export interface CardRecipient {
  */
 export interface CardEmail {
   from: string
+  /** The name of the account it's sent (or saved) from: "From me@work.example (Work)". */
+  fromAccount?: string
   to: CardRecipient[]
   cc: CardRecipient[]
   subject: string

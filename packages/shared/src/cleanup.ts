@@ -1,8 +1,14 @@
 import { z } from 'zod'
 import type { CleanupProgress, CleanupSummary, UndoResult } from '@ordo/mail-core'
+import { AccountIdSchema } from './accounts'
 
 /** What the review sheet asks for. The main process re-checks every sender against its own analysis. */
 export const CleanupRequestSchema = z.object({
+  /**
+   * Which account's inbox to clear: one, or `all` (the default), where each account that has mail
+   * from a chosen sender is cleared on its own connection and gets its own History entry.
+   */
+  account: z.union([AccountIdSchema, z.literal('all')]).optional(),
   senders: z
     .array(
       z.object({
@@ -28,7 +34,11 @@ export type CleanupError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'bus
 export type CleanupOutcome =
   | {
       ok: true
+      /** The first (or only) account's clean-up; `cleanups` has one per account cleared. */
       cleanup: CleanupSummary
+      cleanups?: CleanupSummary[]
+      /** Accounts that couldn't be cleared (the others were), with why. */
+      failed?: { account: string; error: CleanupError; message: string }[]
       /** Senders the main process refused (people, unknown senders), with the reason. */
       rejected: { address: string; reason: string }[]
     }

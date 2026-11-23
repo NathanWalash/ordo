@@ -68,6 +68,15 @@ const mailboxPath = z
   // eslint-disable-next-line no-control-regex -- control characters are what's refused
   .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), '--mailbox is not a mailbox path')
 const mailbox = mailboxPath.default('INBOX')
+/** Which mail account: its label, address or id, as `mail accounts` lists it. */
+const mailAccount = z
+  .string()
+  .trim()
+  .min(1, '--account needs an account: its name or address, as `status` lists it')
+  .max(320, '--account is too long')
+  // eslint-disable-next-line no-control-regex -- control characters are what's refused
+  .refine((p) => !/[\u0000-\u001f\u007f]/.test(p), '--account is not an account')
+  .optional()
 /** The most messages one mail change acts on. */
 export const MAIL_CHANGE_MAX = 20
 /** Message uids, as positional arguments: `mail move 41 42 --to archive`. */
@@ -163,8 +172,11 @@ const COMMANDS = {
       limit: limit(50, 5000),
     }),
   },
-  'cleanup plan': { args: [], flags: z.object(senderChoice) },
-  'cleanup run': { args: [], flags: z.object({ ...senderChoice, confirm: z.boolean().default(false) }) },
+  'cleanup plan': { args: [], flags: z.object({ ...senderChoice, account: mailAccount }) },
+  'cleanup run': {
+    args: [],
+    flags: z.object({ ...senderChoice, account: mailAccount, confirm: z.boolean().default(false) }),
+  },
   history: { args: [], flags: z.object({ limit: limit(10, 500) }) },
   undo: {
     args: ['id'],
@@ -173,11 +185,16 @@ const COMMANDS = {
       confirm: z.boolean().default(false),
     }),
   },
-  'mail mailboxes': { args: [], flags: z.object({}) },
-  'mail sync': { args: [], flags: z.object({ mailbox }) },
+  'mail mailboxes': { args: [], flags: z.object({ account: mailAccount }) },
+  'mail sync': { args: [], flags: z.object({ mailbox, account: mailAccount }) },
   'mail list': {
     args: [],
-    flags: z.object({ mailbox, unread: z.boolean().default(false), limit: limit(25, 500) }),
+    flags: z.object({
+      mailbox,
+      account: mailAccount,
+      unread: z.boolean().default(false),
+      limit: limit(25, 500),
+    }),
   },
   'mail search': {
     args: ['query'],
@@ -188,6 +205,7 @@ const COMMANDS = {
         .min(1, 'mail search needs something to look for')
         .max(200, 'Search for at most 200 characters'),
       mailbox: mailboxPath.optional(),
+      account: mailAccount,
       server: z.boolean().default(false),
       limit: limit(25, 200),
     }),
@@ -200,6 +218,7 @@ const COMMANDS = {
         .int('The uid is a whole number')
         .positive('The uid is a whole number'),
       mailbox,
+      account: mailAccount,
     }),
   },
   'mail move': {
@@ -208,6 +227,7 @@ const COMMANDS = {
     flags: z.object({
       uids: uids('mail move'),
       mailbox,
+      account: mailAccount,
       to: z
         .string({ error: 'mail move needs --to archive, bin, junk, inbox or a folder from `mail mailboxes`' })
         .trim()
@@ -224,6 +244,7 @@ const COMMANDS = {
     flags: z.object({
       uids: uids('mail flag'),
       mailbox,
+      account: mailAccount,
       unflag: z.boolean().default(false),
       confirm: z.boolean().default(false),
     }),
@@ -235,6 +256,7 @@ const COMMANDS = {
       .object({
         uids: uids('mail mark'),
         mailbox,
+        account: mailAccount,
         read: z.boolean().default(false),
         unread: z.boolean().default(false),
         confirm: z.boolean().default(false),

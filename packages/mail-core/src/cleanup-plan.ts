@@ -26,6 +26,8 @@ export interface PlannedSender {
   /** For mailto: the exact email to send (one recipient, checked subject and body). */
   mailto: MailtoMessage | null
   trash: boolean
+  /** The accounts (ids) this sender's mail is in, when the analysis knew. */
+  accounts?: string[]
 }
 
 export interface CleanupPlan {
@@ -99,6 +101,7 @@ export function buildCleanupPlan(
       insecureLinkConfirmed: insecure && unsubscribe !== null,
       mailto,
       trash: req.trash,
+      ...(s.accounts && { accounts: s.accounts }),
     })
   }
   return plan

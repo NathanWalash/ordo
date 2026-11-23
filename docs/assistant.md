@@ -82,7 +82,7 @@ week" is about your data: it looks at your calendar first.
   assistant sends far more, so the first time you open it with a cloud provider it asks separately
   and says exactly what goes: your questions, and the Ordo data looked up to answer them,
   transactions with amounts and dates, balances, bills, calendar events, sender names, addresses
-  and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. It also says
+  and subject lines, the text of emails it opens, your boards’ cards, and your mail accounts’ names and email addresses. It also says
   that the assistant can move, flag and draft email, and send email you confirm. Until you press **Allow**, nothing is sent and
   there's nothing to type into; Ordo's main process refuses the question too. The OK is for that one
   provider (switching asks again), is kept in `assistant.json` in Ordo's data folder, and **Stop

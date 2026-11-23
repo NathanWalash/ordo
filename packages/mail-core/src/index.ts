@@ -87,6 +87,13 @@ export {
   type MailtoDraft,
 } from './compose'
 export { checkLink, LINK_MAX, type CheckedLink } from './links'
+export {
+  backoffMs,
+  SYNC_BACKOFF,
+  SyncSchedule,
+  type AccountSyncRecord,
+  type SyncFailureKind,
+} from './schedule'
 export { archiveMailbox, ROLE_NAMES, toMailboxList, type RawMailbox } from './mailboxes'
 export {
   guessProvider,

@@ -246,14 +246,24 @@ describe('MCP server', () => {
       name: 'ordo_mail_move',
       arguments: { uids: [7], to: 'archive', confirm: true },
     })
-    expect(json(moved)).toEqual({ mailbox: 'INBOX', to: 'Archive', moved: 1, undoId: 5 })
-    expect(services.mail.move).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7], to: 'archive' })
+    expect(json(moved)).toEqual({ account: 'iCloud', mailbox: 'INBOX', to: 'Archive', moved: 1, undoId: 5 })
+    expect(services.mail.move).toHaveBeenCalledWith({
+      account: 'acc-1',
+      mailbox: 'INBOX',
+      uids: [7],
+      to: 'archive',
+    })
     const flagged = await client.callTool({
       name: 'ordo_mail_flag',
       arguments: { uids: [7, 8], flagged: false, confirm: true },
     })
-    expect(json(flagged)).toEqual({ mailbox: 'INBOX', uids: [7, 8], flagged: false })
-    expect(services.mail.setFlags).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7, 8], flagged: false })
+    expect(json(flagged)).toEqual({ account: 'iCloud', mailbox: 'INBOX', uids: [7, 8], flagged: false })
+    expect(services.mail.setFlags).toHaveBeenCalledWith({
+      account: 'acc-1',
+      mailbox: 'INBOX',
+      uids: [7, 8],
+      flagged: false,
+    })
     // A message Ordo hasn't cached is refused before anything changes.
     const unknown = await client.callTool({
       name: 'ordo_mail_mark',
@@ -280,7 +290,8 @@ describe('MCP server', () => {
         to: ['sam@friend.example'],
         subject: 'Re: Lunch?',
         bcc: [],
-        replyTo: { mailbox: 'INBOX', uid: 7 },
+        account: 'acc-1',
+        replyTo: { account: 'acc-1', mailbox: 'INBOX', uid: 7 },
       }),
     )
   })
@@ -288,7 +299,7 @@ describe('MCP server', () => {
   it('ordo_read_message returns text, never HTML, and doesn’t mark it read', async () => {
     const { client, services } = await connect(false)
     const r = await client.callTool({ name: 'ordo_read_message', arguments: { uid: 7 } })
-    expect(services.mail.open).toHaveBeenCalledWith({ mailbox: 'INBOX', uid: 7 })
+    expect(services.mail.open).toHaveBeenCalledWith({ account: 'acc-1', mailbox: 'INBOX', uid: 7 })
     const d = json(r)
     expect(d).toMatchObject({
       uid: 7,

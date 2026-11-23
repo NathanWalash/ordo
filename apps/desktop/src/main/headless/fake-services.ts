@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { CategorisedSender, MemoryView, MessageContent, MessageSummary } from '@ordo/shared'
+import type { CategorisedSender, MailAccount, MemoryView, MessageContent, MessageSummary } from '@ordo/shared'
 import type { BoardCardRow, OrdoServices } from './commands'
 
 const period = (from: string, to: string, spent: number) => ({
@@ -119,9 +119,35 @@ export function sender(address: string, extra: Partial<CategorisedSender> = {}):
   }
 }
 
+/** The fake services' one mail account, unless a test gives more. */
+export const FAKE_ACCOUNT: MailAccount = {
+  id: 'acc-1',
+  label: 'iCloud',
+  email: 'me@icloud.example',
+  color: 'blue',
+  provider: 'icloud',
+  imap: { host: 'imap.mail.me.com', port: 993, secure: true },
+  smtp: { host: 'smtp.mail.me.com', port: 587, secure: false, requireTLS: true },
+  auth: { kind: 'password' },
+  lastScan: null,
+}
+
+/** A second account, for tests of several accounts. */
+export const WORK_ACCOUNT: MailAccount = {
+  ...FAKE_ACCOUNT,
+  id: 'acc-work',
+  label: 'Work',
+  email: 'me@work.example',
+  color: 'green',
+  provider: 'gmail',
+  imap: { host: 'imap.gmail.com', port: 993, secure: true },
+  smtp: { host: 'smtp.gmail.com', port: 465, secure: true, requireTLS: false },
+}
+
 /** A message list row. */
 export function summary(uid: number, extra: Partial<MessageSummary> = {}): MessageSummary {
   return {
+    account: 'acc-1',
     mailbox: 'INBOX',
     uid,
     date: new Date('2026-11-16T10:00:00Z'),
@@ -189,7 +215,13 @@ export function boardCard(extra: Partial<BoardCardRow> = {}): BoardCardRow {
 export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoServices {
   return {
     version: '9.9.9',
-    account: () => ({ connected: true, email: 'me@icloud.example', lastScan: null, messageCount: 4 }),
+    account: () => ({
+      connected: true,
+      email: 'me@icloud.example',
+      lastScan: null,
+      messageCount: 4,
+      accounts: [FAKE_ACCOUNT],
+    }),
     scan: vi.fn(async () => ({ ok: true as const, added: 4, total: 4, stopped: false })),
     senders: async () => [
       sender('digest@news.example', {
@@ -207,6 +239,7 @@ export function fakeServices(overrides: Partial<OrdoServices> = {}): OrdoService
       undo: vi.fn(async () => ({ ok: true as const, restored: 2, missing: 0 })),
     },
     mail: {
+      accounts: () => [FAKE_ACCOUNT],
       mailboxes: () => [
         { path: 'INBOX', name: 'Inbox', role: 'inbox', delimiter: '/', total: 2, unread: 1 },
         { path: 'Archive', name: 'Archive', role: 'archive', delimiter: '/', total: 0, unread: 0 },

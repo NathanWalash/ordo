@@ -191,15 +191,25 @@ const readsOf = (s: Step) => TOOLS.find((t) => t.name === s.tool)?.reads ?? 'ear
  */
 function onlyTarget(s: Step, target: MailTargets['target']): boolean {
   if (!target || isError(s.result)) return false
-  if (s.tool === 'ordo_read_message')
-    return s.args['uid'] === target.uid && (s.args['mailbox'] ?? 'INBOX') === target.mailbox
+  if (s.tool === 'ordo_read_message') {
+    // The same message in the same account: a uid alone is only unique within one account.
+    const named = s.args['account']
+    const sameAccount =
+      named === undefined
+        ? target.first
+        : typeof named === 'string' && target.accountNames.includes(named.toLowerCase())
+    return sameAccount && s.args['uid'] === target.uid && (s.args['mailbox'] ?? 'INBOX') === target.mailbox
+  }
   if (s.tool === 'ordo_search_mail' || s.tool === 'ordo_messages') {
     const found = (s.result as { messages?: unknown }).messages
     return (
       Array.isArray(found) &&
       found.length > 0 &&
       found.every(
-        (m: { uid?: unknown; mailbox?: unknown }) => m.uid === target.uid && m.mailbox === target.mailbox,
+        (m: { uid?: unknown; mailbox?: unknown; accountId?: unknown }) =>
+          m.uid === target.uid &&
+          m.mailbox === target.mailbox &&
+          (m.accountId === undefined ? target.first : m.accountId === target.account),
       )
     )
   }
@@ -386,6 +396,7 @@ const cardEmail = (e: EmailPreview, typed: Set<string>): CardEmail => {
   })
   return {
     from: clean(e.from, 254),
+    fromAccount: clean(e.fromAccount, 40),
     to: e.to.map(who),
     cc: e.cc.map(who),
     subject: clean(e.subject, 300),

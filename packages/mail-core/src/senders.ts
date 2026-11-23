@@ -19,7 +19,10 @@ export function groupBySender(
   sampleSize = 5,
   unsubscribeOptions: UnsubscribeParseOptions = {},
 ): SenderSummary[] {
-  const map = new Map<string, SenderSummary & { _samples: { date: Date; subject: string }[] }>()
+  const map = new Map<
+    string,
+    SenderSummary & { _samples: { date: Date; subject: string }[]; _accounts: Set<string> }
+  >()
   for (const h of headers) {
     const address = h.from.address.trim().toLowerCase()
     let s = map.get(address)
@@ -38,6 +41,7 @@ export function groupBySender(
         bulk: false,
         automated: false,
         _samples: [],
+        _accounts: new Set(),
       }
       map.set(address, s)
     }
@@ -54,10 +58,12 @@ export function groupBySender(
     const unsub = parseUnsubscribe(h.listUnsubscribe, h.listUnsubscribePost, unsubscribeOptions)
     if (unsubscribeRank(unsub) > unsubscribeRank(s.unsubscribe)) s.unsubscribe = unsub
     s._samples.push({ date: h.date, subject: h.subject })
+    if (h.account) s._accounts.add(h.account)
   }
   return [...map.values()]
-    .map(({ _samples, ...s }) => ({
+    .map(({ _samples, _accounts, ...s }) => ({
       ...s,
+      ...(_accounts.size && { accounts: [..._accounts].sort() }),
       sampleSubjects: _samples
         .sort((a, b) => b.date.getTime() - a.date.getTime())
         .slice(0, sampleSize)

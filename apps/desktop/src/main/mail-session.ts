@@ -1,18 +1,22 @@
 import { ImapMailProvider, MailConnectionError } from '@ordo/mail-core/node'
-import { loadAccount } from './account'
-import { imapConfig } from './mail'
+import type { MailAccount } from '@ordo/shared'
+import { getAccount } from './account'
+import { imapConfigFor, onAccountRemoved } from './mail'
 
 /**
- * One IMAP connection the mail client keeps open while you read, so opening a message or
- * flagging one doesn't sign in each time. It closes after a minute with nothing to do, when the
- * connection drops (the next call reconnects) and when the account is disconnected. Syncs use
- * their own short-lived connection, like the inbox scan.
+ * One IMAP connection per account that the mail client keeps open while you read, so opening a
+ * message or flagging one doesn't sign in each time. Each closes after a minute with nothing to
+ * do, when its connection drops (the next call reconnects) and when its account is removed. A
+ * problem with one account's connection never touches another's. Syncs use their own
+ * short-lived connections, like the inbox scan.
  */
 
 const IDLE_MS = 60_000
 
 interface Session {
-  email: string
+  account: string
+  /** The sign-in it was opened with, so a changed address or server opens a new one. */
+  key: string
   provider: ImapMailProvider
   ready: Promise<void>
   connected: boolean
@@ -20,31 +24,34 @@ interface Session {
   idle: ReturnType<typeof setTimeout> | null
 }
 
-let session: Session | null = null
+const sessions = new Map<string, Session>()
 
 export class NotConnected extends Error {
   override name = 'NotConnected'
 }
 
+const keyOf = (a: MailAccount) => JSON.stringify([a.email, a.imap.host, a.imap.port, a.imap.secure])
+
 function drop(s: Session): void {
-  if (session === s) session = null
+  if (sessions.get(s.account) === s) sessions.delete(s.account)
   if (s.idle) clearTimeout(s.idle)
   void s.provider.close().catch(() => {})
 }
 
-async function open(): Promise<Session> {
-  const account = loadAccount()
+async function open(accountId: string): Promise<Session> {
+  const account = getAccount(accountId)
   if (!account) throw new NotConnected('Connect your iCloud account first.')
-  const s = session
-  if (s && s.email === account.email && (!s.connected || s.provider.usable)) {
+  const s = sessions.get(account.id)
+  if (s && s.key === keyOf(account) && (!s.connected || s.provider.usable)) {
     // Still connecting (another call started it), or connected and fine.
     await s.ready
     return s
   }
   if (s) drop(s)
-  const provider = new ImapMailProvider(imapConfig(account.email, account.password))
+  const provider = new ImapMailProvider(await imapConfigFor(account))
   const fresh: Session = {
-    email: account.email,
+    account: account.id,
+    key: keyOf(account),
     provider,
     ready: Promise.resolve(),
     connected: false,
@@ -60,14 +67,17 @@ async function open(): Promise<Session> {
       throw err
     },
   )
-  session = fresh
+  sessions.set(account.id, fresh)
   await fresh.ready
   return fresh
 }
 
-/** Run `fn` with the shared connection. A dropped connection is replaced on the next call. */
-export async function withImap<T>(fn: (provider: ImapMailProvider) => Promise<T>): Promise<T> {
-  const s = await open()
+/** Run `fn` with an account's shared connection. A dropped connection is replaced on the next call. */
+export async function withImap<T>(
+  account: string,
+  fn: (provider: ImapMailProvider) => Promise<T>,
+): Promise<T> {
+  const s = await open(account)
   s.users++
   if (s.idle) clearTimeout(s.idle)
   s.idle = null
@@ -78,11 +88,13 @@ export async function withImap<T>(fn: (provider: ImapMailProvider) => Promise<T>
     throw err
   } finally {
     s.users--
-    if (s.users === 0 && session === s) s.idle = setTimeout(() => drop(s), IDLE_MS)
+    if (s.users === 0 && sessions.get(s.account) === s) s.idle = setTimeout(() => drop(s), IDLE_MS)
   }
 }
 
-/** Close the shared connection (disconnecting, quitting). */
-export function closeImapSession(): void {
-  if (session) drop(session)
+/** Close one account's shared connection, or every one (quitting). */
+export function closeImapSession(account?: string): void {
+  for (const s of [...sessions.values()]) if (!account || s.account === account) drop(s)
 }
+
+onAccountRemoved((account) => closeImapSession(account))

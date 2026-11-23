@@ -145,6 +145,8 @@ export interface SenderSummary {
   bulk: boolean
   /** Machine-sent: an Auto-Submitted header or a no-reply style address. */
   automated: boolean
+  /** The accounts (ids) this sender's mail is in, when the headers said (from the cache). */
+  accounts?: string[]
 }
 
 export interface MailboxStatus {
@@ -154,7 +156,7 @@ export interface MailboxStatus {
   uidValidity: string
 }
 
-export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk' | '\\Drafts' | '\\Archive'
+export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk' | '\\Drafts' | '\\Archive' | '\\All'
 
 /** Where moved messages ended up. */
 export interface MoveResult {
