@@ -217,6 +217,24 @@ describe('signing in to Gmail with a Google token', () => {
     expect(gmail.attempts[0]!.token).not.toBe(gmail.attempts[1]!.token)
   })
 
+  it('refreshes a refused token once for clean-up’s unsubscribe emails too, within the limit', async () => {
+    const a = await added()
+    google.expireAccessTokens()
+    const sender = mail.mailtoSenderFor(a)
+    try {
+      await sender.send({ to: 'unsubscribe@shop.example', subject: 'unsubscribe', body: 'Please' })
+      await sender.send({ to: 'leave@news.example', subject: 'unsubscribe', body: '' })
+    } finally {
+      sender.close()
+    }
+    // One refused sign-in, one refreshed one, then the same connection for the second message.
+    expect(gmail.attempts.map((x) => [x.protocol, x.ok])).toEqual([
+      ['smtp', false],
+      ['smtp', true],
+    ])
+    expect(gmail.sent.map((m) => m.to)).toEqual([['unsubscribe@shop.example'], ['leave@news.example']])
+  })
+
   it('never sends a Google token to a test server that isn’t on this computer', async () => {
     const a = await added()
     const was = { imap: process.env['ORDO_IMAP_HOST'], smtp: process.env['ORDO_SMTP_HOST'] }
@@ -228,6 +246,11 @@ describe('signing in to Gmail with a Google token', () => {
         message: expect.stringContaining('test server imap.example.test'),
       })
       await expect(mail.withSmtp(a, async () => 'sent')).rejects.toThrow(/test server smtp\.example\.test/)
+      const mailto = mail.mailtoSenderFor(a)
+      await expect(mailto.send({ to: 'x@shop.example', subject: 's', body: '' })).rejects.toThrow(
+        /smtp\.example\.test/,
+      )
+      mailto.close()
     } finally {
       process.env['ORDO_IMAP_HOST'] = was.imap
       process.env['ORDO_SMTP_HOST'] = was.smtp

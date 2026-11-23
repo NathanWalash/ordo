@@ -7,13 +7,7 @@ import {
   type CleanupRecord,
 } from '@ordo/mail-core'
 import type { ImapMailProvider } from '@ordo/mail-core/node'
-import {
-  createGuardedFetch,
-  createMailtoSender,
-  runCleanup,
-  scanMailbox,
-  undoCleanup,
-} from '@ordo/mail-core/node'
+import { createGuardedFetch, runCleanup, scanMailbox, undoCleanup } from '@ordo/mail-core/node'
 import {
   CLEANUP_IPC,
   CleanupIdSchema,
@@ -36,7 +30,7 @@ import {
   connectImap,
   INBOX,
   mailStore,
-  smtpConfigFor,
+  mailtoSenderFor,
 } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
 
@@ -115,13 +109,11 @@ async function runAccount(
       const store = accountStore(account.id)
       const loopback = allowLoopbackHttp()
       let provider: ImapMailProvider | null = null
-      // Opened on the first mailto unsubscribe only.
-      const smtp: { sender?: ReturnType<typeof createMailtoSender> } = {}
+      // Connects on the first mailto unsubscribe only, refreshing a refused Google token once.
+      const mailto = mailtoSenderFor(account)
       const fetch = createGuardedFetch({ allowLoopback: loopback })
       try {
         provider = await connectImap(account)
-        // The token the IMAP sign-in just used (refreshed if Gmail refused the first) is still fresh.
-        const smtpConfig = await smtpConfigFor(account)
         const record = await runCleanup(provider, store, plan.senders, {
           mailbox: INBOX,
           onProgress,
@@ -132,7 +124,7 @@ async function runAccount(
                 fetch,
                 allowLoopbackHttp: loopback,
                 openExternal: (url) => shell.openExternal(url),
-                sendMail: (msg) => (smtp.sender ??= createMailtoSender(smtpConfig, account.email)).send(msg),
+                sendMail: (msg) => mailto.send(msg),
               },
               { insecureLinkConfirmed: s.insecureLinkConfirmed, mailto: s.mailto ?? undefined },
             ),
@@ -141,7 +133,7 @@ async function runAccount(
       } catch (err) {
         return { ok: false, ...explain(err, undefined, account) }
       } finally {
-        smtp.sender?.close()
+        mailto.close()
         await provider?.close().catch(() => {})
       }
     }),

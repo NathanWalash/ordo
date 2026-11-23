@@ -2,9 +2,11 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import {
   analyseSenders,
+  MAILTO_PER_CLEANUP_MAX,
   PROVIDERS,
   SyncSchedule,
   withUnsubscribed,
+  type MailtoMessage,
   type SyncFailureKind,
 } from '@ordo/mail-core'
 import {
@@ -14,6 +16,7 @@ import {
   MailUnavailableError,
   MailStore,
   classifyImapError,
+  createMailtoSender,
   serverWords,
   type MailConnectionReason,
   scanMailbox,
@@ -43,7 +46,13 @@ import {
   removeStoredAccount,
   setSecret,
 } from './account'
-import { getCredentials, SignInAgainError, withCredentials, type AccountToSignIn } from './auth'
+import {
+  getCredentials,
+  isAuthFailure,
+  SignInAgainError,
+  withCredentials,
+  type AccountToSignIn,
+} from './auth'
 import { Locked, withWriteLock } from './writes'
 
 export const INBOX = 'INBOX'
@@ -156,16 +165,6 @@ function smtpSettings(
   return { ...server, requireTLS: server.secure ? server.requireTLS : true, ...creds }
 }
 
-/** How to reach and sign in to an account's IMAP server, now (an OAuth token is refreshed here). */
-export async function imapConfigFor(account: AccountToSignIn): Promise<ImapConfig> {
-  return imapSettings(account.imap, await getCredentials(account))
-}
-
-/** How to reach and sign in to an account's SMTP server, now. */
-export async function smtpConfigFor(account: AccountToSignIn): Promise<SmtpConfig> {
-  return smtpSettings(account.smtp, await getCredentials(account))
-}
-
 /**
  * Connect and sign in to an account's IMAP server. A Google sign-in whose token Gmail refuses is
  * refreshed and tried once more (see withCredentials). Close the provider when done.
@@ -196,6 +195,48 @@ export async function testAccountLogin(account: AccountToSignIn): Promise<void> 
  */
 export async function withSmtp<T>(account: AccountToSignIn, fn: (cfg: SmtpConfig) => Promise<T>): Promise<T> {
   return withCredentials(account, (creds) => fn(smtpSettings(account.smtp, creds)))
+}
+
+/**
+ * The sender for a clean-up's mailto: unsubscribes from this account: one SMTP connection, opened
+ * on the first message, at most MAILTO_PER_CLEANUP_MAX messages in all. Like withSmtp, a Google
+ * token the server refuses is refreshed and that message tried once more on a new connection; a
+ * refused sign-in comes before any message is accepted, so nothing is sent twice. Anything else
+ * (including a failure after the message was handed over) is never retried.
+ */
+export function mailtoSenderFor(account: AccountToSignIn): {
+  send(msg: MailtoMessage): Promise<void>
+  close(): void
+} {
+  let sender: ReturnType<typeof createMailtoSender> | null = null
+  let sent = 0
+  const open = async (refresh: boolean) => {
+    sender?.close()
+    sender = null
+    const creds = await getCredentials(account, { refresh })
+    // The limit is for the whole clean-up, across a reconnect.
+    sender = createMailtoSender(
+      smtpSettings(account.smtp, creds),
+      account.email,
+      MAILTO_PER_CLEANUP_MAX - sent,
+    )
+    return sender
+  }
+  return {
+    async send(msg) {
+      const s = sender ?? (await open(false))
+      try {
+        await s.send(msg)
+      } catch (err) {
+        if (account.auth.kind !== 'oauth' || !isAuthFailure(err)) throw err
+        await (await open(true)).send(msg)
+      }
+      sent++
+    },
+    close() {
+      sender?.close()
+    },
+  }
 }
 
 /** Settings for details being tested, before there's an account. */
