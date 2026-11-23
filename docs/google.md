@@ -169,6 +169,13 @@ What it asks for:
 | An account connected for Calendar   | Everything it already allows, plus `https://mail.google.com/`, for that account: Google doesn't do incremental authorization for desktop apps, so the whole set is asked for again. |
 | An account that already allows mail | Nothing: Ordo uses it straight away.                                                                                                                                                |
 
+A sign-in never takes access away from a Google account Ordo already has. If **Another Google
+account** (or **Connect Google account** for Calendar) ends up on an account Ordo already has for the
+other feature, Google's new grant would cover only what was just asked for, so Ordo keeps the
+account's sign-in exactly as it was and says how to add the feature instead (pick the account by name,
+or **Add Calendar** on its row). Signing in again for one account and choosing another in the browser
+changes nothing either.
+
 Gmail is reached at `imap.gmail.com:993` and `smtp.gmail.com:465`, both TLS from the start, as Google
 lists them ([IMAP, POP and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp));
 `smtp.gmail.com:587` with STARTTLS is the alternative. A Google token is only ever sent to those two
@@ -368,7 +375,8 @@ challenge and the client must answer with an empty line
 - `imapflow` gets `auth: { user, accessToken }`; `nodemailer` gets
   `auth: { type: 'OAuth2', user, accessToken, provisionCallback }`, where `provisionCallback` refuses
   to renew, because nodemailer would otherwise answer a refused token by sending the same token again.
-- `imapflow` prefers `AUTH=OAUTHBEARER` (RFC 7628) over `AUTH=XOAUTH2` when a server advertises both.
+- `imapflow` prefers `AUTH=OAUTHBEARER` (RFC 7628) over `AUTH=XOAUTH2` when a server advertises both
+  (the test server can offer both, and the main-process tests run with both on).
   Gmail's capability list includes both as far as we know, so against real Gmail the IMAP sign-in is
   probably OAUTHBEARER, with the same token and scope. Not verified here (no real Gmail in tests).
 - `main/google-mail.ts`: adding an account (`MAIL_SCOPES` for a new sign-in, `requestGoogleScopes`

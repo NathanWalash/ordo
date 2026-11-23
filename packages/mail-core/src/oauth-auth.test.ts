@@ -81,6 +81,27 @@ describe('the XOAUTH2 exchange against a local server', () => {
     expect(server.attempts).toEqual([{ protocol: 'imap', user: USER, token: 'expired', ok: false }])
   })
 
+  it('uses OAUTHBEARER when the server offers it too (as Gmail does), failing a refused token cleanly', async () => {
+    const both = await startFakeXoauth2Mail((user, token) => user === USER && token === TOKEN, {
+      oauthbearer: true,
+    })
+    try {
+      const cfg = (accessToken: string) => ({ ...imap(accessToken), port: both.imapPort })
+      await testImapLogin(cfg(TOKEN))
+      const p = new ImapMailProvider(cfg('expired'))
+      await expect(p.connect()).rejects.toBeInstanceOf(MailAuthError)
+      await p.close().catch(() => {})
+      expect(both.mechanisms).toEqual(['OAUTHBEARER', 'OAUTHBEARER'])
+      expect(both.malformed).toEqual([])
+      expect(both.attempts.map((a) => [a.user, a.token, a.ok])).toEqual([
+        [USER, TOKEN, true],
+        [USER, 'expired', false],
+      ])
+    } finally {
+      await both.stop()
+    }
+  })
+
   it('sends over SMTP with AUTH XOAUTH2', async () => {
     server.attempts = []
     server.sent = []

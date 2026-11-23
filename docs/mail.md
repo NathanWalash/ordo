@@ -307,5 +307,6 @@ Unpackaged builds can point IMAP and SMTP at a local server with `ORDO_IMAP_HOST
 `ORDO_IMAP_PORT`, `ORDO_SMTP_HOST` and `ORDO_SMTP_PORT` (with `ORDO_SMTP_SECURE=1` or
 `ORDO_SMTP_REQUIRE_TLS=1` if needed), for every account at once: each still signs in with its own
 user and password (or Google token: `test/fake-xoauth2.ts` is a local server that speaks XOAUTH2,
-with `ORDO_GOOGLE_BASE_URL` pointing at the fake Google; see [google.md](google.md#testing-against-a-fake-google)). `ORDO_TEST_ALLOW_LOOPBACK_HTTP=1` lets Load images reach an
+with `ORDO_GOOGLE_BASE_URL` pointing at the fake Google; see [google.md](google.md#testing-against-a-fake-google); a Google token is only ever sent to a test
+server on 127.0.0.1, ::1 or localhost). `ORDO_TEST_ALLOW_LOOPBACK_HTTP=1` lets Load images reach an
 http server on 127.0.0.1. Packaged builds ignore all of these.

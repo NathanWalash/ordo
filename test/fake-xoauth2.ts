@@ -5,6 +5,9 @@
  * - IMAP advertises `SASL-IR AUTH=XOAUTH2` and takes `AUTHENTICATE XOAUTH2 <base64>`; SMTP
  *   advertises `AUTH XOAUTH2` and takes `AUTH XOAUTH2 <base64>`. The payload must be exactly
  *   `user=<email>\x01auth=Bearer <token>\x01\x01`.
+ * - With `{ oauthbearer: true }`, IMAP also advertises `AUTH=OAUTHBEARER` (RFC 7628), as Gmail
+ *   does, and takes `n,a=<email>,\x01host=…\x01port=…\x01auth=Bearer <token>\x01\x01`; a refused
+ *   token's challenge must be answered with `AQ==` (\x01). imapflow prefers it when offered.
  * - A token it refuses gets Google's failure: a continuation carrying base64 JSON
  *   (`{"status":"401","schemes":"bearer","scope":"https://mail.google.com/"}`), which the client
  *   must answer with an empty line, then `NO [AUTHENTICATIONFAILED]` (IMAP) or `535` (SMTP).
@@ -27,6 +30,14 @@ const FAILURE = Buffer.from(
 ).toString('base64')
 
 /** The user and token in an XOAUTH2 initial response, or null if it isn't exactly that format. */
+export function parseOauthbearer(b64: string): { user: string; token: string } | null {
+  const fields = Buffer.from(b64, 'base64').toString().split('\x01')
+  const user = /^n,a=([^,]+),$/.exec(fields[0] ?? '')?.[1]
+  const token = fields.map((f) => /^auth=Bearer (.+)$/.exec(f)?.[1]).find(Boolean)
+  const ends = fields.length >= 3 && fields.at(-1) === '' && fields.at(-2) === ''
+  return user && token && ends ? { user: user.replace(/=2C/g, ',').replace(/=3D/g, '='), token } : null
+}
+
 export function parseXoauth2(b64: string): { user: string; token: string } | null {
   // eslint-disable-next-line no-control-regex -- XOAUTH2 separates its fields with \x01
   const m = /^user=([^\x01]+)\x01auth=Bearer ([^\x01]+)\x01\x01$/.exec(Buffer.from(b64, 'base64').toString())
@@ -58,11 +69,18 @@ export class FakeXoauth2Mail {
   private servers: Server[] = []
   private sockets = new Set<Socket>()
 
-  /** `accept` decides whether a user and access token may sign in. */
-  constructor(public accept: (user: string, token: string) => boolean) {}
+  /** The SASL mechanism of each attempt, in order. */
+  mechanisms: string[] = []
 
-  private check(protocol: 'imap' | 'smtp', b64: string): boolean {
-    const p = parseXoauth2(b64)
+  /** `accept` decides whether a user and access token may sign in. */
+  constructor(
+    public accept: (user: string, token: string) => boolean,
+    private options: { oauthbearer?: boolean } = {},
+  ) {}
+
+  private check(protocol: 'imap' | 'smtp', b64: string, mechanism = 'XOAUTH2'): boolean {
+    this.mechanisms.push(mechanism)
+    const p = mechanism === 'OAUTHBEARER' ? parseOauthbearer(b64) : parseXoauth2(b64)
     if (!p) {
       this.malformed.push(b64)
       return false
@@ -74,16 +92,17 @@ export class FakeXoauth2Mail {
 
   private imap(socket: Socket): void {
     const send = (s: string) => socket.write(`${s}\r\n`)
-    let failing: string | null = null
+    let failing: { tag: string; breaker: string } | null = null
     let authed = false
-    send('* OK [CAPABILITY IMAP4rev1 SASL-IR AUTH=XOAUTH2] Fake Gimap ready')
+    const auth = `SASL-IR AUTH=XOAUTH2${this.options.oauthbearer ? ' AUTH=OAUTHBEARER' : ''}`
+    send(`* OK [CAPABILITY IMAP4rev1 ${auth}] Fake Gimap ready`)
     lines(socket, (line) => {
       if (failing) {
-        // The client's answer to the failure challenge: it must be empty.
+        // The client's answer to the failure challenge: empty for XOAUTH2, \x01 for OAUTHBEARER.
         send(
-          line === ''
-            ? `${failing} NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)`
-            : `${failing} BAD expected an empty response`,
+          line === failing.breaker
+            ? `${failing.tag} NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)`
+            : `${failing.tag} BAD expected ${failing.breaker ? failing.breaker : 'an empty response'}`,
         )
         failing = null
         return
@@ -91,16 +110,19 @@ export class FakeXoauth2Mail {
       const [tag = '*', command = '', ...rest] = line.split(' ')
       switch (command.toUpperCase()) {
         case 'CAPABILITY':
-          send(`* CAPABILITY IMAP4rev1${authed ? '' : ' SASL-IR AUTH=XOAUTH2'}`)
+          send(`* CAPABILITY IMAP4rev1${authed ? '' : ` ${auth}`}`)
           return send(`${tag} OK Success`)
-        case 'AUTHENTICATE':
-          if (rest[0]?.toUpperCase() !== 'XOAUTH2' || !rest[1]) return send(`${tag} NO unsupported`)
-          if (this.check('imap', rest[1])) {
+        case 'AUTHENTICATE': {
+          const mechanism = rest[0]?.toUpperCase() ?? ''
+          const offered = mechanism === 'XOAUTH2' || (mechanism === 'OAUTHBEARER' && this.options.oauthbearer)
+          if (!offered || !rest[1]) return send(`${tag} NO unsupported`)
+          if (this.check('imap', rest[1], mechanism)) {
             authed = true
             return send(`${tag} OK [CAPABILITY IMAP4rev1] user authenticated (Success)`)
           }
-          failing = tag
+          failing = { tag, breaker: mechanism === 'OAUTHBEARER' ? 'AQ==' : '' }
           return send(`+ ${FAILURE}`)
+        }
         case 'LOGOUT':
           send('* BYE LOGOUT Requested')
           send(`${tag} OK 73 good day (Success)`)
@@ -214,6 +236,7 @@ export class FakeXoauth2Mail {
 
 export async function startFakeXoauth2Mail(
   accept: (user: string, token: string) => boolean,
+  options: { oauthbearer?: boolean } = {},
 ): Promise<FakeXoauth2Mail> {
-  return new FakeXoauth2Mail(accept).start()
+  return new FakeXoauth2Mail(accept, options).start()
 }

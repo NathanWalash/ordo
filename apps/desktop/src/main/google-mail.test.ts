@@ -32,10 +32,14 @@ const MAIL = 'https://mail.google.com/'
 const google = await startFakeGoogle()
 /** Gmail accepts a live access token with mail access, for the account it belongs to. */
 let gmailUp = true
-const gmail = await startFakeXoauth2Mail((user, token) => {
-  const t = google.accessTokens.get(token)
-  return gmailUp && !!t && t.scope.split(' ').includes(MAIL) && t.account.email === user
-})
+// Like Gmail, it offers OAUTHBEARER as well as XOAUTH2 for IMAP (imapflow picks OAUTHBEARER).
+const gmail = await startFakeXoauth2Mail(
+  (user, token) => {
+    const t = google.accessTokens.get(token)
+    return gmailUp && !!t && t.scope.split(' ').includes(MAIL) && t.account.email === user
+  },
+  { oauthbearer: true },
+)
 process.env['ORDO_GOOGLE_BASE_URL'] = google.base
 process.env['ORDO_TEST_GOOGLE_AUTO_CONSENT'] = '1'
 process.env['ORDO_IMAP_HOST'] = '127.0.0.1'
@@ -215,6 +219,7 @@ describe('signing in to Gmail with a Google token', () => {
     expect(await accounts.test({ id: a.id })).toMatchObject({ ok: true })
     expect(gmail.attempts.map((x) => x.ok)).toEqual([false, true])
     expect(gmail.attempts[0]!.token).not.toBe(gmail.attempts[1]!.token)
+    expect(gmail.mechanisms.slice(-2)).toEqual(['OAUTHBEARER', 'OAUTHBEARER'])
   })
 
   it('refreshes a refused token once for clean-up’s unsubscribe emails too, within the limit', async () => {
