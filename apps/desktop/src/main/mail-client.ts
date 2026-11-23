@@ -761,6 +761,8 @@ function writingAccount(input: ComposeInput): MailAccount | MailFailure {
   const accounts = listAccounts()
   const first = accounts[0]
   if (!first) return NO_ACCOUNT
+  // An account asked for by name must be there: never quietly another one.
+  if (input.account && !accounts.some((a) => a.id === input.account)) return NO_SUCH_ACCOUNT
   const original = input.replyTo
     ? refAccount(input.replyTo, first.id)
     : input.draft
