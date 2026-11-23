@@ -218,13 +218,10 @@ export async function listenForCode(o: {
       () => settle(() => reject(new OAuthError('timeout', 'Google sign-in took too long. Try again.'))),
       o.timeoutMs ?? 5 * 60_000,
     )
-    o.signal?.addEventListener(
-      'abort',
-      () => settle(() => reject(new OAuthError('cancelled', 'Sign-in was cancelled.'))),
-      {
-        once: true,
-      },
-    )
+    const cancel = () => settle(() => reject(new OAuthError('cancelled', 'Sign-in was cancelled.')))
+    // Cancelled while the listener was starting: give up now, not when the timeout runs out.
+    if (o.signal?.aborted) cancel()
+    else o.signal?.addEventListener('abort', cancel, { once: true })
   })
   code.catch(() => {})
   return {

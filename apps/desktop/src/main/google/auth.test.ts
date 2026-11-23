@@ -132,6 +132,15 @@ describe('GoogleAuth', () => {
     expect(fake.revoked).toHaveLength(1)
   })
 
+  it('stops at once, without opening the browser, when cancelled while the listener starts', async () => {
+    const started = Date.now()
+    const p = auth.signIn({ scopes: CALENDAR_SCOPES })
+    auth.cancelSignIn()
+    await expect(p).rejects.toMatchObject({ code: 'cancelled' })
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(opened).toEqual([])
+  })
+
   it('reports a cancelled consent, and a Workspace admin block', async () => {
     fake.consent = { error: 'access_denied' }
     await expect(auth.signIn({ scopes: CALENDAR_SCOPES })).rejects.toMatchObject({ code: 'denied' })

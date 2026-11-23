@@ -119,6 +119,16 @@ describe('the loopback listener', () => {
     ctrl.abort()
     await expect(cancelled.code).rejects.toBeInstanceOf(OAuthError)
   })
+
+  it('gives up at once when cancelled before it started listening, not after the timeout', async () => {
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const started = Date.now()
+    const l = await listenForCode({ state: 's', signal: ctrl.signal })
+    await expect(l.code).rejects.toMatchObject({ code: 'cancelled' })
+    expect(Date.now() - started).toBeLessThan(2000)
+    await expect(get(`${l.redirectUri}?state=s&code=x`)).rejects.toThrow()
+  })
 })
 
 describe('the token endpoint', () => {

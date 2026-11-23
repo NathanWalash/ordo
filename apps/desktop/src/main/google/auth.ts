@@ -219,6 +219,8 @@ export class GoogleAuth {
         state,
         loginHint,
       })
+      // Cancelled while the listener started: don't open the browser at all.
+      if (ctrl.signal.aborted) throw new OAuthError('cancelled', 'Sign-in was cancelled.')
       await this.o.openExternal(url)
       const code = await listener.code
       const t = await exchangeCode(this.o.endpoints, this.o.fetch, {
