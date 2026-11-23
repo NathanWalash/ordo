@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AiError, type CompleteRequest, type ModelProvider } from '@ordo/ai'
 import type { AssistantEvent, ConfirmCard } from '@ordo/shared'
 import type { CleanupPlan } from '@ordo/mail-core'
-import { content, fakeServices } from '../headless/fake-services'
+import { content, FAKE_ACCOUNT, fakeServices, WORK_ACCOUNT } from '../headless/fake-services'
 import { EMAIL_SHOWN_MAX, toolByName } from '../headless/tools'
 import {
   isPlainData,
@@ -768,7 +768,8 @@ describe('mail: acting on email, drafting and sending', () => {
         bcc: [],
         subject: 'Re: Lunch?',
         body: card.email!.text + card.email!.original!.text,
-        replyTo: { mailbox: 'INBOX', uid: 7 },
+        account: 'acc-1',
+        replyTo: { account: 'acc-1', mailbox: 'INBOX', uid: 7 },
       }),
     ])
     const order = s.events.map((e) => (e.type === 'tool' ? `tool:${e.tool}:${e.status}` : e.type))
@@ -848,6 +849,47 @@ describe('mail: acting on email, drafting and sending', () => {
     await s.run()
     expect(s.cards[0]!.trigger).toEqual({ kind: 'request', text: 'You asked for this.' })
     expect(s.cards[0]!.email!.to).toEqual([{ address: 'Pat@Friend.example' }])
+  })
+
+  it('with several accounts, the send card says which account it goes from', async () => {
+    const services = mailServices()
+    services.mail.accounts = () => [FAKE_ACCOUNT, WORK_ACCOUNT]
+    const m = fakeModel(
+      call('ordo_read_message', { uid: 7, account: 'Work' }),
+      reply('Yes, Friday works.', { account: 'Work' }),
+      answer('Sent.'),
+    )
+    const s = setup(m, {
+      services,
+      question: 'Reply to sam@friend.example’s lunch email in my work account saying Friday works',
+      confirm: async () => true,
+    })
+    await s.run()
+    expect(s.cards[0]!.email).toMatchObject({ from: 'me@work.example', fromAccount: 'Work' })
+    // Reading the same message in the same account counts as reading only the email replied to.
+    expect(s.cards[0]!.trigger).toEqual({ kind: 'request', text: 'You asked for this.' })
+    expect(sent(services)).toEqual([
+      expect.objectContaining({
+        account: 'acc-work',
+        replyTo: { account: 'acc-work', mailbox: 'INBOX', uid: 7 },
+      }),
+    ])
+  })
+
+  it('reading a message with the same uid in another account counts as reading other mail', async () => {
+    const services = mailServices()
+    services.mail.accounts = () => [FAKE_ACCOUNT, WORK_ACCOUNT]
+    const m = fakeModel(
+      // uid 7 in the first account (no account named), then a reply to uid 7 in Work.
+      call('ordo_read_message', { uid: 7 }),
+      reply('Yes, Friday works.', { account: 'Work' }),
+    )
+    const s = setup(m, {
+      services,
+      question: 'Reply to sam@friend.example’s lunch email in my work account saying Friday works',
+    })
+    await s.run()
+    expect(s.cards[0]!.trigger.kind).toBe('data')
   })
 
   it('only an exact typed address counts: not a shorter domain, not the part after a plus', async () => {

@@ -73,13 +73,17 @@ test('an unreachable mail server says so, with a next step', async () => {
   }
 })
 
-test('disconnecting forgets the account', async () => {
+test('removing the account forgets it', async () => {
   test.skip(!imapPort, 'Needs the connected account from the previous test')
   await page.getByRole('navigation').getByRole('button', { name: 'Settings' }).click()
-  const account = page.getByRole('region', { name: 'Account' })
-  await expect(account.getByText(`Connected as ${TEST_ACCOUNT.email}.`, { exact: false })).toBeVisible()
-  await account.getByRole('button', { name: 'Disconnect' }).click()
-  await expect(account.getByRole('button', { name: 'Connect iCloud' })).toBeVisible()
+  const accounts = page.getByRole('region', { name: 'Accounts' })
+  await expect(accounts.getByText(TEST_ACCOUNT.email, { exact: false })).toBeVisible()
+  await accounts.getByRole('button', { name: 'Remove iCloud' }).click()
+  // The sheet says what goes, and that nothing changes on the server.
+  const sheet = page.getByRole('dialog', { name: 'Remove iCloud?' })
+  await expect(sheet).toContainText('Nothing changes on the server')
+  await sheet.getByRole('button', { name: 'Remove account' }).click()
+  await expect(accounts.getByRole('button', { name: 'Connect iCloud' })).toBeVisible()
   await page.getByRole('navigation').getByRole('button', { name: 'Mail' }).click()
   await expect(page.getByRole('heading', { name: 'Connect your iCloud account' })).toBeVisible()
 })

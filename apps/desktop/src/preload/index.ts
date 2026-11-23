@@ -12,6 +12,7 @@ import { boardsApi } from './boards'
 import { updatesApi } from './updates'
 import { backupApi } from './backup'
 import { googleApi } from './google'
+import { accountsApi } from './accounts'
 
 const api: OrdoApi = {
   app: {
@@ -44,6 +45,7 @@ const api: OrdoApi = {
     connect: (input) => ipcRenderer.invoke(IPC.accountConnect, input),
     disconnect: () => ipcRenderer.invoke(IPC.accountDisconnect),
   },
+  accounts: accountsApi,
   scan: {
     start: () => ipcRenderer.invoke(IPC.scanStart),
     stop: () => ipcRenderer.invoke(IPC.scanStop),
@@ -54,7 +56,7 @@ const api: OrdoApi = {
     },
   },
   senders: {
-    list: () => ipcRenderer.invoke(IPC.sendersList),
+    list: (input) => ipcRenderer.invoke(IPC.sendersList, input),
   },
   calendar: {
     status: () => ipcRenderer.invoke(IPC.calendarStatus),

@@ -48,6 +48,23 @@ describe('replyRecipients', () => {
       'me.person@mac.com',
     ])
     expect(ownAddresses('me@custom.example')).toEqual(['me@custom.example'])
+  })
+
+  it('knows Gmail’s other spellings, and takes every account at once', () => {
+    expect(ownAddresses('Jo.Bloggs@gmail.com').sort()).toEqual(
+      [
+        'jo.bloggs@gmail.com',
+        'jo.bloggs@googlemail.com',
+        'jobloggs@gmail.com',
+        'jobloggs@googlemail.com',
+      ].sort(),
+    )
+    expect(ownAddresses('me@icloud.com', 'jo@work.example', '')).toEqual([
+      'me@icloud.com',
+      'me@me.com',
+      'me@mac.com',
+      'jo@work.example',
+    ])
     const toAlias = {
       from: { address: 'sam@friend.example' },
       to: [{ address: 'me.person@me.com' }, { address: 'pat@friend.example' }],

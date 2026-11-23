@@ -9,6 +9,7 @@ import {
   type MailboxRole,
   type MessageContent,
 } from '@ordo/mail-core'
+import { AccountIdSchema } from './accounts'
 
 /** An IMAP folder path, as listed by the server. The main process also checks it's one it knows. */
 export const MailboxPathSchema = z
@@ -19,10 +20,27 @@ export const MailboxPathSchema = z
 
 const uid = z.number().int().positive().max(4_294_967_295)
 
-export const MessageRefSchema = z.object({ mailbox: MailboxPathSchema, uid })
+/**
+ * Which account. Left out, the first account: what callers from before Ordo had several accounts
+ * (headless scripts, MCP agents) meant.
+ */
+const account = AccountIdSchema.optional()
+/** One account, or `all` of them (the unified inbox, search everywhere). */
+const accountOrAll = z.union([AccountIdSchema, z.literal('all')]).optional()
+
+export const MessageRefSchema = z.object({ account, mailbox: MailboxPathSchema, uid })
 export type MessageRef = z.infer<typeof MessageRefSchema>
 
+/** Which account's folders to list (the first account's when left out). */
+export const MailboxesInputSchema = z.object({ account }).strict()
+
+/** A folder in an account; `all` with INBOX is the unified inbox. */
+export const MailboxRefSchema = z.object({ account: accountOrAll, mailbox: MailboxPathSchema })
+export type MailboxRef = z.input<typeof MailboxRefSchema>
+
 export const MessageListQuerySchema = z.object({
+  /** One account, or `all` for every account's INBOX (the unified inbox). */
+  account: accountOrAll,
   mailbox: MailboxPathSchema,
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).max(1_000_000).default(0),
@@ -32,19 +50,22 @@ export type MessageListQuery = z.input<typeof MessageListQuerySchema>
 
 export const SearchQuerySchema = z.object({
   query: z.string().trim().min(1).max(200),
+  /** One account; every account when missing or `all`. */
+  account: accountOrAll,
   /** Only this folder; every cached folder when missing (local search only). */
   mailbox: MailboxPathSchema.optional(),
   limit: z.number().int().min(1).max(200).default(50),
 })
 export type SearchQueryInput = z.input<typeof SearchQuerySchema>
 
-export const ServerSearchSchema = SearchQuerySchema.extend({ mailbox: MailboxPathSchema })
+export const ServerSearchSchema = SearchQuerySchema.extend({ account, mailbox: MailboxPathSchema })
 export type ServerSearchInput = z.input<typeof ServerSearchSchema>
 
 const uids = z.array(uid).min(1).max(500)
 
 export const SetFlagsSchema = z
   .object({
+    account,
     mailbox: MailboxPathSchema,
     uids,
     seen: z.boolean().optional(),
@@ -59,6 +80,7 @@ export type MoveTarget = (typeof MOVE_TARGETS)[number]
 
 /** Archive, Bin, Inbox or Junk, or one of the user's own folders as the server lists it. */
 export const MailMoveSchema = z.object({
+  account,
   mailbox: MailboxPathSchema,
   uids,
   to: z.union([z.enum(MOVE_TARGETS), z.object({ folder: MailboxPathSchema }).strict()]),
@@ -68,6 +90,8 @@ export type MailMoveInput = z.input<typeof MailMoveSchema>
 /** The most recent move that can still be undone, for the assistant's and headless undo. */
 export interface LastMove {
   undoId: number
+  /** The account the messages are in. */
+  account: string
   /** Folder paths. */
   from: string
   to: string
@@ -105,6 +129,11 @@ const addressField = z.union([
 
 /** A message from the compose sheet. Addresses are parsed and checked again in the main process. */
 export const ComposeSchema = z.object({
+  /**
+   * The account to send (or save the draft) from. A reply always goes from the account the original
+   * is in, and a draft is saved where it was: the main process refuses any other.
+   */
+  account,
   to: addressField,
   cc: addressField,
   bcc: addressField,
@@ -123,6 +152,8 @@ export type ComposeInput = z.input<typeof ComposeSchema>
 
 /** A row in the message list. */
 export interface MessageSummary {
+  /** The account it's in (its id). */
+  account: string
   mailbox: string
   uid: number
   date: Date
@@ -143,18 +174,39 @@ export type MailFailure = { ok: false; error: MailError; message: string }
 export type MailOutcome<T extends object = object> = ({ ok: true } & T) | MailFailure
 
 export interface MailRefreshProgress {
+  account: string
   mailbox: string
   checked: number
   total: number
 }
 
+/** An account a check for new mail couldn't reach, and why. */
+export interface AccountRefreshFailure {
+  account: string
+  error: MailError
+  message: string
+}
+
+export type RefreshOutcome = MailOutcome<{
+  added: number
+  removed: number
+  changed: number
+  /**
+   * Checking several accounts (`account: 'all'`): those that couldn't be checked. The others were,
+   * so the outcome is still ok; each failing account backs off on its own.
+   */
+  failed?: AccountRefreshFailure[]
+}>
+
 export interface MailApi {
-  /** Folders from the cache, special ones first. Empty until the first refresh. */
-  mailboxes(): Promise<MailboxInfo[]>
-  /** Fetch the folder list and new mail in one folder from the server into the cache. */
-  refresh(input: {
-    mailbox: string
-  }): Promise<MailOutcome<{ added: number; removed: number; changed: number }>>
+  /** One account's folders from the cache (the first account's when left out), special ones first. */
+  mailboxes(input?: { account?: string }): Promise<MailboxInfo[]>
+  /**
+   * Fetch the folder list and new mail in one folder from the server into the cache. With
+   * `account: 'all'` (INBOX only), every account's inbox, each on its own connection. `auto`: the
+   * window's own timer, which skips accounts backing off after a failure.
+   */
+  refresh(input: MailboxRef, options?: { auto?: boolean }): Promise<RefreshOutcome>
   onRefreshProgress(listener: (p: MailRefreshProgress) => void): () => void
   /** One page of a folder from the cache, newest first. */
   messages(query: MessageListQuery): Promise<{ total: number; messages: MessageSummary[] }>

@@ -3,7 +3,7 @@ import { parseInvocation, type Command } from './args'
 import { runCli, type CliIo } from './cli'
 import { exitCodeFor, gate, runCommand } from './commands'
 import { clean, formatHuman, pounds } from './format'
-import { boardCard, fakeServices, summary } from './fake-services'
+import { boardCard, FAKE_ACCOUNT, fakeServices, summary, WORK_ACCOUNT } from './fake-services'
 
 function io() {
   const out: string[] = []
@@ -156,6 +156,7 @@ describe('commands', () => {
     }))
     const r = await cli(services, 'mail', 'list', '--mailbox', 'Archive', '--unread')
     expect(services.mail.messages).toHaveBeenCalledWith({
+      account: 'acc-1',
       mailbox: 'Archive',
       limit: 25,
       offset: 0,
@@ -189,17 +190,24 @@ describe('commands', () => {
     const moved = await cli(services, 'mail', 'move', '7', '8', '--to', 'bin', ...go, '--json')
     expect(moved.code).toBe(0)
     expect(JSON.parse(moved.stdout)).toEqual({
+      account: 'iCloud',
       mailbox: 'INBOX',
       to: 'Deleted Messages',
       moved: 2,
       undoId: 5,
     })
-    expect(services.mail.move).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7, 8], to: 'trash' })
+    expect(services.mail.move).toHaveBeenCalledWith({
+      account: 'acc-1',
+      mailbox: 'INBOX',
+      uids: [7, 8],
+      to: 'trash',
+    })
     const human = await cli(services, 'mail', 'move', '7', '--to', 'Projects', ...go)
     expect(human.stdout).toBe(
       'Moved 1 message from INBOX to Projects. Nothing is deleted; move them back with `mail move` (undo only works within one MCP session).\n',
     )
     expect(services.mail.move).toHaveBeenLastCalledWith({
+      account: 'acc-1',
       mailbox: 'INBOX',
       uids: [7],
       to: { folder: 'Projects' },
@@ -207,11 +215,21 @@ describe('commands', () => {
     expect((await cli(services, 'mail', 'flag', '7', '--unflag', ...go)).stdout).toBe(
       'Unflagged 1 message.\n',
     )
-    expect(services.mail.setFlags).toHaveBeenCalledWith({ mailbox: 'INBOX', uids: [7], flagged: false })
+    expect(services.mail.setFlags).toHaveBeenCalledWith({
+      account: 'acc-1',
+      mailbox: 'INBOX',
+      uids: [7],
+      flagged: false,
+    })
     expect((await cli(services, 'mail', 'mark', '7', '8', '--read', ...go)).stdout).toBe(
       'Marked 2 messages as read.\n',
     )
-    expect(services.mail.setFlags).toHaveBeenLastCalledWith({ mailbox: 'INBOX', uids: [7, 8], seen: true })
+    expect(services.mail.setFlags).toHaveBeenLastCalledWith({
+      account: 'acc-1',
+      mailbox: 'INBOX',
+      uids: [7, 8],
+      seen: true,
+    })
   })
 
   it('mail changes refuse unknown folders, Drafts, and messages Ordo hasn’t cached', async () => {
@@ -236,7 +254,14 @@ describe('commands', () => {
     const go = ['--allow-changes', '--confirm', '--json']
     const none = await cli(services, 'mail', 'undo', ...go)
     expect(JSON.parse(none.stdout).error).toMatchObject({ code: 'not_found' })
-    services.mail.lastMove = () => ({ undoId: 9, from: 'INBOX', to: 'Archive', count: 1, messages: [] })
+    services.mail.lastMove = () => ({
+      undoId: 9,
+      account: 'acc-1',
+      from: 'INBOX',
+      to: 'Archive',
+      count: 1,
+      messages: [],
+    })
     expect(JSON.parse((await cli(services, 'mail', 'undo', ...go)).stdout)).toEqual({
       undoId: 9,
       restored: 1,
@@ -250,8 +275,129 @@ describe('commands', () => {
     const services = fakeServices()
     const r = await cli(services, 'mail', 'sync', '--mailbox', 'Projects', '--json')
     expect(r.code).toBe(0)
-    expect(services.mail.refresh).toHaveBeenCalledWith({ mailbox: 'Projects' }, expect.anything())
-    expect(JSON.parse(r.stdout)).toEqual({ mailbox: 'Projects', added: 1, removed: 0, changed: 2 })
+    expect(services.mail.refresh).toHaveBeenCalledWith(
+      { account: 'acc-1', mailbox: 'Projects' },
+      expect.anything(),
+    )
+    expect(JSON.parse(r.stdout)).toEqual({
+      mailbox: 'Projects',
+      account: 'iCloud',
+      added: 1,
+      removed: 0,
+      changed: 2,
+    })
+  })
+
+  describe('with several accounts', () => {
+    const two = () => {
+      const services = fakeServices()
+      services.mail.accounts = () => [FAKE_ACCOUNT, WORK_ACCOUNT]
+      services.mail.messages = vi.fn(() => ({
+        total: 2,
+        messages: [summary(7), summary(7, { account: 'acc-work', subject: 'Standup' })],
+      }))
+      return services
+    }
+
+    it('mail list shows every account’s inbox together, each row naming its account', async () => {
+      const services = two()
+      const r = await cli(services, 'mail', 'list', '--json')
+      expect(services.mail.messages).toHaveBeenCalledWith(expect.objectContaining({ account: 'all' }))
+      expect(JSON.parse(r.stdout).messages).toEqual([
+        expect.objectContaining({ account: 'iCloud', accountId: 'acc-1', uid: 7 }),
+        expect.objectContaining({ account: 'Work', accountId: 'acc-work', uid: 7, subject: 'Standup' }),
+      ])
+    })
+
+    it('--account names an account by name, address or id, case-insensitively', async () => {
+      for (const word of ['work', 'ME@WORK.EXAMPLE', 'acc-work']) {
+        const services = two()
+        await cli(services, 'mail', 'list', '--account', word, '--json')
+        expect(services.mail.messages).toHaveBeenCalledWith(expect.objectContaining({ account: 'acc-work' }))
+      }
+    })
+
+    it('refuses an account that isn’t there, or a name two accounts share', async () => {
+      const services = two()
+      const none = await cli(services, 'mail', 'list', '--account', 'Holiday', '--json')
+      expect(JSON.parse(none.stdout).error).toMatchObject({ code: 'not_found' })
+      expect(JSON.parse(none.stdout).error.message).toContain('Work (me@work.example)')
+      services.mail.accounts = () => [FAKE_ACCOUNT, { ...WORK_ACCOUNT, label: 'iCloud' }]
+      const both = await cli(services, 'mail', 'read', '7', '--account', 'icloud', '--json')
+      expect(JSON.parse(both.stdout).error).toMatchObject({ code: 'invalid' })
+      expect(services.mail.open).not.toHaveBeenCalled()
+    })
+
+    it('reads and moves a message in the account named, and checks its own folders', async () => {
+      const services = two()
+      services.mail.cached = vi.fn(() => summary(7, { account: 'acc-work' }))
+      services.mail.mailboxes = vi.fn((input?: { account?: string }) =>
+        input?.account === 'acc-work'
+          ? [
+              { path: 'INBOX', name: 'Inbox', role: 'inbox' as const, delimiter: '/', total: 1, unread: 0 },
+              {
+                path: '[Gmail]/All Mail',
+                name: 'All Mail',
+                role: 'all' as const,
+                delimiter: '/',
+                total: 1,
+                unread: 0,
+              },
+            ]
+          : [],
+      )
+      const go = ['--allow-changes', '--confirm', '--json']
+      const r = await cli(services, 'mail', 'move', '7', '--to', 'archive', '--account', 'Work', ...go)
+      expect(JSON.parse(r.stdout)).toMatchObject({ account: 'Work', to: '[Gmail]/All Mail' })
+      expect(services.mail.cached).toHaveBeenCalledWith({ account: 'acc-work', mailbox: 'INBOX', uid: 7 })
+      expect(services.mail.move).toHaveBeenCalledWith({
+        account: 'acc-work',
+        mailbox: 'INBOX',
+        uids: [7],
+        to: 'archive',
+      })
+      await cli(services, 'mail', 'read', '7', '--account', 'Work', '--json')
+      expect(services.mail.open).toHaveBeenCalledWith({ account: 'acc-work', mailbox: 'INBOX', uid: 7 })
+    })
+
+    it('mail sync checks every inbox, and says which accounts it couldn’t reach', async () => {
+      const services = two()
+      services.mail.refresh = vi.fn(async () => ({
+        ok: true as const,
+        added: 3,
+        removed: 0,
+        changed: 0,
+        failed: [{ account: 'acc-work', error: 'auth' as const, message: 'Gmail didn’t accept that.' }],
+      }))
+      const r = await cli(services, 'mail', 'sync', '--json')
+      expect(services.mail.refresh).toHaveBeenCalledWith(
+        { account: 'all', mailbox: 'INBOX' },
+        expect.anything(),
+      )
+      expect(JSON.parse(r.stdout)).toMatchObject({
+        added: 3,
+        failed: [{ account: 'Work', error: 'auth', message: 'Gmail didn’t accept that.' }],
+      })
+    })
+
+    it('mail mailboxes lists every account’s folders, and status lists the accounts', async () => {
+      const services = two()
+      const boxes = JSON.parse((await cli(services, 'mail', 'mailboxes', '--json')).stdout)
+      expect(boxes.accounts.map((a: { name: string }) => a.name)).toEqual(['iCloud', 'Work'])
+      expect(boxes.mailboxes.filter((m: { account: string }) => m.account === 'Work')).not.toHaveLength(0)
+      const status = JSON.parse((await cli(services, 'status', '--json')).stdout)
+      expect(status.account.accounts).toEqual([
+        expect.objectContaining({ id: 'acc-1', name: 'iCloud', email: 'me@icloud.example' }),
+        expect.objectContaining({ id: 'acc-work', name: 'Work', provider: 'gmail' }),
+      ])
+      expect(JSON.stringify(status)).not.toMatch(/password|secret/i)
+    })
+
+    it('cleanup plan and run can be kept to one account', async () => {
+      const services = two()
+      await cli(services, 'cleanup', 'plan', '--sender', 'digest@news.example', '--account', 'Work', '--json')
+      expect(services.cleanup.plan).toHaveBeenCalledWith(expect.objectContaining({ account: 'acc-work' }))
+    })
   })
 
   it('senders filters, limits and marks people as protected', async () => {

@@ -87,6 +87,25 @@ export {
   type MailtoDraft,
 } from './compose'
 export { checkLink, LINK_MAX, type CheckedLink } from './links'
-export { ROLE_NAMES, toMailboxList, type RawMailbox } from './mailboxes'
+export {
+  backoffMs,
+  SYNC_BACKOFF,
+  SyncSchedule,
+  type AccountSyncRecord,
+  type SyncFailureKind,
+} from './schedule'
+export { archiveMailbox, ROLE_NAMES, toMailboxList, type RawMailbox } from './mailboxes'
+export {
+  guessProvider,
+  imapSecureFor,
+  PROVIDER_IDS,
+  PROVIDERS,
+  serversFor,
+  smtpSecurityFor,
+  type ImapServer,
+  type ProviderId,
+  type ProviderPreset,
+  type SmtpServer,
+} from './providers'
 export { planBodyParts, referencedCids, safeFilename, type BodyNode, type BodyPlan } from './mime'
 export { bodyText, decodeEntities, htmlToText, printable, tidy, type HtmlToTextOptions } from './text'

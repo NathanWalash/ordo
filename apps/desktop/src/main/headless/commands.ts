@@ -28,6 +28,8 @@ import type {
   ImportOutcome,
   ComposeInput,
   LastMove,
+  MailAccount,
+  MailboxRef,
   MemoryResult,
   MemoryView,
   MailboxInfo,
@@ -36,11 +38,13 @@ import type {
   MailRefreshProgress,
   MessageContent,
   MessageListQuery,
+  MessageRef,
   MessageSummary,
   MoneyAiOutcome,
   MonthComparison,
   MoneyAiProgress,
   MoneyOverview,
+  RefreshOutcome,
   ScanOutcome,
   ScanProgress,
   SearchQueryInput,
@@ -78,25 +82,28 @@ export interface OrdoServices {
    * flag, mark and save drafts. They can never send: `send` exists only in the app's assistant.
    */
   mail: {
-    mailboxes(): MailboxInfo[]
-    refresh(
-      input: { mailbox: string },
-      onProgress?: (p: MailRefreshProgress) => void,
-    ): Promise<MailOutcome<{ added: number; removed: number; changed: number }>>
+    /** Every mail account, in order (no secrets). Inputs below name one by `account` (its id). */
+    accounts(): MailAccount[]
+    /** One account's folders (the first account's when none is named). */
+    mailboxes(input?: { account?: string }): MailboxInfo[]
+    refresh(input: MailboxRef, onProgress?: (p: MailRefreshProgress) => void): Promise<RefreshOutcome>
     messages(query: MessageListQuery): { total: number; messages: MessageSummary[] }
     search(query: SearchQueryInput): MessageSummary[]
     searchServer(query: ServerSearchInput): Promise<MailOutcome<{ messages: MessageSummary[] }>>
-    open(ref: { mailbox: string; uid: number }): Promise<MailOutcome<{ message: MessageContent }>>
+    open(ref: MessageRef): Promise<MailOutcome<{ message: MessageContent }>>
     /** One message's headers from the cache, or null. No network. */
-    cached(ref: { mailbox: string; uid: number }): MessageSummary | null
+    cached(ref: MessageRef): MessageSummary | null
     setFlags(input: SetFlagsInput): Promise<MailOutcome>
     move(input: MailMoveInput): Promise<MailOutcome<{ moved: number; undoId: number | null }>>
     /** The newest move that can still be undone in this process, or null. */
     lastMove(): LastMove | null
     undoMove(undoId: number): Promise<MailOutcome<{ restored: number }>>
-    saveDraft(
-      input: ComposeInput,
-    ): Promise<MailOutcome<{ draft: { mailbox: string; uid: number } | null; attachments: unknown[] }>>
+    saveDraft(input: ComposeInput): Promise<
+      MailOutcome<{
+        draft: { account?: string; mailbox: string; uid: number } | null
+        attachments: unknown[]
+      }>
+    >
     /** Only in the app's assistant, after the user confirmed the card. Never in headless or MCP. */
     send?(input: ComposeInput): Promise<MailOutcome<{ warning?: string }>>
   }
@@ -442,10 +449,8 @@ function eventView(d: EventDraft) {
   }
 }
 
-const NOT_CONNECTED = fail(
-  'not_connected',
-  'No iCloud account is connected. Open Ordo and connect one in Mail first.',
-)
+const NOT_CONNECTED_TEXT = 'No iCloud account is connected. Open Ordo and connect one in Mail first.'
+const NOT_CONNECTED = fail('not_connected', NOT_CONNECTED_TEXT)
 const NO_CALENDARS = fail(
   'not_connected',
   'No calendars are connected. Open Ordo and connect iCloud or a Google account, or add a calendar by link.',
@@ -527,6 +532,8 @@ export function planView(plan: CleanupPlan) {
 export function cleanupView(c: CleanupSummary) {
   return {
     id: c.id,
+    // The account's id (status lists which is which). Older results without one were the first.
+    ...(c.account && { accountId: c.account }),
     at: iso(c.at),
     moved: c.moved,
     canUndo: c.canUndo,
@@ -547,8 +554,15 @@ const MAIL_TEXT_MAX = 100_000
 
 const address = (a: { address: string; name?: string }) => ({ address: a.address, name: a.name ?? null })
 
-export function messageRow(m: MessageSummary) {
+/**
+ * A message as headless and MCP output show it. `account` is the account's name and `accountId`
+ * what to pass back as `account` to read or change it (a uid is only unique within one account
+ * and folder).
+ */
+export function messageRow(m: MessageSummary, accounts: readonly MailAccount[] = []) {
+  const a = accounts.find((x) => x.id === m.account)
   return {
+    ...(a && { account: a.label, accountId: a.id }),
     mailbox: m.mailbox,
     uid: m.uid,
     date: iso(m.date),
@@ -575,12 +589,16 @@ const page = <T>(all: T[], limit: number, offset = 0) => ({
   items: all.slice(offset, offset + limit),
 })
 
-function cleanupRequest(c: {
-  sender: string[]
-  'no-unsubscribe': boolean
-  'no-trash': boolean
-}): CleanupRequest {
+function cleanupRequest(
+  c: {
+    sender: string[]
+    'no-unsubscribe': boolean
+    'no-trash': boolean
+  },
+  account?: string,
+): CleanupRequest {
   return {
+    ...(account && { account }),
     senders: c.sender.map((address) => ({
       address,
       unsubscribe: !c['no-unsubscribe'],
@@ -588,6 +606,48 @@ function cleanupRequest(c: {
     })),
   }
 }
+
+// ---- Accounts ----------------------------------------------------------------------------------
+
+/**
+ * The account a command or tool names: by id, address or name (case doesn't matter), or the first
+ * account when it names none. A name two accounts share is refused rather than guessed.
+ */
+export function pickAccount(
+  services: OrdoServices,
+  word: string | undefined,
+): { ok: true; account: MailAccount } | { ok: false; code: ErrorCode; message: string } {
+  const accounts = services.mail.accounts()
+  const first = accounts[0]
+  if (!first) return { ok: false, code: 'not_connected', message: NOT_CONNECTED_TEXT }
+  if (word === undefined) return { ok: true, account: first }
+  const w = word.trim().toLowerCase()
+  const byId = accounts.find((a) => a.id === w)
+  if (byId) return { ok: true, account: byId }
+  const matches = accounts.filter((a) => a.email.toLowerCase() === w || a.label.toLowerCase() === w)
+  if (matches.length === 1) return { ok: true, account: matches[0]! }
+  const names = accounts.map((a) => `${a.label} (${a.email})`).join(', ')
+  return matches.length > 1
+    ? {
+        ok: false,
+        code: 'invalid',
+        message: `More than one account is called “${word.slice(0, 60)}”. Use its address instead: ${names}.`,
+      }
+    : {
+        ok: false,
+        code: 'not_found',
+        message: `There’s no account called “${word.slice(0, 60)}”. The accounts are: ${names}.`,
+      }
+}
+
+/** Every account, as status and `mail mailboxes` list them. */
+const accountRow = (a: MailAccount) => ({
+  id: a.id,
+  name: a.label,
+  email: a.email,
+  provider: a.provider,
+  lastScan: a.lastScan,
+})
 
 // ---- Mail changes ------------------------------------------------------------------------------
 
@@ -612,11 +672,17 @@ const ROLE_NAMES = { archive: 'Archive', trash: 'Bin', inbox: 'Inbox', junk: 'Ju
 export function moveTarget(
   services: OrdoServices,
   to: string,
+  account?: string,
 ): { ok: true; to: MoveTo; path: string; name: string } | { ok: false; code: ErrorCode; message: string } {
-  const boxes = services.mail.mailboxes()
+  const boxes = services.mail.mailboxes(account ? { account } : undefined)
   const word = ROLE_WORDS[to.trim().toLowerCase()]
   if (word) {
-    const path = word === 'inbox' ? 'INBOX' : boxes.find((b) => b.role === word)?.path
+    // Gmail has no Archive folder: archiving there moves to All Mail.
+    const path =
+      word === 'inbox'
+        ? 'INBOX'
+        : (boxes.find((b) => b.role === word)?.path ??
+          (word === 'archive' ? boxes.find((b) => b.role === 'all')?.path : undefined))
     if (!path)
       return { ok: false, code: 'unavailable', message: `This account has no ${ROLE_NAMES[word]} mailbox.` }
     return { ok: true, to: word, path, name: ROLE_NAMES[word] }
@@ -644,10 +710,11 @@ export function cachedMessages(
   services: OrdoServices,
   mailbox: string,
   uids: readonly number[],
+  account?: string,
 ): { ok: true; messages: MessageSummary[] } | { ok: false; code: ErrorCode; message: string } {
   const messages: MessageSummary[] = []
   for (const uid of uids) {
-    const m = services.mail.cached({ mailbox, uid })
+    const m = services.mail.cached({ ...(account && { account }), mailbox, uid })
     if (!m)
       return {
         ok: false,
@@ -697,6 +764,7 @@ export async function runCommand(
                 email: account.email,
                 lastScan: account.lastScan,
                 messages: account.messageCount,
+                accounts: services.mail.accounts().map(accountRow),
               }
             : { connected: false },
           calendar:
@@ -754,15 +822,31 @@ export async function runCommand(
 
     case 'cleanup plan': {
       if (!connected()) return NOT_CONNECTED
-      const r = services.cleanup.plan(cleanupRequest(command))
+      const which = command.account === undefined ? null : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
+      const r = services.cleanup.plan(cleanupRequest(command, which?.account.id))
       return r.ok ? { ok: true, data: planView(r.plan) } : fromService(r)
     }
 
     case 'cleanup run': {
       if (!connected()) return NOT_CONNECTED
-      const r = await services.cleanup.run(cleanupRequest(command), options.progress?.cleanup)
+      const which = command.account === undefined ? null : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
+      const r = await services.cleanup.run(
+        cleanupRequest(command, which?.account.id),
+        options.progress?.cleanup,
+      )
       return r.ok
-        ? { ok: true, data: { cleanup: cleanupView(r.cleanup), rejected: r.rejected } }
+        ? {
+            ok: true,
+            data: {
+              cleanup: cleanupView(r.cleanup),
+              // Several accounts: one clean-up each, and any account that couldn't be cleared.
+              ...(r.cleanups && { cleanups: r.cleanups.map(cleanupView) }),
+              ...(r.failed?.length && { failed: r.failed }),
+              rejected: r.rejected,
+            },
+          }
         : fromService(r)
     }
 
@@ -788,63 +872,117 @@ export async function runCommand(
 
     case 'mail mailboxes': {
       if (!connected()) return NOT_CONNECTED
-      const boxes = services.mail.mailboxes()
+      // One account's folders, or every account's (each folder says whose) when none is named.
+      const which = command.account === undefined ? null : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
+      const accounts = which ? [which.account] : services.mail.accounts()
       return {
         ok: true,
         data: {
-          mailboxes: boxes.map((m) => ({
-            path: m.path,
-            name: m.name,
-            role: m.role,
-            messages: m.total,
-            unread: m.unread,
-          })),
+          accounts: accounts.map(accountRow),
+          mailboxes: accounts.flatMap((a) =>
+            services.mail.mailboxes({ account: a.id }).map((m) => ({
+              account: a.label,
+              accountId: a.id,
+              path: m.path,
+              name: m.name,
+              role: m.role,
+              messages: m.total,
+              unread: m.unread,
+            })),
+          ),
         },
       }
     }
 
     case 'mail sync': {
       if (!connected()) return NOT_CONNECTED
-      const r = await services.mail.refresh({ mailbox: command.mailbox }, options.progress?.mail)
+      // The inbox of every account when none is named; another folder is always one account's.
+      const which =
+        command.account === undefined && command.mailbox === 'INBOX'
+          ? null
+          : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
+      const r = await services.mail.refresh(
+        { account: which ? which.account.id : 'all', mailbox: command.mailbox },
+        options.progress?.mail,
+      )
       if (!r.ok) return fromMail(r)
+      const accounts = services.mail.accounts()
+      const name = (id: string) => accounts.find((a) => a.id === id)?.label ?? id
       return {
         ok: true,
-        data: { mailbox: command.mailbox, added: r.added, removed: r.removed, changed: r.changed },
+        data: {
+          mailbox: command.mailbox,
+          ...(which && { account: which.account.label }),
+          added: r.added,
+          removed: r.removed,
+          changed: r.changed,
+          ...(r.failed?.length && {
+            failed: r.failed.map((f) => ({ account: name(f.account), error: f.error, message: f.message })),
+          }),
+        },
       }
     }
 
     case 'mail list': {
       if (!connected()) return NOT_CONNECTED
+      // Every account's inbox together when none is named; another folder is one account's.
+      const which =
+        command.account === undefined && command.mailbox === 'INBOX'
+          ? null
+          : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
       const r = services.mail.messages({
+        account: which ? which.account.id : 'all',
         mailbox: command.mailbox,
         limit: command.limit,
         offset,
         unread: command.unread || undefined,
       })
+      const accounts = services.mail.accounts()
       return {
         ok: true,
         data: {
           mailbox: command.mailbox,
+          account: which ? which.account.label : null,
           total: r.total,
           offset,
           shown: r.messages.length,
-          messages: r.messages.map(messageRow),
+          messages: r.messages.map((m) => messageRow(m, accounts)),
         },
       }
     }
 
     case 'mail search': {
       if (!connected()) return NOT_CONNECTED
+      const accounts = services.mail.accounts()
+      const which =
+        command.account === undefined && !command.server ? null : pickAccount(services, command.account)
+      if (which && !which.ok) return fail(which.code, which.message)
       if (command.server) {
         const mailbox = command.mailbox ?? 'INBOX'
-        const r = await services.mail.searchServer({ query: command.query, mailbox, limit: command.limit })
+        const r = await services.mail.searchServer({
+          account: which!.account.id,
+          query: command.query,
+          mailbox,
+          limit: command.limit,
+        })
         if (!r.ok) return fromMail(r)
         return {
           ok: true,
-          data: { query: command.query, where: 'server', mailbox, messages: r.messages.map(messageRow) },
+          data: {
+            query: command.query,
+            where: 'server',
+            account: which!.account.label,
+            mailbox,
+            messages: r.messages.map((m) => messageRow(m, accounts)),
+          },
         }
       }
+      // The cache of every account when none is named.
       const found = services.mail.search({
+        ...(which && { account: which.account.id }),
         query: command.query,
         mailbox: command.mailbox,
         limit: command.limit,
@@ -854,21 +992,30 @@ export async function runCommand(
         data: {
           query: command.query,
           where: 'cache',
+          account: which ? which.account.label : null,
           mailbox: command.mailbox ?? null,
-          messages: found.map(messageRow),
+          messages: found.map((m) => messageRow(m, accounts)),
         },
       }
     }
 
     case 'mail read': {
       if (!connected()) return NOT_CONNECTED
-      const r = await services.mail.open({ mailbox: command.mailbox, uid: command.uid })
+      const which = pickAccount(services, command.account)
+      if (!which.ok) return fail(which.code, which.message)
+      const r = await services.mail.open({
+        account: which.account.id,
+        mailbox: command.mailbox,
+        uid: command.uid,
+      })
       if (!r.ok) return fromMail(r)
       const m = r.message
       const text = bodyText(m, { links: true })
       return {
         ok: true,
         data: {
+          account: which.account.label,
+          accountId: which.account.id,
           mailbox: m.mailbox,
           uid: m.uid,
           date: iso(m.date),
@@ -892,29 +1039,52 @@ export async function runCommand(
 
     case 'mail move': {
       if (!connected()) return NOT_CONNECTED
-      const target = moveTarget(services, command.to)
+      const which = pickAccount(services, command.account)
+      if (!which.ok) return fail(which.code, which.message)
+      const account = which.account.id
+      const target = moveTarget(services, command.to, account)
       if (!target.ok) return fail(target.code, target.message)
-      const found = cachedMessages(services, command.mailbox, command.uids)
+      const found = cachedMessages(services, command.mailbox, command.uids, account)
       if (!found.ok) return fail(found.code, found.message)
-      const r = await services.mail.move({ mailbox: command.mailbox, uids: command.uids, to: target.to })
+      const r = await services.mail.move({
+        account,
+        mailbox: command.mailbox,
+        uids: command.uids,
+        to: target.to,
+      })
       if (!r.ok) return fromMail(r)
       return {
         ok: true,
-        data: { mailbox: command.mailbox, to: target.path, moved: r.moved, undoId: r.undoId },
+        data: {
+          account: which.account.label,
+          mailbox: command.mailbox,
+          to: target.path,
+          moved: r.moved,
+          undoId: r.undoId,
+        },
       }
     }
 
     case 'mail flag':
     case 'mail mark': {
       if (!connected()) return NOT_CONNECTED
-      const found = cachedMessages(services, command.mailbox, command.uids)
+      const which = pickAccount(services, command.account)
+      if (!which.ok) return fail(which.code, which.message)
+      const account = which.account.id
+      const found = cachedMessages(services, command.mailbox, command.uids, account)
       if (!found.ok) return fail(found.code, found.message)
       const flags = command.name === 'mail flag' ? { flagged: !command.unflag } : { seen: command.read }
-      const r = await services.mail.setFlags({ mailbox: command.mailbox, uids: command.uids, ...flags })
+      const r = await services.mail.setFlags({
+        account,
+        mailbox: command.mailbox,
+        uids: command.uids,
+        ...flags,
+      })
       if (!r.ok) return fromMail(r)
       return {
         ok: true,
         data: {
+          account: which.account.label,
           mailbox: command.mailbox,
           uids: command.uids,
           ...(command.name === 'mail flag' ? { flagged: !command.unflag } : { read: command.read }),

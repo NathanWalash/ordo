@@ -8,6 +8,7 @@ import * as memory from '../money-memory'
 import * as boards from '../boards'
 import { aiSettings, categoriseSenders, sendersWithAi, status as aiStatus } from '../ai'
 import { lockHolder } from '../writes'
+import { listAccounts } from '../account'
 import type { OrdoServices } from './commands'
 
 /**
@@ -22,7 +23,8 @@ export function mainServices(options: { send?: boolean } = {}): OrdoServices {
   return {
     version: app.getVersion(),
     account: mail.status,
-    scan: mail.scan,
+    // Every account's inbox, each on its own connection.
+    scan: mail.scanAll,
     senders: sendersWithAi,
     cleanup: {
       plan: cleanup.plan,
@@ -33,6 +35,7 @@ export function mainServices(options: { send?: boolean } = {}): OrdoServices {
     // Changes go through the window's own functions (the write lock, folder checks, undo).
     // No send here unless the assistant asked for it.
     mail: {
+      accounts: listAccounts,
       mailboxes: mailClient.mailboxes,
       refresh: (input, onProgress) => mailClient.refresh(input, onProgress),
       messages: mailClient.messages,

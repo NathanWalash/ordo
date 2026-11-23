@@ -78,9 +78,12 @@ const person = (a: any) => (a.name ? `${clean(a.name, 40)} <${clean(a.address, 6
 const body = (text: string) => printable(text).replace(/[\t\v\f]/g, ' ')
 
 function messageTable(messages: any[], withMailbox = false): string {
+  // Several accounts: a column says whose each message is (a uid is unique only within one).
+  const accounts = new Set(messages.map((m: any) => m.account).filter(Boolean)).size > 1
   return table([
-    ['UID', 'DATE', '', 'FROM', 'SUBJECT'],
+    [...(accounts ? ['ACCOUNT'] : []), 'UID', 'DATE', '', 'FROM', 'SUBJECT'],
     ...messages.map((m: any) => [
+      ...(accounts ? [clean(m.account ?? '', 20)] : []),
       String(m.uid),
       when(m.date),
       (m.unread ? '●' : ' ') + (m.flagged ? '⚑' : ' '),
@@ -95,7 +98,9 @@ const FORMATTERS: { [K in CommandName]: (d: any) => string } = {
     [
       `Ordo ${d.version}`,
       d.account.connected
-        ? `Mail:      ${clean(d.account.email)} · ${plural(d.account.messages, 'email')} cached · last scan ${when(d.account.lastScan)}`
+        ? (d.account.accounts?.length ?? 0) > 1
+          ? `Mail:      ${d.account.accounts.map((a: any) => `${clean(a.name, 30)} (${clean(a.email)})`).join(', ')}`
+          : `Mail:      ${clean(d.account.email)} · ${plural(d.account.messages, 'email')} cached · last scan ${when(d.account.lastScan)}`
         : 'Mail:      not connected (connect an account in the Ordo app)',
       d.calendar.calendars !== undefined
         ? `Calendar:  ${plural(d.calendar.calendars, 'calendar')} · last sync ${when(d.calendar.lastSync)}`
@@ -504,23 +509,27 @@ Mail:
   senders [--category <c>] [--limit <n>]        Senders by email count. Categories: promotions,
                                                 newsletters, notifications, receipts, people, other
   cleanup plan --sender <address>...            Dry run: exactly what a clean-up would do
-          [--no-unsubscribe] [--no-trash]
+          [--no-unsubscribe] [--no-trash] [--account <a>]   (default: every account)
   cleanup run --sender <address>... --confirm   Unsubscribe and move emails to Trash *
   history [--limit <n>]                         Past clean-ups
   undo <id> --confirm                           Move a clean-up's emails back from Trash *
-  mail mailboxes                                Folders with message and unread counts
-  mail sync [--mailbox <path>]                  Fetch new mail in a folder (default INBOX)
-  mail list [--mailbox <path>] [--unread] [--limit <n>]
+  mail mailboxes [--account <a>]                Folders with message and unread counts
+  mail sync [--mailbox <path>] [--account <a>]  Fetch new mail in a folder (default: every inbox)
+  mail list [--mailbox <path>] [--account <a>] [--unread] [--limit <n>]
                                                 Messages, newest first, with their uid
-  mail search <words> [--mailbox <path>] [--server] [--limit <n>]
+                                                (default: every account's inbox together)
+  mail search <words> [--mailbox <path>] [--account <a>] [--server] [--limit <n>]
                                                 Search downloaded mail, or the server
-  mail read <uid> [--mailbox <path>]            A message as plain text. Doesn't mark it read
-  mail move <uid>... --to <where> [--mailbox <path>] --confirm
+  mail read <uid> [--mailbox <path>] [--account <a>]
+                                                A message as plain text. Doesn't mark it read
+  mail move <uid>... --to <where> [--mailbox <path>] [--account <a>] --confirm
                                                 Move to archive, bin, junk, inbox or a folder *
-  mail flag <uid>... [--unflag] [--mailbox <path>] --confirm      Flag or unflag *
-  mail mark <uid>... --read|--unread [--mailbox <path>] --confirm  Mark read or unread *
+  mail flag <uid>... [--unflag] [--mailbox <path>] [--account <a>] --confirm   Flag *
+  mail mark <uid>... --read|--unread [--mailbox <path>] [--account <a>] --confirm  Mark *
   mail undo [<id>] --confirm                    Undo a move made by this Ordo run (the last) *
                                                 At most 20 messages at a time, from the cache.
+                                                --account is an account's name or address, as
+                                                \`status\` lists it (default: the first account).
                                                 Headless mode never sends mail.
 
 Calendar:

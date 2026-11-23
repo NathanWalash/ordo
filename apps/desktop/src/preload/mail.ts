@@ -12,8 +12,8 @@ const userActed = () =>
 
 /** `window.ordo.mail`: one ipcRenderer.invoke per Mail channel. */
 export const mailApi: MailApi = {
-  mailboxes: () => ipcRenderer.invoke(MAIL_IPC.mailboxes),
-  refresh: (input) => ipcRenderer.invoke(MAIL_IPC.refresh, input),
+  mailboxes: (input) => ipcRenderer.invoke(MAIL_IPC.mailboxes, input),
+  refresh: (input, options) => ipcRenderer.invoke(MAIL_IPC.refresh, input, options?.auto === true),
   onRefreshProgress: (listener) => {
     const handler = (_e: IpcRendererEvent, p: MailRefreshProgress) => listener(p)
     ipcRenderer.on(MAIL_IPC.refreshProgress, handler)

@@ -84,6 +84,19 @@ describe('with a cached inbox', () => {
       email: 'me@icloud.example',
       lastScan: null,
       messageCount: 3,
+      accounts: [
+        {
+          id: 'acc-1',
+          label: 'iCloud',
+          email: 'me@icloud.example',
+          color: 'blue',
+          provider: 'icloud',
+          imap: { host: 'imap.mail.me.com', port: 993, secure: true },
+          smtp: { host: 'smtp.mail.me.com', port: 587, secure: false, requireTLS: true },
+          auth: { kind: 'password' },
+          lastScan: null,
+        },
+      ],
     })
     expect(JSON.stringify(status)).not.toContain('abcd')
   })

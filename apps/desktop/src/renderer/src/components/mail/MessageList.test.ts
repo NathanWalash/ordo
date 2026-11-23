@@ -8,6 +8,7 @@ import { MessageList } from './MessageList'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const row = (uid: number): MessageSummary => ({
+  account: 'acc-1',
   mailbox: 'INBOX',
   uid,
   date: new Date('2026-11-16T10:00:00Z'),

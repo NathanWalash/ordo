@@ -178,7 +178,7 @@ describe('unsubscribed senders from clean-up history', () => {
       // Corrupt rows, written straight to the database: broken JSON, and JSON that isn't a list.
       const db = new DatabaseSync(path)
       const insert = db.prepare(
-        'INSERT INTO cleanups (created_at, mailbox, moved, senders) VALUES (?, ?, 0, ?)',
+        "INSERT INTO cleanups (account_id, created_at, mailbox, moved, senders) VALUES ('acc-1', ?, ?, 0, ?)",
       )
       insert.run(Date.parse('2026-11-10T10:00:00Z'), 'INBOX', '[{"address": "broken@')
       insert.run(Date.parse('2026-11-10T11:00:00Z'), 'INBOX', '{"address":"x@shop.example"}')

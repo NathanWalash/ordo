@@ -61,14 +61,34 @@ export function snapshotProfile(profileDir: string, workDir: string): BackupFile
   return copied
 }
 
-/** The email of the account in `account.json`, never the password; null if there's none. */
+/**
+ * The files that hold this Mac's mail accounts and their keychain-encrypted passwords: the list
+ * (`accounts.json`), and the single account of an install from before several accounts
+ * (`account.json`, or its copy kept after moving it into the list). Never backed up.
+ */
+export const ACCOUNT_FILES = ['accounts.json', 'account.json', 'account.json.migrated'] as const
+
+/**
+ * The email of the first mail account (whose mail a backup holds first), never a password; null
+ * if there's none. From the accounts list, or an older install's `account.json`.
+ */
 export function accountEmail(profileDir: string): string | null {
-  try {
-    const parsed = JSON.parse(readFileSync(join(profileDir, 'account.json'), 'utf8')) as { email?: unknown }
-    return typeof parsed.email === 'string' ? parsed.email : null
-  } catch {
-    return null
+  const read = (name: string): unknown => {
+    try {
+      return JSON.parse(readFileSync(join(profileDir, name), 'utf8')) as unknown
+    } catch {
+      return null
+    }
   }
+  const list = read('accounts.json') as { accounts?: unknown } | null
+  if (list && Array.isArray(list.accounts)) {
+    const first = list.accounts.find(
+      (a): a is { email: string } => typeof (a as { email?: unknown } | null)?.email === 'string',
+    )
+    return first?.email ?? null
+  }
+  const single = read('account.json') as { email?: unknown } | null
+  return typeof single?.email === 'string' ? single.email : null
 }
 
 /** Every file a restore replaces: each backup file and, for databases, their WAL and shared memory. */
@@ -84,8 +104,9 @@ export interface ApplyRestoreOptions {
   /** Folder to move the current data into. Must not exist yet. */
   asideDir: string
   /**
-   * Keep this Mac's `account.json` (its keychain-encrypted password) in place. False when the
-   * backup's mail belongs to another account: then it's moved aside too and you sign in again.
+   * Keep this Mac's mail accounts (ACCOUNT_FILES, with their keychain-encrypted passwords) in place.
+   * False when the backup's mail belongs to another account: then they're moved aside too and you
+   * sign in again.
    */
   keepAccount: boolean
   /** For tests: the rename to use. */
@@ -97,7 +118,7 @@ export const RESTORE_MARKER = 'restore-in-progress.json'
 
 /** Only a plain folder name inside the profile, never a path. */
 const folderName = z.string().regex(/^[\w.-]{1,100}$/)
-const movable = z.enum(['account.json', ...replacedFiles()] as [string, ...string[]])
+const movable = z.enum([...ACCOUNT_FILES, ...replacedFiles()] as [string, ...string[]])
 const MarkerSchema = z.strictObject({
   version: z.literal(1),
   startedAt: z.string(),
@@ -139,7 +160,7 @@ export function applyRestore(options: ApplyRestoreOptions): { moved: string[]; r
     rename(from, to)
     undo.push({ from, to })
   }
-  const toMove = [...replacedFiles(), ...(options.keepAccount ? [] : ['account.json'])].filter((name) =>
+  const toMove = [...replacedFiles(), ...(options.keepAccount ? [] : ACCOUNT_FILES)].filter((name) =>
     existsSync(join(profileDir, name)),
   )
   const moved: string[] = []

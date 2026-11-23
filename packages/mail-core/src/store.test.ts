@@ -29,6 +29,7 @@ describe('MailStore', () => {
     expect(store.headers('INBOX')).toEqual([
       {
         ...original,
+        account: 'acc-1',
         listUnsubscribe: undefined,
         precedence: undefined,
         autoSubmitted: undefined,
@@ -102,7 +103,14 @@ describe('MailStore clean-up history', () => {
   it('stores clean-ups newest first, with their UID map', () => {
     const older = store.addCleanup(cleanup(1000))
     const newer = store.addCleanup({ ...cleanup(2000), uidMap: null, error: 'Connection lost' })
-    expect(older).toEqual({ ...cleanup(1000), id: older.id, canUndo: true, undoneAt: null, restored: null })
+    expect(older).toEqual({
+      ...cleanup(1000),
+      id: older.id,
+      account: 'acc-1',
+      canUndo: true,
+      undoneAt: null,
+      restored: null,
+    })
     expect(newer).toMatchObject({ uidMap: null, canUndo: false, error: 'Connection lost' })
     expect(store.cleanups().map((c) => c.id)).toEqual([newer.id, older.id])
   })

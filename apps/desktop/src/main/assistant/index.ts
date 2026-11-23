@@ -37,7 +37,7 @@ export const CONFIRM_TIMEOUT_MS = 10 * 60_000
 /** What a cloud model sees through the assistant. Shown before the user agrees, and in docs/assistant.md. */
 export const CLOUD_SENDS =
   'Your questions, and the Ordo data the assistant looks up to answer them: transactions with amounts and dates, ' +
-  'balances, bills, calendar events, sender names, addresses and subject lines, the text of emails it opens, your boards’ cards, and your iCloud email address. ' +
+  'balances, bills, calendar events, sender names, addresses and subject lines, the text of emails it opens, your boards’ cards, and your mail accounts’ names and email addresses. ' +
   'What you’ve taught Ordo about your money in Ask Ordo (people’s names, paybacks, money you hold for others, events, exact amounts) ' +
   'goes only if you also allow Ask Ordo to send amounts, dates and names to this provider in Settings → AI. ' +
   'The assistant can also move, flag and draft email, and send email you confirm: each only after you press Confirm or Send on a card.'

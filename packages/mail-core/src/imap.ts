@@ -22,14 +22,36 @@ import type {
   SpecialMailbox,
 } from './types'
 
+/**
+ * How to sign in: a password (an app-specific password), or an OAuth access token (XOAUTH2, for
+ * "Sign in with Google" and the like). Exactly one of `pass` and `accessToken`.
+ */
+export type MailCredentials = { user: string; pass: string } | { user: string; accessToken: string }
+
 export interface ImapConfig {
   host: string
   port: number
+  /** TLS from the start (993). */
   secure: boolean
   user: string
-  pass: string
+  /** A password. Leave out when signing in with `accessToken`. */
+  pass?: string
+  /** An OAuth 2 access token, sent with XOAUTH2 instead of a password. */
+  accessToken?: string
+  /**
+   * With `secure: false`: refuse to sign in unless the server upgrades to TLS with STARTTLS, so a
+   * password is never sent in the clear. Off only for local test servers.
+   */
+  requireTLS?: boolean
   /** How long to wait for the connection, and then for the server's greeting. Default 15 seconds. */
   timeoutMs?: number
+}
+
+/** The sign-in imapflow (and nodemailer) needs: an access token wins over a password. */
+export function authOf(cfg: { user: string; pass?: string; accessToken?: string }): MailCredentials {
+  if (cfg.accessToken) return { user: cfg.user, accessToken: cfg.accessToken }
+  if (cfg.pass !== undefined) return { user: cfg.user, pass: cfg.pass }
+  throw new MailAuthError('No password or access token to sign in with')
 }
 
 export const ICLOUD_IMAP = { host: 'imap.mail.me.com', port: 993, secure: true } as const
@@ -161,7 +183,7 @@ const HEADER_QUERY: FetchQueryObject = {
   headers: [...SCAN_HEADER_FIELDS],
 }
 
-/** IMAP access for iCloud (or any IMAP server, for tests). */
+/** IMAP access for any account: iCloud, Gmail, Fastmail, or a server you name. */
 export class ImapMailProvider implements MailProvider {
   private client: ImapFlow
   private closed = false
@@ -171,7 +193,8 @@ export class ImapMailProvider implements MailProvider {
       host: cfg.host,
       port: cfg.port,
       secure: cfg.secure,
-      auth: { user: cfg.user, pass: cfg.pass },
+      ...(!cfg.secure && cfg.requireTLS && { doSTARTTLS: true }),
+      auth: authOf(cfg),
       logger: false,
       emitLogs: false,
       connectionTimeout: cfg.timeoutMs ?? 15_000,

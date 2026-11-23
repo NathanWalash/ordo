@@ -19,8 +19,9 @@
   <img src="docs/assets/screenshot-unclutter.png" width="820" alt="Unclutter showing senders grouped by category, with counts and unsubscribe options" />
 </p>
 
-> **Early days.** You can connect iCloud, read, search and write mail, see who’s filling your inbox, and
-> unsubscribe and clear senders with a review step and undo. See the [roadmap](#roadmap).
+> **Early days.** You can connect iCloud, Gmail and other mail accounts side by side with a unified
+> inbox, read, search and write mail, see who’s filling your inbox, and unsubscribe and clear senders
+> with a review step and undo. See the [roadmap](#roadmap).
 
 ## Why Ordo
 
@@ -40,6 +41,8 @@ them in a couple of clicks, and grows into a home for the rest of your personal 
 | Unclutter preview with sample data                                           | Done   |
 | Light, dark or system theme, with frosted glass surfaces                     | Done   |
 | Connect iCloud (app-specific password in the Keychain)                       | Done   |
+| Several accounts: iCloud, Gmail, Yahoo, Fastmail or any IMAP, unified inbox  | Done   |
+| Sign in with Google (Gmail and Workspace without an app password)            | Next   |
 | Scan inbox headers and group by sender                                       | Done   |
 | Sort senders with rules                                                      | Done   |
 | AI settings: LM Studio, Ollama, Claude Code or Codex CLI, with a test        | Done   |

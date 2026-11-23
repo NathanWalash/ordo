@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CHANGE_COMMANDS } from './args'
-import { content, fakeServices, summary } from './fake-services'
+import { content, FAKE_ACCOUNT, fakeServices, summary, WORK_ACCOUNT } from './fake-services'
 import {
   attachmentNameOk,
   DRAFT_NOTE,
@@ -348,7 +348,7 @@ describe('mail tools', () => {
     const services = fakeServices()
     const r = await runTool(services, t('ordo_read_message'), { uid: 7 }, read)
     expect(r.ok).toBe(true)
-    expect(services.mail.open).toHaveBeenCalledWith({ mailbox: 'INBOX', uid: 7 })
+    expect(services.mail.open).toHaveBeenCalledWith({ account: 'acc-1', mailbox: 'INBOX', uid: 7 })
     expect(JSON.stringify(r)).not.toMatch(/<html|<div/i)
   })
 
@@ -430,6 +430,7 @@ describe('mail change tools', () => {
     expect((await previewTool(services, t('ordo_mail_undo'), {})).blocked).toMatch(/no move to undo/)
     services.mail.lastMove = () => ({
       undoId: 4,
+      account: 'acc-1',
       from: 'INBOX',
       to: 'Archive',
       count: 1,
@@ -504,9 +505,17 @@ describe('mail change tools', () => {
     // Where each recipient came from: here the Reply-To, which the sender picked.
     expect(p.mail).toEqual({
       messages: [{ address: 'sam@friend.example', name: 'Sam', subject: 'Lunch?' }],
-      target: { mailbox: 'INBOX', uid: 7 },
+      target: {
+        account: 'acc-1',
+        accountNames: ['acc-1', 'icloud', 'me@icloud.example'],
+        first: true,
+        mailbox: 'INBOX',
+        uid: 7,
+      },
       recipients: [{ address: 'sam.lists@friend.example', source: 'reply-to' }],
     })
+    // One account: the card names no account, exactly as before several accounts.
+    expect(p.email).not.toHaveProperty('fromAccount')
     expect(p.notes).toEqual([DRAFT_NOTE])
     // A reply goes to the sender: the model can't pick its To.
     const redirected = await previewTool(services, t('ordo_mail_draft'), {
@@ -841,5 +850,112 @@ describe('review round three: tools', () => {
     )
     const once = visibleText(`x${acute.repeat(9)}${String.fromCodePoint(0xfff9)}y`)
     expect(visibleText(once)).toBe(once)
+  })
+})
+
+describe('mail tools with several accounts', () => {
+  const two = () => {
+    const services = fakeServices()
+    services.mail.accounts = () => [FAKE_ACCOUNT, WORK_ACCOUNT]
+    services.mail.cached = vi.fn((ref: { account?: string; mailbox: string; uid: number }) =>
+      ref.account === 'acc-work' && ref.uid === 7
+        ? summary(7, { account: 'acc-work', subject: 'Standup' })
+        : null,
+    )
+    services.mail.open = vi.fn(async (ref: { account?: string; uid: number }) =>
+      ref.account === 'acc-work'
+        ? {
+            ok: true as const,
+            message: content({
+              subject: 'Standup',
+              text: 'Notes attached',
+              html: null,
+              to: [
+                { address: 'me@work.example' },
+                { address: 'me@icloud.example' },
+                { address: 'pat@work.example' },
+              ],
+            }),
+          }
+        : { ok: false as const, error: 'not-found' as const, message: 'This message isn’t there any more.' },
+    )
+    return services
+  }
+
+  it('every mail tool takes an optional account, and says a uid belongs to one account', () => {
+    const names = [
+      'ordo_mailboxes',
+      'ordo_mail_sync',
+      'ordo_messages',
+      'ordo_search_mail',
+      'ordo_read_message',
+      'ordo_mail_move',
+      'ordo_mail_flag',
+      'ordo_mail_mark',
+      'ordo_mail_draft',
+      'ordo_mail_send',
+    ]
+    for (const name of names) expect(Object.keys(t(name).input), name).toContain('account')
+    for (const name of ['ordo_messages', 'ordo_search_mail', 'ordo_mail_move'])
+      expect(t(name).description).toContain('only unique')
+  })
+
+  it('a reply goes from the account the message is in, and the card says which', async () => {
+    const services = two()
+    services.mail.send = vi.fn(async () => ({ ok: true as const }))
+    const p = await previewTool(services, t('ordo_mail_send'), {
+      mode: 'reply',
+      uid: 7,
+      account: 'Work',
+      body: 'On it.',
+    })
+    expect(p.blocked).toBeUndefined()
+    expect(p.email).toMatchObject({
+      from: 'me@work.example',
+      fromAccount: 'Work',
+      to: ['sam@friend.example'],
+    })
+    expect(p.mail?.target).toMatchObject({ account: 'acc-work', first: false })
+    expect(services.mail.open).toHaveBeenCalledWith({ account: 'acc-work', mailbox: 'INBOX', uid: 7 })
+  })
+
+  it('reply all never copies in any of the user’s accounts', async () => {
+    const services = two()
+    const p = await previewTool(services, t('ordo_mail_draft'), {
+      mode: 'reply-all',
+      uid: 7,
+      account: 'me@work.example',
+      body: 'Thanks all',
+    })
+    expect([...p.email!.to, ...p.email!.cc]).toEqual(['sam@friend.example', 'pat@work.example'])
+  })
+
+  it('sends with the account in what the mail client gets', async () => {
+    const services = two()
+    const send = vi.fn(async () => ({ ok: true as const }))
+    services.mail.send = send
+    const r = await runTool(
+      services,
+      t('ordo_mail_send'),
+      { mode: 'reply', uid: 7, account: 'Work', body: 'On it.' },
+      { ...allow, caller: 'assistant' },
+    )
+    expect(r.ok).toBe(true)
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: 'acc-work',
+        replyTo: { account: 'acc-work', mailbox: 'INBOX', uid: 7 },
+      }),
+    )
+  })
+
+  it('a change card names the account when there’s more than one', async () => {
+    const services = two()
+    const p = await previewTool(services, t('ordo_mail_flag'), { uids: [7], account: 'Work', flagged: false })
+    expect(p.title).toBe('Unflag 1 message in Work (me@work.example)')
+    const wrong = await previewTool(services, t('ordo_mail_flag'), { uids: [7], flagged: false })
+    expect(wrong.blocked).toMatch(/doesn’t have message 7/)
+    const nobody = await previewTool(services, t('ordo_mail_flag'), { uids: [7], account: 'Holiday' })
+    expect(nobody.blocked).toMatch(/no account called “Holiday”/)
   })
 })

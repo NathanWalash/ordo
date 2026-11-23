@@ -232,7 +232,7 @@ vi.mock('@ordo/mail-core/node', async (importOriginal) => {
 })
 
 dir.path = mkdtempSync(join(tmpdir(), 'ordo-mail-flow-'))
-const { saveAccount, deleteAccount } = await import('./account')
+const { saveAccount, deleteAccount, listAccounts } = await import('./account')
 const mail = await import('./mail')
 const client = await import('./mail-client')
 const { RecipientsRefused } = await import('@ordo/mail-core/node')
@@ -427,6 +427,7 @@ describe('the assistant’s and MCP’s mail tools, through the real mail client
     fakeServices({
       account: mail.status,
       mail: {
+        accounts: listAccounts,
         mailboxes: client.mailboxes,
         refresh: (input, onProgress) => client.refresh(input, onProgress),
         messages: client.messages,

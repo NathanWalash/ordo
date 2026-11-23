@@ -10,10 +10,12 @@ import {
   shell,
   systemPreferences,
 } from 'electron'
-import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
+import { IPC, SendersInputSchema, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc, startCalendarPolling } from './calendar'
 import { registerCleanupIpc } from './cleanup'
+import { registerAccountsIpc } from './accounts'
+import { loadAccount } from './account'
 import { closeMailClient, registerMailIpc } from './mail-client'
 import { hasMica, setupAppearance } from './appearance'
 import { initAi, registerAiIpc, sendersWithAi } from './ai'
@@ -165,9 +167,15 @@ function startApp(): void {
     closeMailClient()
     return mail.disconnect().then(clearCalendar)
   })
-  ipcMain.handle(IPC.scanStart, (e) => mail.scan(toRenderer(e.sender, IPC.scanProgress)))
+  ipcMain.handle(IPC.scanStart, (e) => mail.scanAll(toRenderer(e.sender, IPC.scanProgress)))
   ipcMain.handle(IPC.scanStop, () => mail.stopScan())
-  ipcMain.handle(IPC.sendersList, () => sendersWithAi())
+  // Removing the iCloud account Calendar used forgets its calendars too.
+  registerAccountsIpc(() => {
+    if (!loadAccount()) clearCalendar()
+  })
+  ipcMain.handle(IPC.sendersList, (_e, input: unknown) =>
+    sendersWithAi(SendersInputSchema.safeParse(input ?? {}).data?.account),
+  )
   registerCalendarIpc()
   registerCleanupIpc()
   registerMailIpc()

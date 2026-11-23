@@ -6,6 +6,7 @@ import type { CleanupApi } from './cleanup'
 import type { MailApi } from './mail'
 import type { AssistantApi } from './assistant'
 import type { UpdatesApi } from './updates'
+import type { AccountsApi, MailAccount } from './accounts'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
 import type { GoogleApi } from './google'
 
@@ -57,12 +58,28 @@ export type ConnectInput = z.input<typeof ConnectInputSchema>
 export type ConnectError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'unknown'
 export type ConnectResult = { ok: true; email: string } | { ok: false; error: ConnectError; message: string }
 
+/**
+ * Whether any mail account is connected. `email`, `lastScan` and `messageCount` are the first
+ * account's (what pages and scripts from before several accounts read); `accounts` lists them all.
+ */
 export type AccountStatus =
-  { connected: false } | { connected: true; email: string; lastScan: string | null; messageCount: number }
+  | { connected: false }
+  | {
+      connected: true
+      email: string
+      lastScan: string | null
+      messageCount: number
+      accounts: MailAccount[]
+    }
 
 /** `locked`: another Ordo process (the app, a headless command or an agent) is writing. */
 export type ScanOutcome =
-  ({ ok: true } & ScanResult) | { ok: false; error: ConnectError | 'locked' | 'busy'; message: string }
+  | ({
+      ok: true
+      /** Scanning every account: those that couldn't be scanned (the others were). */
+      failed?: { account: string; error: ConnectError | 'locked' | 'busy'; message: string }[]
+    } & ScanResult)
+  | { ok: false; error: ConnectError | 'locked' | 'busy'; message: string }
 
 export type { CategorisedSender, ScanProgress }
 export * from './settings'
@@ -72,6 +89,7 @@ export * from './mail'
 export * from './assistant'
 export * from './updates'
 export * from './backup'
+export * from './accounts'
 
 /**
  * The API the preload script exposes to the renderer as `window.ordo`.
@@ -92,6 +110,8 @@ export interface OrdoApi {
     /** Forget the credentials and every cached header. */
     disconnect(): Promise<void>
   }
+  /** Every mail account: add, rename, recolour, test, re-enter a password, remove. */
+  accounts: AccountsApi
   scan: {
     start(): Promise<ScanOutcome>
     stop(): Promise<void>
@@ -99,8 +119,13 @@ export interface OrdoApi {
     onProgress(listener: (p: ScanProgress) => void): () => void
   }
   senders: {
-    /** Senders sorted by the rules, plus any earlier AI answers when AI sorting is on. */
-    list(): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
+    /**
+     * Senders sorted by the rules, plus any earlier AI answers when AI sorting is on: every
+     * account's inbox together, or one account's.
+     */
+    list(input?: {
+      account?: string
+    }): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
   }
   money: MoneyApi
   moneyMemory: MoneyMemoryApi

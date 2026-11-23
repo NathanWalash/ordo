@@ -12,6 +12,7 @@ import {
   draftFromFlags,
   gate,
   moveTarget,
+  pickAccount,
   pickCalendar,
   pickEvent,
   runCommand,
@@ -34,7 +35,7 @@ import {
   replySubject,
   type MessageContent,
 } from '@ordo/mail-core'
-import type { CalendarListItem, ComposeInput, MessageSummary } from '@ordo/shared'
+import type { CalendarListItem, ComposeInput, MailAccount, MessageSummary } from '@ordo/shared'
 import { clean, UNSAFE_KEEP_LINES } from './format'
 import { pathProblem } from '../paths'
 
@@ -82,6 +83,11 @@ export interface ChangePreview {
  */
 export interface EmailPreview {
   from: string
+  /**
+   * The name of the account it's sent (or saved) from, as Settings → Accounts shows it. Only with
+   * more than one account: with one, the card looks as it always did.
+   */
+  fromAccount?: string
   /** Full addresses only: a display name can pose as someone else. */
   to: string[]
   cc: string[]
@@ -105,8 +111,13 @@ export type RecipientSource = 'sender' | 'reply-to' | 'thread' | 'model'
 export interface MailTargets {
   /** The messages a change acts on (or replies to, or forwards), from Ordo's cache or the message itself. */
   messages: { address: string; name: string | null; subject: string }[]
-  /** The email a draft or send replies to or forwards: reading it doesn't count as reading other mail. */
-  target?: { mailbox: string; uid: number }
+  /**
+   * The email a draft or send replies to or forwards: reading it doesn't count as reading other
+   * mail. `account` is its account's id; `accountNames` every way a tool call can name that account
+   * (id, name, address, lower-cased); `first` whether it's the first account (what a call naming no
+   * account means).
+   */
+  target?: { account: string; accountNames: string[]; first: boolean; mailbox: string; uid: number }
   /**
    * Every address a draft or an email goes to (To and Cc). Each counts as asked for only if the
    * user typed it: a reply's sender, Reply-To, name and subject are all the sender's to choose.
@@ -577,6 +588,22 @@ const mailboxArg = z
   .optional()
   .describe('Mailbox path as ordo_mailboxes lists it (default INBOX)')
 
+/** Which account, for mail tools. */
+const accountArg = z
+  .string()
+  .min(1)
+  .max(320)
+  .optional()
+  .describe(
+    'The account, by its name or address (or accountId) as results and ordo_status list it. Leave out for the ' +
+      'first account; ordo_messages and ordo_search_mail look at every account when left out',
+  )
+
+/** What every account-aware mail tool's description ends with. */
+const ACCOUNTS_TEXT =
+  ' The user may have several accounts: results name each message’s account, and a uid is only unique ' +
+  'within one account and mailbox, so pass the account back when you act on a message.'
+
 const MAIL_TOOLS = [
   tool({
     name: 'ordo_mailboxes',
@@ -585,12 +612,13 @@ const MAIL_TOOLS = [
     done: (d) => `Read ${plural(num(d, 'mailboxes'), 'mailbox', 'mailboxes')}`,
     command: 'mail mailboxes',
     description:
-      'The mail folders Ordo has seen (Inbox, Drafts, Sent, Archive, Junk, Bin and the user’s own), with ' +
-      'message and unread counts. Run ordo_mail_sync first to refresh.',
+      'The mail folders Ordo has seen in each account (Inbox, Drafts, Sent, Archive, Junk, Bin, Gmail’s All Mail ' +
+      'and the user’s own), with message and unread counts, and the accounts themselves. One account’s when ' +
+      'account is given. Run ordo_mail_sync first to refresh.',
     untrusted: true,
     reads: 'your mailboxes',
-    input: {},
-    run: viaCommand('mail mailboxes', () => ({ input: {} })),
+    input: { account: accountArg },
+    run: viaCommand('mail mailboxes', (a: { account?: string }) => ({ input: { account: a.account } })),
   }),
 
   tool({
@@ -600,11 +628,14 @@ const MAIL_TOOLS = [
     done: (d) => `Checked for mail: ${plural(num(d, 'added'), 'new message')}`,
     command: 'mail sync',
     description:
-      'Fetch the folder list and new mail in one mailbox (default INBOX) from iCloud into Ordo’s local cache. ' +
-      'Reads only; changes nothing in the mailbox. Fails with code "locked" if the Ordo app or another agent is writing.',
+      'Fetch the folder list and new mail in one mailbox (default INBOX) from the mail server into Ordo’s local ' +
+      'cache: every account’s inbox when no account is given. Reads only; changes nothing in the mailbox. ' +
+      'Fails with code "locked" if the Ordo app or another agent is writing.',
     untrusted: false,
-    input: { mailbox: mailboxArg },
-    run: viaCommand('mail sync', (a: { mailbox?: string }) => ({ input: { mailbox: a.mailbox } })),
+    input: { mailbox: mailboxArg, account: accountArg },
+    run: viaCommand('mail sync', (a: { mailbox?: string; account?: string }) => ({
+      input: { mailbox: a.mailbox, account: a.account },
+    })),
   }),
 
   tool({
@@ -615,19 +646,21 @@ const MAIL_TOOLS = [
     command: 'mail list',
     description:
       'Messages in one mailbox from Ordo’s local cache, newest first, with the uid ordo_read_message needs. ' +
-      'Headers only.',
+      'Headers only. With no account, the inbox of every account together.' +
+      ACCOUNTS_TEXT,
     untrusted: true,
     reads: 'your mail',
     input: {
       mailbox: mailboxArg,
+      account: accountArg,
       unread: z.boolean().default(false).describe('Only unread messages'),
       limit: limit(25, 100),
       offset,
     },
     run: viaCommand(
       'mail list',
-      (a: { mailbox?: string; unread: boolean; limit: number; offset: number }) => ({
-        input: { mailbox: a.mailbox, unread: a.unread, limit: a.limit },
+      (a: { mailbox?: string; account?: string; unread: boolean; limit: number; offset: number }) => ({
+        input: { mailbox: a.mailbox, account: a.account, unread: a.unread, limit: a.limit },
         offset: a.offset,
       }),
     ),
@@ -641,20 +674,23 @@ const MAIL_TOOLS = [
     command: 'mail search',
     description:
       'Search mail. By default searches Ordo’s local cache (subjects, senders, recipients and the text of ' +
-      'messages already opened) across every folder; with server: true, asks the mail server to search one ' +
-      'mailbox (default INBOX), which finds older mail too. Every word must match.',
+      'messages already opened) across every folder of every account (or one account); with server: true, asks ' +
+      'one account’s mail server to search one mailbox (default INBOX), which finds older mail too. Every word ' +
+      'must match.' +
+      ACCOUNTS_TEXT,
     untrusted: true,
     reads: 'your mail',
     input: {
       query: z.string().min(1).max(200).describe('Words to look for'),
       mailbox: mailboxArg,
+      account: accountArg,
       server: z.boolean().default(false).describe('Search the server instead of the local cache'),
       limit: limit(25, 100),
     },
     run: viaCommand(
       'mail search',
-      (a: { query: string; mailbox?: string; server: boolean; limit: number }) => ({
-        input: { query: a.query, mailbox: a.mailbox, server: a.server, limit: a.limit },
+      (a: { query: string; mailbox?: string; account?: string; server: boolean; limit: number }) => ({
+        input: { query: a.query, mailbox: a.mailbox, account: a.account, server: a.server, limit: a.limit },
       }),
     ),
   }),
@@ -674,9 +710,10 @@ const MAIL_TOOLS = [
     input: {
       uid: z.number().int().positive().describe('The uid from ordo_messages or ordo_search_mail'),
       mailbox: mailboxArg,
+      account: accountArg,
     },
-    run: viaCommand('mail read', (a: { uid: number; mailbox?: string }) => ({
-      input: { uid: a.uid, mailbox: a.mailbox },
+    run: viaCommand('mail read', (a: { uid: number; mailbox?: string; account?: string }) => ({
+      input: { uid: a.uid, mailbox: a.mailbox, account: a.account },
     })),
   }),
 ]
@@ -706,11 +743,12 @@ export function messageLine(m: Pick<MessageSummary, 'from' | 'subject' | 'date'>
 }
 
 /** A folder as the card names it: Inbox, Archive, Bin, Junk, or its own name. */
-function folderName(services: OrdoServices, path: string): string {
+function folderName(services: OrdoServices, path: string, account?: string): string {
   if (path === 'INBOX') return 'Inbox'
-  const box = services.mail.mailboxes().find((b) => b.path === path)
+  const box = services.mail.mailboxes(account ? { account } : undefined).find((b) => b.path === path)
   const roles: Record<string, string> = {
     archive: 'Archive',
+    all: 'All Mail',
     trash: 'Bin',
     junk: 'Junk',
     sent: 'Sent',
@@ -723,11 +761,30 @@ const targetsOf = (messages: MessageSummary[]): MailTargets => ({
   messages: messages.map((m) => ({ address: m.from.address, name: m.from.name ?? null, subject: m.subject })),
 })
 
-/** The cached messages for a preview, or why there's nothing to show. */
-function previewMessages(services: OrdoServices, title: string, mailbox: string, uids: number[]) {
+/**
+ * The cached messages for a preview, in the account the call names, or why there's nothing to show.
+ * `where` names the account on the card when there's more than one.
+ */
+function previewMessages(
+  services: OrdoServices,
+  title: string,
+  mailbox: string,
+  uids: number[],
+  accountWord?: string,
+):
+  | { blocked: ChangePreview; messages?: undefined; account?: undefined; where?: undefined }
+  | { blocked?: undefined; messages: MessageSummary[]; account: MailAccount; where: string } {
   if (!services.account().connected) return { blocked: blockedCard(title, NO_ICLOUD) }
-  const found = cachedMessages(services, mailbox, uids)
-  return found.ok ? { messages: found.messages } : { blocked: blockedCard(title, found.message) }
+  const which = pickAccount(services, accountWord)
+  if (!which.ok) return { blocked: blockedCard(title, which.message) }
+  const found = cachedMessages(services, mailbox, uids, which.account.id)
+  if (!found.ok) return { blocked: blockedCard(title, found.message) }
+  return { messages: found.messages, account: which.account, where: accountNote(services, which.account) }
+}
+
+/** " in Work (me@work.example)" on a card, when there's more than one account to tell apart. */
+function accountNote(services: OrdoServices, a: MailAccount): string {
+  return services.mail.accounts().length > 1 ? ` in ${clean(a.label, 40)} (${clean(a.email, 254)})` : ''
 }
 
 /** The most text the model may write in one email, before any quoted original. */
@@ -790,6 +847,7 @@ interface EmailArgs {
   mode: Mode
   uid?: number
   mailbox?: string
+  account?: string
   to?: string[]
   cc?: string[]
   subject?: string
@@ -812,6 +870,15 @@ const emailInput = (modes: readonly Mode[]) => ({
     .optional()
     .describe('For reply and forward: the message, from ordo_messages or ordo_search_mail'),
   mailbox: mailboxArg,
+  account: z
+    .string()
+    .min(1)
+    .max(320)
+    .optional()
+    .describe(
+      'For reply and forward: the account the message is in (it’s sent from there). For new: the account to ' +
+        'send from. By name or address; the first account when left out',
+    ),
   to: recipientList.describe('Email addresses (new and forward only; a reply goes to the message’s sender)'),
   cc: recipientList.describe('More email addresses to copy in'),
   subject: z
@@ -837,9 +904,14 @@ const kb = (n: number) => `${Math.ceil(n / 1024 / 1024)} MB`
  * recipient says where it came from, for the card's trigger.
  */
 async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): Promise<Built> {
-  const account = services.account()
-  if (!account.connected) return { ok: false, message: NO_ICLOUD }
-  const own = ownAddresses(account.email)
+  if (!services.account().connected) return { ok: false, message: NO_ICLOUD }
+  // A reply or forward goes from the account the message is in; a new email from the one named.
+  const which = pickAccount(services, a.account)
+  if (!which.ok) return { ok: false, message: which.message }
+  const account = which.account
+  const accounts = services.mail.accounts()
+  // Every account's addresses: Reply all never copies in the user's other accounts.
+  const own = ownAddresses(...accounts.map((x) => x.email))
   const listed = (list: string[] | undefined) => [...new Set((list ?? []).map((x) => x.trim()))]
   const to = listed(a.to)
   const cc = listed(a.cc)
@@ -851,7 +923,7 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
   if (a.mode !== 'new') {
     if (a.uid === undefined)
       return { ok: false, message: 'Say which message to reply to or forward (its uid).' }
-    const r = await services.mail.open({ mailbox, uid: a.uid })
+    const r = await services.mail.open({ account: account.id, mailbox, uid: a.uid })
     if (!r.ok) return { ok: false, message: r.message }
     original = r.message
   }
@@ -869,7 +941,8 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     if (to.length)
       return { ok: false, message: 'A reply goes to the message’s sender. Add anyone else with cc.' }
     const m = original!
-    const inSent = services.mail.mailboxes().find((b) => b.path === mailbox)?.role === 'sent'
+    const inSent =
+      services.mail.mailboxes({ account: account.id }).find((b) => b.path === mailbox)?.role === 'sent'
     const r = replyRecipients(m, own, a.mode === 'reply-all', { inSent })
     // Addresses from the email's own headers are the sender's to write. Each must be one plain
     // address: a quoted local part with a comma in it (`"a@b.example,boss"@c.example`) would
@@ -952,6 +1025,7 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     rest = visibleText(rest.slice(0, Math.max(0, room - ORIGINAL_CUT.length)) + ORIGINAL_CUT)
   const body = text + (rest ?? '')
   const compose: ComposeInput = {
+    account: account.id,
     // As lists, one address each, so nothing is split or joined on the way to the server.
     to: recipients.to,
     cc: recipients.cc,
@@ -959,14 +1033,19 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
     subject,
     body,
     attachments: [],
-    ...((a.mode === 'reply' || a.mode === 'reply-all') && { replyTo: { mailbox, uid: a.uid! } }),
-    ...(a.mode === 'forward' && { forward: { mailbox, uid: a.uid!, parts: files.map((f) => f.part) } }),
+    ...((a.mode === 'reply' || a.mode === 'reply-all') && {
+      replyTo: { account: account.id, mailbox, uid: a.uid! },
+    }),
+    ...(a.mode === 'forward' && {
+      forward: { account: account.id, mailbox, uid: a.uid!, parts: files.map((f) => f.part) },
+    }),
   }
   return {
     ok: true,
     compose,
     email: {
       from: account.email,
+      ...(accounts.length > 1 && { fromAccount: account.label }),
       to: recipients.to,
       cc: recipients.cc,
       subject,
@@ -985,7 +1064,15 @@ async function buildEmail(services: OrdoServices, a: EmailArgs, send: boolean): 
             },
           ]
         : [],
-      ...(original && { target: { mailbox, uid: a.uid! } }),
+      ...(original && {
+        target: {
+          account: account.id,
+          accountNames: [account.id, account.label, account.email].map((x) => x.toLowerCase()),
+          first: accounts[0]?.id === account.id,
+          mailbox,
+          uid: a.uid!,
+        },
+      }),
       recipients: everyone.map((address) => ({
         address,
         source: sourceOf.get(address.toLowerCase()) ?? 'model',
@@ -1054,32 +1141,35 @@ const MAIL_CHANGE_TOOLS = [
       // Verbs only: "Is it spam?" or "What's in my archive?" ask nothing.
       /\b(?:move|delete|throw (?:away|out)|get rid of|clear (?:out|away))\b|(?<!\b(?:my|the|in|from|your)\s)\barchive\b|\b(?:bin|trash|junk)\s+(?:it|them|this|that|these|those|the|all|every)\b|\bput\b.{0,60}\b(?:in|into)\b|\bfile\b.{0,60}\b(?:in|into|under)\b|\bmark\b.{0,60}\bas\s+(?:spam|junk)\b/i,
     description:
-      'Move messages (at most 20, from one mailbox) to Archive, Bin, Junk, the Inbox, or one of the user’s folders ' +
-      'from ordo_mailboxes. Nothing is deleted; ordo_mail_undo puts the last move back.' +
+      'Move messages (at most 20, from one mailbox of one account) to Archive (All Mail on Gmail), Bin, Junk, ' +
+      'the Inbox, or one of that account’s folders from ordo_mailboxes. Nothing is deleted; ordo_mail_undo puts ' +
+      'the last move back.' +
+      ACCOUNTS_TEXT +
       MAIL_TEXT,
     untrusted: false,
     input: {
       uids: uidList,
       mailbox: mailboxArg,
+      account: accountArg,
       to: z
         .string()
         .min(1)
         .max(1000)
         .describe('archive, bin, junk, inbox, or a folder path as ordo_mailboxes lists it'),
     },
-    run: viaCommand('mail move', (a: { uids: number[]; mailbox?: string; to: string }) => ({
-      input: { uids: a.uids, mailbox: a.mailbox, to: a.to },
+    run: viaCommand('mail move', (a: { uids: number[]; mailbox?: string; account?: string; to: string }) => ({
+      input: { uids: a.uids, mailbox: a.mailbox, account: a.account, to: a.to },
     })),
     async preview(services, a) {
       const mailbox = a.mailbox ?? 'INBOX'
       const n = plural(a.uids.length, 'message')
-      const got = previewMessages(services, `Move ${n}`, mailbox, a.uids)
+      const got = previewMessages(services, `Move ${n}`, mailbox, a.uids, a.account)
       if (got.blocked) return got.blocked
-      const target = moveTarget(services, a.to)
+      const target = moveTarget(services, a.to, got.account.id)
       if (!target.ok) return blockedCard(`Move ${n}`, target.message)
-      const from = folderName(services, mailbox)
+      const from = folderName(services, mailbox, got.account.id)
       return {
-        title: `Move ${n} to ${clean(target.name, 60)}`,
+        title: `Move ${n} to ${clean(target.name, 60)}${got.where}`,
         details: got.messages.map((m) => `${messageLine(m)}: ${from} → ${clean(target.name, 60)}`),
         notes: ['Nothing is deleted. You can undo the move while Ordo is open.'],
         mail: targetsOf(got.messages),
@@ -1099,24 +1189,29 @@ const MAIL_CHANGE_TOOLS = [
     command: 'mail flag',
     // The verb only: "Which are flagged?" and "Starting with…" ask for nothing.
     intent: /\b(?:flag|unflag|star|unstar)\b/i,
-    description: 'Flag or unflag messages (at most 20, from one mailbox).' + MAIL_TEXT,
+    description:
+      'Flag or unflag messages (at most 20, from one mailbox of one account).' + ACCOUNTS_TEXT + MAIL_TEXT,
     untrusted: false,
     input: {
       uids: uidList,
       mailbox: mailboxArg,
+      account: accountArg,
       flagged: z.boolean().default(true).describe('false to unflag'),
     },
-    run: viaCommand('mail flag', (a: { uids: number[]; mailbox?: string; flagged: boolean }) => ({
-      input: { uids: a.uids, mailbox: a.mailbox, unflag: !a.flagged },
-    })),
+    run: viaCommand(
+      'mail flag',
+      (a: { uids: number[]; mailbox?: string; account?: string; flagged: boolean }) => ({
+        input: { uids: a.uids, mailbox: a.mailbox, account: a.account, unflag: !a.flagged },
+      }),
+    ),
     async preview(services, a) {
       const n = plural(a.uids.length, 'message')
       const title = `${a.flagged ? 'Flag' : 'Unflag'} ${n}`
-      const got = previewMessages(services, title, a.mailbox ?? 'INBOX', a.uids)
+      const got = previewMessages(services, title, a.mailbox ?? 'INBOX', a.uids, a.account)
       if (got.blocked) return got.blocked
       const state = (on: boolean) => (on ? 'flagged' : 'not flagged')
       return {
-        title,
+        title: title + got.where,
         details: got.messages.map((m) => `${messageLine(m)}: ${state(m.flagged)} → ${state(a.flagged)}`),
         notes: ['You can change it back in Mail.'],
         mail: targetsOf(got.messages),
@@ -1135,24 +1230,31 @@ const MAIL_CHANGE_TOOLS = [
     done: () => 'Marked mail',
     command: 'mail mark',
     intent: /\bmark\b.{0,60}\bas\s+(?:read|unread|seen|new|not read)\b/i,
-    description: 'Mark messages (at most 20, from one mailbox) as read or unread.' + MAIL_TEXT,
+    description:
+      'Mark messages (at most 20, from one mailbox of one account) as read or unread.' +
+      ACCOUNTS_TEXT +
+      MAIL_TEXT,
     untrusted: false,
     input: {
       uids: uidList,
       mailbox: mailboxArg,
+      account: accountArg,
       read: z.boolean().describe('true to mark read, false to mark unread'),
     },
-    run: viaCommand('mail mark', (a: { uids: number[]; mailbox?: string; read: boolean }) => ({
-      input: { uids: a.uids, mailbox: a.mailbox, read: a.read, unread: !a.read },
-    })),
+    run: viaCommand(
+      'mail mark',
+      (a: { uids: number[]; mailbox?: string; account?: string; read: boolean }) => ({
+        input: { uids: a.uids, mailbox: a.mailbox, account: a.account, read: a.read, unread: !a.read },
+      }),
+    ),
     async preview(services, a) {
       const n = plural(a.uids.length, 'message')
       const title = `Mark ${n} as ${a.read ? 'read' : 'unread'}`
-      const got = previewMessages(services, title, a.mailbox ?? 'INBOX', a.uids)
+      const got = previewMessages(services, title, a.mailbox ?? 'INBOX', a.uids, a.account)
       if (got.blocked) return got.blocked
       const state = (seen: boolean) => (seen ? 'read' : 'unread')
       return {
-        title,
+        title: title + got.where,
         details: got.messages.map((m) => `${messageLine(m)}: ${state(m.seen)} → ${state(a.read)}`),
         notes: ['You can change it back in Mail.'],
         mail: targetsOf(got.messages),
@@ -1186,10 +1288,11 @@ const MAIL_CHANGE_TOOLS = [
           title,
           'There’s no move to undo. Only moves made while Ordo is open can be undone.',
         )
-      const from = folderName(services, last.to)
-      const to = folderName(services, last.from)
+      const from = folderName(services, last.to, last.account)
+      const to = folderName(services, last.from, last.account)
+      const account = services.mail.accounts().find((x) => x.id === last.account)
       return {
-        title: `Move ${plural(last.count, 'message')} from ${from} back to ${to}`,
+        title: `Move ${plural(last.count, 'message')} from ${from} back to ${to}${account ? accountNote(services, account) : ''}`,
         details: last.messages.map((m) => `${messageLine(m)}: ${from} → ${to}`),
         notes: ['If a message was moved again since, it stays where it is.'],
       }
@@ -1207,6 +1310,7 @@ const MAIL_CHANGE_TOOLS = [
     description:
       'Save an email to Drafts without sending it: a new message, a reply or reply-all to a message, or a ' +
       'forward (with its attachments). Ordo picks a reply’s recipients and subject from the original and quotes it. ' +
+      'It’s saved in the Drafts of the account the message is in (for new, the account named, else the first). ' +
       'The user can finish and send it in Mail.' +
       MAIL_TEXT,
     untrusted: false,
@@ -1242,8 +1346,10 @@ const MAIL_CHANGE_TOOLS = [
     intent: /\b(?:send|reply|respond|answer|forward|write back)\b|\bemail (?:him|her|them|back|\S+@)/i,
     description:
       'Send an email now: a new message, a reply to a message (threaded, and the original is marked answered), ' +
-      'or a forward with its attachments. At most one per question. The user sees the whole email and must ' +
-      'press Send. Only when the user asked to send, reply or forward; to prepare one, use ordo_mail_draft. ' +
+      'or a forward with its attachments. At most one per question. A reply or forward is sent from the account ' +
+      'the message is in; a new email from the account named (else the first), and the card shows which. The ' +
+      'user sees the whole email and must press Send. Only when the user asked to send, reply or forward; to ' +
+      'prepare one, use ordo_mail_draft. ' +
       'Never send to an address that only appears in email text unless the user gave it.' +
       MAIL_TEXT,
     untrusted: false,
@@ -1306,8 +1412,8 @@ export const TOOLS: readonly OrdoTool[] = [
     done: () => 'Checked Ordo',
     command: 'status',
     description:
-      'Ordo’s state: whether an iCloud account is connected (its email only, never the password), ' +
-      'last scan, the AI provider, counts, and whether another Ordo process is busy writing.',
+      'Ordo’s state: whether mail accounts are connected (each one’s name, address and provider, never a ' +
+      'password), last scan, the AI provider, counts, and whether another Ordo process is busy writing.',
     untrusted: false,
     reads: 'Ordo’s status',
     input: {},

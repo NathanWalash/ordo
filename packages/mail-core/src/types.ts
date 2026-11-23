@@ -22,6 +22,8 @@ export interface Address {
 export interface MessageHeader {
   uid: number
   mailbox: string
+  /** The account it belongs to (its id). Set on headers read from the cache. */
+  account?: string
   date: Date
   seen: boolean
   from: Address
@@ -42,10 +44,22 @@ export interface MessageHeader {
   hasAttachments?: boolean
 }
 
-/** What a mailbox is for, from its SPECIAL-USE flag (or its name, when the server has none). */
-export type MailboxRole = 'inbox' | 'drafts' | 'sent' | 'archive' | 'junk' | 'trash'
+/**
+ * What a mailbox is for, from its SPECIAL-USE flag (or its name, when the server has none).
+ * `all` is Gmail's All Mail (`\All`): every message, whatever its labels. Archiving on Gmail moves
+ * a message there (which takes it out of the Inbox).
+ */
+export type MailboxRole = 'inbox' | 'drafts' | 'sent' | 'archive' | 'all' | 'junk' | 'trash'
 
-export const MAILBOX_ROLES: readonly MailboxRole[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash']
+export const MAILBOX_ROLES: readonly MailboxRole[] = [
+  'inbox',
+  'drafts',
+  'sent',
+  'archive',
+  'all',
+  'junk',
+  'trash',
+]
 
 /** A folder on the server. */
 export interface MailboxInfo {
@@ -131,6 +145,8 @@ export interface SenderSummary {
   bulk: boolean
   /** Machine-sent: an Auto-Submitted header or a no-reply style address. */
   automated: boolean
+  /** The accounts (ids) this sender's mail is in, when the headers said (from the cache). */
+  accounts?: string[]
 }
 
 export interface MailboxStatus {
@@ -140,7 +156,7 @@ export interface MailboxStatus {
   uidValidity: string
 }
 
-export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk' | '\\Drafts' | '\\Archive'
+export type SpecialMailbox = '\\Sent' | '\\Trash' | '\\Junk' | '\\Drafts' | '\\Archive' | '\\All'
 
 /** Where moved messages ended up. */
 export interface MoveResult {
@@ -194,6 +210,8 @@ export interface CleanupSenderResult {
 /** A past clean-up, as the History view shows it. */
 export interface CleanupSummary {
   id: number
+  /** The account it cleaned up (its id). */
+  account: string
   at: Date
   /** Where the emails came from (INBOX). */
   mailbox: string

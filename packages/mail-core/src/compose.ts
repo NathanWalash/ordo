@@ -26,15 +26,29 @@ export const forwardSubject = (subject: string) =>
 type Original = Pick<MessageContent, 'from' | 'to' | 'cc' | 'replyTo'>
 
 const ICLOUD = /^([^@]+)@(icloud|me|mac)\.com$/i
+const GMAIL = /^([^@]+)@(gmail|googlemail)\.com$/i
 
 /**
- * Every address the account receives mail at, lower-cased. An iCloud address has the same name
- * at @icloud.com, @me.com and @mac.com.
+ * Every address the accounts receive mail at, lower-cased. An iCloud address has the same name
+ * at @icloud.com, @me.com and @mac.com; a Gmail one at @gmail.com and @googlemail.com, with or
+ * without dots. Give every account's address, so Reply all never copies in your other accounts.
  */
-export function ownAddresses(email: string): string[] {
-  const e = email.trim().toLowerCase()
-  const m = ICLOUD.exec(e)
-  return m ? ['icloud', 'me', 'mac'].map((d) => `${m[1]}@${d}.com`) : [e]
+export function ownAddresses(...emails: string[]): string[] {
+  const out = new Set<string>()
+  for (const email of emails) {
+    const e = email.trim().toLowerCase()
+    if (!e) continue
+    out.add(e)
+    const icloud = ICLOUD.exec(e)
+    if (icloud) for (const d of ['icloud', 'me', 'mac']) out.add(`${icloud[1]}@${d}.com`)
+    const gmail = GMAIL.exec(e)
+    if (gmail) {
+      const name = gmail[1]!.split('+')[0]!
+      for (const n of new Set([name, name.replace(/\./g, '')]))
+        for (const d of ['gmail', 'googlemail']) out.add(`${n}@${d}.com`)
+    }
+  }
+  return [...out]
 }
 
 /**

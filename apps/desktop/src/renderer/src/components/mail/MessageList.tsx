@@ -1,11 +1,14 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode, type UIEvent } from 'react'
 import { Flag, Paperclip, Reply } from 'lucide-react'
 import { displayName } from '@ordo/mail-core'
-import type { MessageSummary } from '@ordo/shared'
+import type { MailAccount, MessageSummary } from '@ordo/shared'
+import { AccountChip } from '../accounts/AccountChip'
 import { fullDate, listDate, people } from './format'
 import { END_MARGIN, nearEnd } from './paging'
 
-export const keyOf = (m: { mailbox: string; uid: number }) => `${m.mailbox}\u0000${m.uid}`
+/** A message's key: its account, folder and UID (a UID is only unique within one account's folder). */
+export const keyOf = (m: { account?: string; mailbox: string; uid: number }) =>
+  `${m.account ?? ''}\u0000${m.mailbox}\u0000${m.uid}`
 
 interface Props {
   label: string
@@ -15,7 +18,9 @@ interface Props {
   /** Show recipients instead of senders (Sent, Drafts). */
   showRecipients: boolean
   /** Show which folder each message is in (search across folders). */
-  showMailbox?: (path: string) => string
+  showMailbox?: (m: MessageSummary) => string
+  /** Show each message's account (the unified inbox, search across accounts). */
+  accountOf?: (m: MessageSummary) => MailAccount | undefined
   /** Near the bottom: load the next page. */
   onEndReached?: () => void
   /** Keys the list doesn't use itself (the window's shortcuts). */
@@ -25,8 +30,9 @@ interface Props {
 }
 
 /** What a screen reader says for a row: state, who, subject, when, and what's attached. */
-function rowLabel(m: MessageSummary, who: string): string {
+function rowLabel(m: MessageSummary, who: string, account?: MailAccount): string {
   return [
+    account ? `${account.label}.` : '',
     m.seen ? '' : 'Unread.',
     m.flagged ? 'Flagged.' : '',
     `${who}: ${m.subject || '(No subject)'}.`,
@@ -49,6 +55,7 @@ export function MessageList({
   onSelect,
   showRecipients,
   showMailbox,
+  accountOf,
   onEndReached,
   onKey,
   empty,
@@ -130,6 +137,7 @@ export function MessageList({
           const on = i === index
           const who = showRecipients ? people(m.to) || 'No recipients' : displayName(m.from)
           const sub = on ? 'text-ink-2 group-focus/list:text-white' : 'text-ink-2'
+          const account = accountOf?.(m)
           return (
             <li
               key={keyOf(m)}
@@ -137,7 +145,7 @@ export function MessageList({
               data-index={i}
               role="option"
               aria-selected={on}
-              aria-label={rowLabel(m, who)}
+              aria-label={rowLabel(m, who, account)}
               onMouseDown={(e) => {
                 // Clicking a row focuses the list, so the arrow keys work straight away.
                 e.preventDefault()
@@ -180,7 +188,12 @@ export function MessageList({
                   />
                 )}
               </div>
-              {showMailbox && <span className={`text-[11px] ${sub}`}>{showMailbox(m.mailbox)}</span>}
+              {(showMailbox || account) && (
+                <span className={`flex min-w-0 items-center gap-2 text-[11px] ${sub}`}>
+                  {account && <AccountChip account={account} />}
+                  {showMailbox && <span className="truncate">{showMailbox(m)}</span>}
+                </span>
+              )}
             </li>
           )
         })}

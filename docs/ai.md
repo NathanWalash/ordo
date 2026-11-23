@@ -241,7 +241,7 @@ Suggestions aren't cached.
 
 The [assistant](assistant.md) uses the same provider and model, but it looks up much more than
 sorting does: transactions with amounts and dates, balances, bills, calendar events, sender names,
-addresses and subject lines, and your iCloud email address, as well as your questions. So agreeing
+addresses and subject lines, and your mail accounts’ names and email addresses, as well as your questions. So agreeing
 to a cloud CLI here covers sorting only. The assistant asks for its own OK the first time you open
 it with Claude Code or Codex, says exactly what goes to Anthropic or OpenAI, and sends nothing until
 you allow it. **Stop sharing** in the assistant takes the OK back; switching provider asks again.
