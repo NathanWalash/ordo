@@ -30,6 +30,7 @@ import {
   formatAddressList,
   ownAddresses,
   parseMailtoLink,
+  PROVIDERS,
   replyBody,
   replyRecipients,
   replySubject,
@@ -37,6 +38,7 @@ import {
 } from '@ordo/mail-core'
 import type {
   AccountStatus,
+  MailAccount,
   MailboxInfo,
   MailRefreshProgress,
   MessageContent,
@@ -50,7 +52,7 @@ import { ToolbarActions } from '../components/Toolbar'
 import { ComposeSheet, type ComposeDraft } from '../components/mail/ComposeSheet'
 import { fullDate } from '../components/mail/format'
 import { LinkSheet } from '../components/mail/LinkSheet'
-import { mailboxName, MailboxList } from '../components/mail/MailboxList'
+import { ALL, mailboxName, MailboxList, type MailView } from '../components/mail/MailboxList'
 import { keyOf, MessageList } from '../components/mail/MessageList'
 import { Reader } from '../components/mail/Reader'
 import { ShortcutsSheet } from '../components/mail/ShortcutsSheet'
@@ -87,7 +89,14 @@ export function MailPage({ account, onConnect, onTitle, changed = 0 }: Props) {
         }
       />
     )
-  return <MailClient key={account.email} email={account.email} onTitle={onTitle} changed={changed} />
+  return (
+    <MailClient
+      key={account.accounts.map((a) => a.id).join()}
+      accounts={account.accounts}
+      onTitle={onTitle}
+      changed={changed}
+    />
+  )
 }
 
 type Opened = { key: string; message?: MessageContent; error?: string }
@@ -115,17 +124,28 @@ function useWindowWidth(): number {
   return width
 }
 
+/** The first view: every account's inbox together (with one account, its inbox). */
+const startView = (accounts: MailAccount[]): MailView => ({
+  account: accounts.length > 1 ? ALL : (accounts[0]?.id ?? ALL),
+  mailbox: INBOX,
+})
+
 function MailClient({
-  email,
+  accounts,
   onTitle,
   changed,
 }: {
-  email: string
+  accounts: MailAccount[]
   onTitle: (t: string | null) => void
   changed: number
 }) {
-  const [boxes, setBoxes] = useState<MailboxInfo[]>([])
-  const [current, setCurrent] = useState(INBOX)
+  const several = accounts.length > 1
+  /** Each account's folders, by account id. */
+  const [boxes, setBoxes] = useState<Record<string, MailboxInfo[]>>({})
+  const [view, setView] = useState<MailView>(() => startView(accounts))
+  const current = view.mailbox
+  /** Accounts whose last check failed, and why. */
+  const [accountProblems, setAccountProblems] = useState<Record<string, string>>({})
   const [filter, setFilter] = useState<Filter>('all')
   const [list, setList] = useState<Page | null>(null)
   const [selected, setSelected] = useState<MessageSummary | null>(null)
@@ -152,29 +172,42 @@ function MailClient({
   const listRef = useRef<HTMLDivElement>(null)
   const readerRef = useRef<HTMLElement>(null)
   // What's on screen, for async work and the poll, which outlive the render that started them.
-  const view = useRef({ current, filter, shown: 0, query })
+  const onScreen = useRef({ view, filter, shown: 0, query })
   useEffect(() => {
-    view.current = { current, filter, shown: list?.messages.length ?? 0, query }
-  }, [current, filter, list, query])
+    onScreen.current = { view, filter, shown: list?.messages.length ?? 0, query }
+  }, [view, filter, list, query])
   const loadingMore = useRef(false)
   const moving = useRef(new Set<string>())
 
-  const box = boxes.find((b) => b.path === current)
+  const accountById = useCallback((id: string) => accounts.find((a) => a.id === id), [accounts])
+  const boxesOf = useCallback((account: string) => boxes[account] ?? [], [boxes])
+  const unified = view.account === ALL
+  const box = unified ? undefined : boxesOf(view.account).find((b) => b.path === current)
   const role = box?.role ?? (current === INBOX ? 'inbox' : null)
-  const boxName = box ? mailboxName(box) : current === INBOX ? 'Inbox' : current
+  const boxName = unified ? 'All Inboxes' : box ? mailboxName(box) : current === INBOX ? 'Inbox' : current
+  const viewName = several && !unified ? `${boxName} – ${accountById(view.account)?.label ?? ''}` : boxName
   const nameOf = useCallback(
-    (path: string) => {
-      const b = boxes.find((x) => x.path === path)
-      return b ? mailboxName(b) : path
+    (m: MessageSummary) => {
+      const b = boxesOf(m.account).find((x) => x.path === m.mailbox)
+      return b ? mailboxName(b) : m.mailbox
     },
-    [boxes],
+    [boxesOf],
   )
-  const roleOf = (path: string) =>
-    boxes.find((b) => b.path === path)?.role ?? (path === INBOX ? 'inbox' : null)
+  const roleOf = (account: string, path: string) =>
+    boxesOf(account).find((b) => b.path === path)?.role ?? (path === INBOX ? 'inbox' : null)
+  /** Each row's account, when there's more than one to tell apart. */
+  const accountOf = several ? (m: MessageSummary) => accountById(m.account) : undefined
+  /** Load every account's folders. */
+  const loadBoxes = useCallback(async () => {
+    const all = await Promise.all(
+      accounts.map(async (a) => [a.id, await window.ordo.mail.mailboxes({ account: a.id })] as const),
+    )
+    return Object.fromEntries(all)
+  }, [accounts])
 
   useEffect(() => {
-    onTitle(boxName)
-  }, [boxName, onTitle])
+    onTitle(viewName)
+  }, [viewName, onTitle])
   useEffect(() => () => onTitle(null), [onTitle])
 
   /**
@@ -182,14 +215,15 @@ function MailClient({
    * or as many as are already shown, in chunks the main process accepts.
    */
   const load = useCallback(async () => {
-    const { current: mailbox, filter: f, shown } = view.current
+    const { view: v, filter: f, shown } = onScreen.current
     const want = Math.max(PAGE, shown)
     const unread = f === 'unread' || undefined
     const pages: MessageSummary[] = []
     let total = 0
     for (let offset = 0; offset < want; offset += CHUNK) {
       const p = await window.ordo.mail.messages({
-        mailbox,
+        account: v.account,
+        mailbox: v.mailbox,
         limit: Math.min(CHUNK, want - offset),
         offset,
         unread,
@@ -198,12 +232,12 @@ function MailClient({
       pages.push(...p.messages)
       if (p.messages.length < Math.min(CHUNK, want - offset)) break
     }
-    const b = await window.ordo.mail.mailboxes()
-    if (mailbox !== view.current.current || f !== view.current.filter) return null
+    const b = await loadBoxes()
+    if (v !== onScreen.current.view || f !== onScreen.current.filter) return null
     setBoxes(b)
     setList({ total, messages: pages })
     return pages
-  }, [])
+  }, [loadBoxes])
 
   // The assistant moved, flagged or marked mail, or saved a draft: show it, in the same folder.
   // The selection becomes its fresh row (so its flag and read state are current), or goes if the
@@ -215,7 +249,7 @@ function MailClient({
     void (async () => {
       const rows = await load()
       if (!live || !rows) return
-      const { query: q, filter: f, current: mailbox } = view.current
+      const { query: q, filter: f, view: v } = onScreen.current
       let found = rows
       if (q.trim()) {
         found = await window.ordo.mail.search({ query: q.trim(), limit: 200 })
@@ -224,7 +258,8 @@ function MailClient({
       }
       const all =
         f === 'unread' && !q.trim()
-          ? (await window.ordo.mail.messages({ mailbox, limit: CHUNK })).messages
+          ? (await window.ordo.mail.messages({ account: v.account, mailbox: v.mailbox, limit: CHUNK }))
+              .messages
           : []
       if (!live) return
       setSelected((s) => {
@@ -243,15 +278,16 @@ function MailClient({
     const l = list
     if (!l || loadingMore.current || l.messages.length >= l.total) return
     loadingMore.current = true
-    const { current: mailbox, filter: f } = view.current
+    const { view: v, filter: f } = onScreen.current
     try {
       const p = await window.ordo.mail.messages({
-        mailbox,
+        account: v.account,
+        mailbox: v.mailbox,
         limit: PAGE,
         offset: l.messages.length,
         unread: f === 'unread' || undefined,
       })
-      if (mailbox !== view.current.current || f !== view.current.filter) return
+      if (v !== onScreen.current.view || f !== onScreen.current.filter) return
       setList((cur) => {
         if (!cur) return cur
         const seen = new Set(cur.messages.map(keyOf))
@@ -265,17 +301,46 @@ function MailClient({
     }
   }
 
-  /** Fetch new mail for a folder from the server, then show it. */
+  /**
+   * Fetch new mail for a folder from the server, then show it. All Inboxes checks every account at
+   * once; one that fails is named in the problem, and the others still show their new mail. The
+   * timer passes `auto`, so accounts backing off after a failure aren't tried again each time.
+   */
   const refresh = useCallback(
-    async (mailbox: string) => {
+    async (v: MailView, auto = false) => {
       setRefreshing(true)
-      const off = window.ordo.mail.onRefreshProgress((p) => p.mailbox === mailbox && setProgress(p))
+      // Progress from every account being checked, added up.
+      const each = new Map<string, MailRefreshProgress>()
+      const off = window.ordo.mail.onRefreshProgress((p) => {
+        if (p.mailbox !== v.mailbox || (v.account !== ALL && p.account !== v.account)) return
+        each.set(p.account, p)
+        const all = [...each.values()]
+        setProgress({
+          account: v.account,
+          mailbox: v.mailbox,
+          checked: all.reduce((n, x) => n + x.checked, 0),
+          total: all.reduce((n, x) => n + x.total, 0),
+        })
+      })
       try {
-        const r = await window.ordo.mail.refresh({ mailbox })
+        const r = await window.ordo.mail.refresh({ account: v.account, mailbox: v.mailbox }, { auto })
+        const label = (id: string) => accountById(id)?.label ?? 'An account'
         if (r.ok) {
-          setProblem(null)
+          // Accounts skipped while backing off keep the problem they had.
+          const failed = (r.failed ?? []).filter((f) => f.error !== 'busy')
+          setAccountProblems((had) => {
+            const next: Record<string, string> = {}
+            for (const f of r.failed ?? [])
+              if (f.error === 'busy' && had[f.account]) next[f.account] = had[f.account]!
+            for (const f of failed) next[f.account] = f.message
+            return next
+          })
+          const text = failed
+            .map((f) => (several ? `${label(f.account)}: ${f.message}` : f.message))
+            .join(' ')
+          setProblem((p) => (!text ? null : p?.text === text ? p : { text, at: new Date() }))
           setCheckedAt(new Date())
-          if (r.added > 0 && mailbox === view.current.current)
+          if (r.added > 0 && v === onScreen.current.view)
             setAnnouncement(`${r.added} new ${r.added === 1 ? 'message' : 'messages'}`)
         } else if (r.error !== 'busy')
           // Only a new problem is announced again.
@@ -287,7 +352,7 @@ function MailClient({
         setProgress(null)
       }
     },
-    [load],
+    [load, accountById, several],
   )
   const refreshRef = useRef(refresh)
   useEffect(() => {
@@ -298,18 +363,18 @@ function MailClient({
   useEffect(() => {
     const t = setTimeout(() => void load(), 0)
     return () => clearTimeout(t)
-  }, [load, current, filter])
+  }, [load, view, filter])
 
   // Then check the server: on opening a folder, and every few minutes (always with what's on
   // screen now, not what was there when the timer started).
   useEffect(() => {
-    const first = setTimeout(() => void refreshRef.current(current), 0)
-    const every = setInterval(() => void refreshRef.current(view.current.current), POLL_MS)
+    const first = setTimeout(() => void refreshRef.current(view), 0)
+    const every = setInterval(() => void refreshRef.current(onScreen.current.view, true), POLL_MS)
     return () => {
       clearTimeout(first)
       clearInterval(every)
     }
-  }, [current])
+  }, [view])
 
   const changeQuery = (q: string) => {
     // Starting a search clears the selection, so the reading pane doesn't show a non-result.
@@ -351,14 +416,14 @@ function MailClient({
 
   const setFlags = async (ms: MessageSummary[], flags: { seen?: boolean; flagged?: boolean }) => {
     if (!ms.length) return
-    const mailbox = ms[0]!.mailbox
-    const same = ms.filter((m) => m.mailbox === mailbox)
+    const { account, mailbox } = ms[0]!
+    const same = ms.filter((m) => m.mailbox === mailbox && m.account === account)
     patch(new Set(same.map(keyOf)), flags)
-    const r = await window.ordo.mail.setFlags({ mailbox, uids: same.map((m) => m.uid), ...flags })
+    const r = await window.ordo.mail.setFlags({ account, mailbox, uids: same.map((m) => m.uid), ...flags })
     if (!r.ok) {
       setToast({ text: r.message, error: true })
       await load()
-    } else setBoxes(await window.ordo.mail.mailboxes())
+    } else setBoxes(await loadBoxes())
   }
 
   // Open the selected message, and mark it read. What's on screen is `opened` only while its
@@ -369,12 +434,14 @@ function MailClient({
     let live = true
     // "Opening…" only if it takes a moment.
     const t = setTimeout(() => live && setSlow(true), 300)
-    void window.ordo.mail.open({ mailbox: selected.mailbox, uid: selected.uid }).then((r) => {
-      if (!live) return
-      setSlow(false)
-      setOpened(r.ok ? { key, message: r.message } : { key, error: r.message })
-      if (r.ok && !r.message.seen) void setFlags([selected], { seen: true })
-    })
+    void window.ordo.mail
+      .open({ account: selected.account, mailbox: selected.mailbox, uid: selected.uid })
+      .then((r) => {
+        if (!live) return
+        setSlow(false)
+        setOpened(r.ok ? { key, message: r.message } : { key, error: r.message })
+        if (r.ok && !r.message.seen) void setFlags([selected], { seen: true })
+      })
     return () => {
       live = false
       clearTimeout(t)
@@ -393,16 +460,23 @@ function MailClient({
     try {
       const i = visible.findIndex((x) => keyOf(x) === key)
       const next = visible[i + 1] ?? visible[i - 1] ?? null
-      const r = await window.ordo.mail.move({ mailbox: m.mailbox, uids: [m.uid], to })
+      const r = await window.ordo.mail.move({ account: m.account, mailbox: m.mailbox, uids: [m.uid], to })
       if (!r.ok) {
         setToast({ text: r.message, error: true })
         return
       }
       patch(new Set([key]), null)
       setSelected(next)
-      const where = { archive: 'Archive', trash: 'Bin', inbox: 'Inbox', junk: 'Junk' }[to]
+      // Gmail has no Archive folder: archiving there moves to All Mail.
+      const gmailArchive = to === 'archive' && !boxesOf(m.account).some((b) => b.role === 'archive')
+      const where = {
+        archive: gmailArchive ? 'All Mail' : 'Archive',
+        trash: 'Bin',
+        inbox: 'Inbox',
+        junk: 'Junk',
+      }[to]
       setToast({ text: `Moved to ${where}.`, ...(r.undoId !== null && { undoId: r.undoId }) })
-      setBoxes(await window.ordo.mail.mailboxes())
+      setBoxes(await loadBoxes())
     } finally {
       moving.current.delete(key)
     }
@@ -426,19 +500,26 @@ function MailClient({
 
   const message = opened?.message && opened.key === selectedKey ? opened.message : null
 
+  /** The account the open message is in. */
+  const messageAccount = selected?.account ?? accounts[0]?.id ?? ''
+
   const startReply = (all: boolean) => {
     if (!message) return
-    const r = replyRecipients(message, ownAddresses(email), all, {
-      inSent: roleOf(message.mailbox) === 'sent',
+    // Every account's addresses: Reply all never copies in your other accounts.
+    const r = replyRecipients(message, ownAddresses(...accounts.map((a) => a.email)), all, {
+      inSent: roleOf(messageAccount, message.mailbox) === 'sent',
     })
     setCompose({
       title: all ? 'Reply all' : 'Reply',
+      // A reply always goes from the account the message arrived in.
+      account: messageAccount,
+      lockAccount: true,
       to: formatAddressList(r.to),
       cc: formatAddressList(r.cc),
       bcc: '',
       subject: replySubject(message.subject),
       body: replyBody(message, bodyText(message), fullDate(message.date)),
-      replyTo: { mailbox: message.mailbox, uid: message.uid },
+      replyTo: { account: messageAccount, mailbox: message.mailbox, uid: message.uid },
       focusBody: true,
     })
   }
@@ -447,13 +528,14 @@ function MailClient({
     if (!message) return
     setCompose({
       title: 'Forward',
+      account: messageAccount,
       to: '',
       cc: '',
       bcc: '',
       subject: forwardSubject(message.subject),
       body: forwardBody(message, bodyText(message), fullDate(message.date)),
       forward: {
-        ref: { mailbox: message.mailbox, uid: message.uid },
+        ref: { account: messageAccount, mailbox: message.mailbox, uid: message.uid },
         attachments: message.attachments.filter((a) => !a.inline),
       },
     })
@@ -461,10 +543,13 @@ function MailClient({
 
   const editDraft = () => {
     if (!message) return
-    const ref = { mailbox: message.mailbox, uid: message.uid }
+    const ref = { account: messageAccount, mailbox: message.mailbox, uid: message.uid }
     const files = message.attachments.filter((a) => !a.inline)
     setCompose({
       title: 'Draft',
+      // A draft is finished from the account it was saved in.
+      account: messageAccount,
+      lockAccount: true,
       to: formatAddressList(message.to),
       cc: formatAddressList(message.cc),
       bcc: formatAddressList(message.bcc),
@@ -476,8 +561,10 @@ function MailClient({
     })
   }
 
+  /** A new message starts from the account you're looking at (the first, in All Inboxes). */
+  const viewAccount = unified ? (accounts[0]?.id ?? '') : view.account
   const newMessage = () =>
-    setCompose({ title: 'New message', to: '', cc: '', bcc: '', subject: '', body: '' })
+    setCompose({ title: 'New message', account: viewAccount, to: '', cc: '', bcc: '', subject: '', body: '' })
 
   const onLink = useCallback((href: string, text: string) => {
     const checked = checkLink(href, text)
@@ -489,30 +576,39 @@ function MailClient({
         url: checked.url,
         reason: 'Ordo can’t write to the address in this link.',
       })
-    setCompose({ title: 'New message', bcc: '', ...draft })
+    setCompose({ title: 'New message', bcc: '', ...draft, account: onScreen.current.view.account })
   }, [])
 
+  /** Search the open folder on the server: in All Inboxes, every account's inbox. */
   const searchServer = async () => {
     const q = query.trim()
     if (!q) return
-    const mailbox = current
+    const v = view
     setServer({ busy: true, done: false })
-    const r = await window.ordo.mail.searchServer({ query: q, mailbox, limit: 100 })
+    const ids = v.account === ALL ? accounts.map((a) => a.id) : [v.account]
+    const all = await Promise.all(
+      ids.map((account) =>
+        window.ordo.mail.searchServer({ account, query: q, mailbox: v.mailbox, limit: 100 }),
+      ),
+    )
     // You've typed something else, or left the folder, since: these results are for nothing on screen.
-    if (view.current.query.trim() !== q || view.current.current !== mailbox) return
-    if (!r.ok) return setServer({ busy: false, done: false, error: r.message })
+    if (onScreen.current.query.trim() !== q || onScreen.current.view !== v) return
+    const failed = all.find((r) => !r.ok)
+    const found = all.flatMap((r) => (r.ok ? r.messages : []))
+    if (failed && !failed.ok && found.length === 0)
+      return setServer({ busy: false, done: false, error: failed.message })
     setResults((local) => {
       const seen = new Set((local ?? []).map(keyOf))
-      return [...(local ?? []), ...r.messages.filter((m) => !seen.has(keyOf(m)))].sort(
+      return [...(local ?? []), ...found.filter((m) => !seen.has(keyOf(m)))].sort(
         (a, b) => b.date.getTime() - a.date.getTime(),
       )
     })
-    setServer({ busy: false, done: true })
+    setServer({ busy: false, done: true, ...(failed && !failed.ok && { error: failed.message }) })
   }
 
-  const selectMailbox = (path: string) => {
-    if (path === current) return void refresh(path)
-    setCurrent(path)
+  const selectMailbox = (next: MailView) => {
+    if (next.account === view.account && next.mailbox === view.mailbox) return void refresh(view)
+    setView(next)
     setSelected(null)
     setList(null)
     changeQuery('')
@@ -613,9 +709,14 @@ function MailClient({
   }
   const onFrameKey = useCallback((e: KeyboardEvent) => void handleKey(e, true), [handleKey])
 
-  const hasRole = (r: MoveTarget) => r === 'inbox' || boxes.some((b) => b.role === r)
+  /** The selected message's account has a folder for this (Gmail's All Mail counts as Archive). */
+  const hasRole = (r: MoveTarget) =>
+    r === 'inbox' ||
+    boxesOf(messageAccount).some((b) => b.role === r || (r === 'archive' && b.role === 'all'))
   const canAct = selected !== null
-  const inDrafts = role === 'drafts' || (message?.draft ?? false)
+  const inDrafts =
+    (selected ? roleOf(selected.account, selected.mailbox) === 'drafts' : role === 'drafts') ||
+    (message?.draft ?? false)
   const searching = results !== null
   const emptyFolder = !searching && list !== null && list.messages.length === 0
 
@@ -637,11 +738,14 @@ function MailClient({
       ? `Couldn’t check at ${timeNow(problem.at)}. Showing downloaded mail.`
       : checkedAt
         ? `Updated ${timeNow(checkedAt)}`
-        : email
+        : several
+          ? `${accounts.length} accounts`
+          : (accounts[0]?.email ?? '')
 
   const serverSearch = (
     <ServerSearch
       mailbox={boxName}
+      where={unified ? 'every account’s server' : serviceName(accountById(view.account))}
       busy={server.busy}
       done={server.done}
       error={server.error}
@@ -779,13 +883,15 @@ function MailClient({
       </ToolbarActions>
 
       <MailboxList
+        accounts={accounts}
         mailboxes={boxes}
-        current={current}
+        current={view}
         onSelect={selectMailbox}
-        onRefresh={() => void refresh(current)}
+        onRefresh={() => void refresh(view)}
         refreshing={refreshing}
         compact={compact}
         footer={footer}
+        problems={accountProblems}
       />
 
       <section
@@ -807,7 +913,7 @@ function MailClient({
             <p role="alert" className="min-w-0 flex-1 text-danger-text">
               {problem.text}
             </p>
-            <Button onClick={() => void refresh(current)} disabled={refreshing} className="shrink-0">
+            <Button onClick={() => void refresh(view)} disabled={refreshing} className="shrink-0">
               Try again
             </Button>
           </div>
@@ -816,13 +922,14 @@ function MailClient({
           <FirstSync progress={progress} />
         ) : (
           <MessageList
-            label={searching ? 'Search results' : `${boxName} messages`}
+            label={searching ? 'Search results' : `${viewName} messages`}
             messages={visible}
             selected={selectedKey}
             onSelect={setSelected}
             onKey={onPaneKey}
             showRecipients={!searching && (role === 'sent' || role === 'drafts')}
             showMailbox={searching ? nameOf : undefined}
+            accountOf={unified || searching ? accountOf : undefined}
             onEndReached={() => {
               if (!searching) void loadMore()
             }}
@@ -911,7 +1018,7 @@ function MailClient({
 
       {compose && (
         <ComposeSheet
-          from={email}
+          accounts={accounts}
           initial={compose}
           onClose={() => setCompose(null)}
           onSent={(warning) => {
@@ -926,6 +1033,12 @@ function MailClient({
       {showKeys && <ShortcutsSheet onClose={() => setShowKeys(false)} />}
     </div>
   )
+}
+
+/** What the user calls an account's mail service: "iCloud", "Gmail", or its server. */
+function serviceName(a: MailAccount | undefined): string {
+  if (!a) return 'the server'
+  return a.provider === 'other' ? a.imap.host : PROVIDERS[a.provider].name
 }
 
 function FirstSync({ progress }: { progress: MailRefreshProgress | null }) {
@@ -946,7 +1059,7 @@ function FirstSync({ progress }: { progress: MailRefreshProgress | null }) {
       <p className="mt-2 text-[12px] leading-snug text-ink-2">
         {progress?.total
           ? `${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()}. Ordo downloads the list of messages first. Each message downloads when you open it.`
-          : 'Connecting to iCloud…'}
+          : 'Connecting…'}
       </p>
     </div>
   )
@@ -954,6 +1067,8 @@ function FirstSync({ progress }: { progress: MailRefreshProgress | null }) {
 
 function ServerSearch(props: {
   mailbox: string
+  /** Whose server: "iCloud", an account's name, or every account's. */
+  where: string
   busy: boolean
   done: boolean
   error?: string
@@ -962,10 +1077,12 @@ function ServerSearch(props: {
   return (
     <div className="flex flex-col items-center gap-1.5 px-4 py-4 text-center">
       {props.done ? (
-        <p className="text-[12px] text-ink-2">Searched all of {props.mailbox} on iCloud.</p>
+        <p className="text-[12px] text-ink-2">
+          Searched all of {props.mailbox} on {props.where}.
+        </p>
       ) : (
         <Button icon={<Search size={13} />} onClick={props.onSearch} disabled={props.busy}>
-          {props.busy ? 'Searching iCloud…' : `Search all of ${props.mailbox} on iCloud`}
+          {props.busy ? `Searching ${props.where}…` : `Search all of ${props.mailbox} on ${props.where}`}
         </Button>
       )}
       {props.error && <p className="text-[12px] text-danger-text">{props.error}</p>}

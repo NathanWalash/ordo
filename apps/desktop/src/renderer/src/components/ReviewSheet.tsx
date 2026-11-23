@@ -39,6 +39,8 @@ interface Props {
   purpose?: 'clear' | 'unsubscribe'
   /** Whether Move to Trash starts on for each sender. Defaults to on for a clean-up, off to unsubscribe. */
   initialTrash?: boolean
+  /** Which account's inbox to clear: one, or every account with mail from these senders (the default). */
+  account?: string
 }
 
 type Choice = { unsubscribe: boolean; trash: boolean }
@@ -66,6 +68,7 @@ export function ReviewSheet({
   onChanged,
   purpose = 'clear',
   initialTrash = purpose === 'clear',
+  account,
 }: Props) {
   const senders = selected.filter((s) => s.category !== 'people')
   const single = purpose === 'unsubscribe'
@@ -122,6 +125,7 @@ export function ReviewSheet({
     const off = window.ordo.cleanup.onProgress(setProgress)
     try {
       const res = await window.ordo.cleanup.run({
+        ...(account && { account }),
         senders: senders.map((s) => ({
           address: s.address,
           ...choices[s.address]!,
@@ -351,7 +355,7 @@ function ReviewRow({
           <span className="min-w-0 break-all select-text">
             {mailto.offDomain && `Email unsubscribe to a different domain (${mailto.message.to}). `}
             Sends “<span className="text-ink">{mailto.message.subject}</span>” to{' '}
-            <span className="text-ink">{mailto.message.to}</span> from your iCloud address.
+            <span className="text-ink">{mailto.message.to}</span> from your address its emails come to.
           </span>
         </p>
       )}

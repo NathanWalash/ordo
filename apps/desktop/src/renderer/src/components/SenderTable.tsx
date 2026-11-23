@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react'
+import type { MailAccount } from '@ordo/shared'
+import { AccountChip } from './accounts/AccountChip'
 import {
   CircleCheck,
   ExternalLink,
@@ -27,6 +29,8 @@ export type ListedSender = CategorisedSender & { sortedBy?: 'rules' | 'ai'; conf
 
 interface Props {
   senders: ListedSender[]
+  /** Several accounts: each sender's accounts by id, to show which inboxes its mail is in. */
+  accountOf?: (id: string) => MailAccount | undefined
   /** Shown above the makeup bar, e.g. a sample-data notice. */
   banner?: ReactNode
   /** Right side of the summary line, e.g. a "Scan again" button. */
@@ -41,7 +45,7 @@ interface Props {
 }
 
 /** Inbox makeup, category filters and a selectable sender list. People can never be selected. */
-export function SenderTable({ senders, banner, actions, onReview, onUnsubscribe }: Props) {
+export function SenderTable({ senders, accountOf, banner, actions, onReview, onUnsubscribe }: Props) {
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
@@ -150,8 +154,15 @@ export function SenderTable({ senders, banner, actions, onReview, onUnsubscribe 
                         </span>
                       )}
                     </div>
-                    <div className="truncate pl-4 text-[12px] text-ink-2">
-                      {person ? "Someone you've written to. Never included in bulk actions." : s.address}
+                    <div className="flex min-w-0 items-center gap-2 pl-4 text-[12px] text-ink-2">
+                      <span className="truncate">
+                        {person ? "Someone you've written to. Never included in bulk actions." : s.address}
+                      </span>
+                      {accountOf &&
+                        s.accounts?.map((id) => {
+                          const a = accountOf(id)
+                          return a ? <AccountChip key={id} account={a} className="shrink-0" /> : null
+                        })}
                     </div>
                   </td>
                   <td className="pr-4 text-right tabular-nums">{s.count.toLocaleString()}</td>
@@ -207,7 +218,7 @@ function Chip(props: { active: boolean; onClick: () => void; children: ReactNode
 const METHOD = {
   'one-click': { icon: Zap, about: 'One-click: Ordo unsubscribes for you' },
   link: { icon: ExternalLink, about: 'Web page: opens the sender’s unsubscribe page' },
-  mailto: { icon: Mail, about: 'Email: Ordo sends an unsubscribe email from your iCloud address' },
+  mailto: { icon: Mail, about: 'Email: Ordo sends an unsubscribe email from the address it came to' },
 } as const
 
 /**

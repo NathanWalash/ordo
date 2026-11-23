@@ -933,6 +933,8 @@ function EmailPreview({ email }: { email: CardEmail }) {
           <dt className="w-14 shrink-0 font-medium text-ink">From</dt>
           <dd className="min-w-0 flex-1">
             <Breakable address={email.from} />
+            {/* Which of the user's accounts it goes from, so a work reply never leaves from home. */}
+            {email.fromAccount && <span className="text-ink-2"> ({email.fromAccount})</span>}
           </dd>
         </div>
         <Recipients label="To" list={email.to} />

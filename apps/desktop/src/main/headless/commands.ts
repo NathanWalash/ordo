@@ -98,9 +98,7 @@ export interface OrdoServices {
     /** The newest move that can still be undone in this process, or null. */
     lastMove(): LastMove | null
     undoMove(undoId: number): Promise<MailOutcome<{ restored: number }>>
-    saveDraft(
-      input: ComposeInput,
-    ): Promise<
+    saveDraft(input: ComposeInput): Promise<
       MailOutcome<{
         draft: { account?: string; mailbox: string; uid: number } | null
         attachments: unknown[]

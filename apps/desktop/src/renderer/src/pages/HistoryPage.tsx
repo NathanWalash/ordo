@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { History, TriangleAlert, Undo2 } from 'lucide-react'
-import type { CleanupSummary, UndoOutcome } from '@ordo/shared'
+import type { CleanupSummary, MailAccount, UndoOutcome } from '@ordo/shared'
+import { AccountChip } from '../components/accounts/AccountChip'
 import { Button } from '../components/Button'
 import { CleanupSenderRows, plural, resultSentence, undoSentence } from '../components/CleanupResults'
 import { EmptyState } from '../components/EmptyState'
@@ -10,6 +11,15 @@ export function HistoryPage() {
   const [cleanups, setCleanups] = useState<CleanupSummary[] | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
   const [messages, setMessages] = useState<Record<number, UndoOutcome>>({})
+  // With several accounts, each clean-up says which account it cleared.
+  const [accounts, setAccounts] = useState<MailAccount[]>([])
+  useEffect(() => {
+    let live = true
+    void window.ordo.accounts.list().then((a) => live && setAccounts(a))
+    return () => {
+      live = false
+    }
+  }, [])
 
   const load = useCallback(async () => setCleanups(await window.ordo.cleanup.history()), [])
   useEffect(() => {
@@ -49,6 +59,7 @@ export function HistoryPage() {
         <CleanupCard
           key={c.id}
           cleanup={c}
+          account={accounts.length > 1 ? accounts.find((a) => a.id === c.account) : undefined}
           busy={busy === c.id}
           disabled={busy !== null}
           message={messages[c.id]}
@@ -61,6 +72,7 @@ export function HistoryPage() {
 
 function CleanupCard(props: {
   cleanup: CleanupSummary
+  account?: MailAccount
   busy: boolean
   disabled: boolean
   message?: UndoOutcome
@@ -78,8 +90,9 @@ function CleanupCard(props: {
     <section aria-labelledby={titleId} className="overflow-hidden rounded-xl border border-sep bg-content">
       <header className="flex items-center justify-between gap-3 border-b border-sep bg-hover/50 px-4 py-2.5">
         <div className="min-w-0">
-          <h2 id={titleId} className="text-[13px] font-semibold">
+          <h2 id={titleId} className="flex items-center gap-2 text-[13px] font-semibold">
             {when}
+            {props.account && <AccountChip account={props.account} className="font-normal text-ink-2" />}
           </h2>
           <p className="text-[12px] text-ink-2">
             {plural(c.senders.length, 'sender')}. {resultSentence(c)}

@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Paperclip, PenLine, X } from 'lucide-react'
 import { COMPOSE_LIMITS, parseAddressList, type AttachmentInfo } from '@ordo/mail-core'
-import type { ComposeInput, MessageRef, PickedFile } from '@ordo/shared'
+import type { ComposeInput, MailAccount, MessageRef, PickedFile } from '@ordo/shared'
+import { AccountDot } from '../accounts/AccountChip'
 import { Button } from '../Button'
 import { Sheet } from '../Sheet'
 import { decodedSize, fileSize } from './format'
@@ -10,6 +11,9 @@ import { RecipientField, recipientsText, toRecipients, type Recipients } from '.
 /** What the compose sheet starts with. */
 export interface ComposeDraft {
   title: string
+  /** The account to send from. A reply or a draft being finished can't change it (`lockAccount`). */
+  account?: string
+  lockAccount?: boolean
   to: string
   cc: string
   bcc: string
@@ -24,7 +28,8 @@ export interface ComposeDraft {
 }
 
 interface Props {
-  from: string
+  /** Every account, for the From picker. */
+  accounts: MailAccount[]
   initial: ComposeDraft
   onClose: () => void
   /** Sent; `warning` if something after sending didn't work. */
@@ -55,7 +60,15 @@ function check(fields: Record<Field, string>, needRecipients: boolean): Errors {
  * Write, reply or forward. Plain text. Nothing is sent until you click Send (or press ⌘Return):
  * Return in a field doesn't send, and closing with changes asks whether to keep a draft.
  */
-export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props) {
+export function ComposeSheet({ accounts, initial, onClose, onSent, onSaved }: Props) {
+  const [fromId, setFromId] = useState(() =>
+    initial.account && accounts.some((a) => a.id === initial.account)
+      ? initial.account
+      : (accounts[0]?.id ?? ''),
+  )
+  const from = accounts.find((a) => a.id === fromId)
+  // A draft lives in its account's Drafts: changing From after saving starts a new one there.
+  const canPick = accounts.length > 1 && !initial.lockAccount
   const [recipients, setRecipients] = useState<Record<Field, Recipients>>(() => ({
     to: toRecipients(initial.to),
     cc: toRecipients(initial.cc),
@@ -99,6 +112,7 @@ export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props)
   const fields = { to: text('to'), cc: text('cc'), bcc: text('bcc') }
 
   const input = (): ComposeInput => ({
+    ...(fromId && { account: fromId }),
     ...fields,
     subject,
     body,
@@ -107,7 +121,7 @@ export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props)
     ...(carried?.attachments.length && {
       forward: { ...carried.ref, parts: carried.attachments.map((a) => a.part) },
     }),
-    ...(draft && { draft }),
+    ...(draft && (draft.account === undefined || draft.account === fromId) && { draft }),
   })
 
   const touch = () => {
@@ -210,7 +224,11 @@ export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props)
   return (
     <Sheet
       title={initial.title}
-      subtitle={`From ${from}`}
+      subtitle={
+        canPick
+          ? 'Choose who it’s from below.'
+          : `From ${from?.email ?? ''}${accounts.length > 1 && from ? ` (${from.label})` : ''}`
+      }
       icon={<PenLine size={20} />}
       width={640}
       fit
@@ -255,6 +273,31 @@ export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props)
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3" onKeyDown={onKeyDown}>
         <div className="grid grid-cols-[56px_1fr] items-start gap-x-3 gap-y-2">
+          {canPick && (
+            <>
+              <label htmlFor={`${bodyId}-from`} className="pt-1.5 text-right text-[13px] text-ink-2">
+                From
+              </label>
+              <div className="flex min-w-0 items-center gap-2">
+                {from && <AccountDot color={from.color} />}
+                <select
+                  id={`${bodyId}-from`}
+                  value={fromId}
+                  onChange={(e) => {
+                    setFromId(e.target.value)
+                    touch()
+                  }}
+                  className="h-7 min-w-0 flex-1 rounded-md border border-sep bg-field px-1.5 text-[13px] text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label} – {a.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
           <RecipientField
             label="To"
             value={recipients.to}
@@ -349,7 +392,7 @@ export function ComposeSheet({ from, initial, onClose, onSent, onSaved }: Props)
         )}
         {tooBig && (
           <p className="shrink-0 text-[12px] text-danger-text">
-            The attachments add up to {fileSize(total)}. iCloud Mail can’t send more than about{' '}
+            The attachments add up to {fileSize(total)}. Most mail services can’t send more than about{' '}
             {fileSize(COMPOSE_LIMITS.attachmentBytes)} by email.
           </p>
         )}

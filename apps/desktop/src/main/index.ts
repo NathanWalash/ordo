@@ -10,7 +10,7 @@ import {
   shell,
   systemPreferences,
 } from 'electron'
-import { IPC, type AppInfo, type ConnectInput } from '@ordo/shared'
+import { IPC, SendersInputSchema, type AppInfo, type ConnectInput } from '@ordo/shared'
 import * as mail from './mail'
 import { clearCalendar, closeCalendar, registerCalendarIpc, startCalendarPolling } from './calendar'
 import { registerCleanupIpc } from './cleanup'
@@ -173,7 +173,9 @@ function startApp(): void {
   registerAccountsIpc(() => {
     if (!loadAccount()) clearCalendar()
   })
-  ipcMain.handle(IPC.sendersList, () => sendersWithAi())
+  ipcMain.handle(IPC.sendersList, (_e, input: unknown) =>
+    sendersWithAi(SendersInputSchema.safeParse(input ?? {}).data?.account),
+  )
   registerCalendarIpc()
   registerCleanupIpc()
   registerMailIpc()

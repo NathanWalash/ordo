@@ -15,7 +15,11 @@ import {
  */
 
 /** Short and plain, so it's safe anywhere (file names, SQL defaults, IPC). */
-export const AccountIdSchema = z.string().regex(/^[a-z0-9-]{1,40}$/, 'Not an account')
+export const AccountIdSchema = z
+  .string()
+  .regex(/^[a-z0-9-]{1,40}$/, 'Not an account')
+  // `all` means every account wherever an account can be named.
+  .refine((id) => id !== 'all', 'Not an account')
 export type AccountId = z.infer<typeof AccountIdSchema>
 
 /** The account a single-account install migrates to: its cache already belongs to this id. */
@@ -212,3 +216,8 @@ export function fromAccount(
   if (choice.original) return known(choice.original) ?? null
   return known(choice.picked) ?? known(choice.viewing) ?? accounts[0]?.id ?? null
 }
+
+/** Which inbox's senders Unclutter lists: one account's, or every account's (`all`, the default). */
+export const SendersInputSchema = z.object({
+  account: z.union([AccountIdSchema, z.literal('all')]).optional(),
+})

@@ -119,8 +119,13 @@ export interface OrdoApi {
     onProgress(listener: (p: ScanProgress) => void): () => void
   }
   senders: {
-    /** Senders sorted by the rules, plus any earlier AI answers when AI sorting is on. */
-    list(): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
+    /**
+     * Senders sorted by the rules, plus any earlier AI answers when AI sorting is on: every
+     * account's inbox together, or one account's.
+     */
+    list(input?: {
+      account?: string
+    }): Promise<(CategorisedSender & { sortedBy?: 'rules' | 'ai'; confidence?: number })[]>
   }
   money: MoneyApi
   moneyMemory: MoneyMemoryApi

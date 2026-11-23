@@ -162,14 +162,16 @@ export function App() {
             )}
             {route === 'mail/unclutter' && (
               <UnclutterPage
-                key={account?.connected ? account.email : 'sample'}
+                key={account?.connected ? account.accounts.map((a) => a.id).join() : 'sample'}
                 account={account}
                 onConnect={() => setConnecting(true)}
                 onScanned={() => void refreshAccount()}
                 onOpenSettings={() => setRoute('settings')}
               />
             )}
-            {route === 'mail/history' && <HistoryPage key={account?.connected ? account.email : 'none'} />}
+            {route === 'mail/history' && (
+              <HistoryPage key={account?.connected ? account.accounts.map((a) => a.id).join() : 'none'} />
+            )}
             {route === 'calendar' && <CalendarPage account={account} onConnect={() => setConnecting(true)} />}
             {route === 'boards' && <BoardsPage onNavigate={setRoute} />}
             {route === 'money/finances' && (
@@ -182,6 +184,7 @@ export function App() {
                 account={account}
                 onConnect={() => setConnecting(true)}
                 onDisconnect={() => void disconnect()}
+                onAccountsChanged={() => void refreshAccount()}
               />
             )}
           </div>

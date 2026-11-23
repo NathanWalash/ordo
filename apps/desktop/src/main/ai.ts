@@ -119,8 +119,8 @@ export async function resolveModel(ai: AiSettings): Promise<string | undefined> 
  * The sender list, with earlier AI answers applied from the cache when AI sorting is on.
  * Never asks a model; if anything goes wrong it falls back to the rules alone.
  */
-export async function sendersWithAi() {
-  const list = senders()
+export async function sendersWithAi(account?: string) {
+  const list = senders(account)
   const ai = readSettings(settingsFile()).ai
   if (ai.provider === 'none' || !ai.sortSenders || !allowed(ai, ai.provider)) return list
   try {

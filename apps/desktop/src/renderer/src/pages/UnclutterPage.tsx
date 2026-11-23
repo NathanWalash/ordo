@@ -74,15 +74,29 @@ function LiveUnclutter({
   // Bumped after a clean-up so the table starts with nothing selected.
   const [generation, setGeneration] = useState(0)
 
-  const load = useCallback(async () => setSenders(await window.ordo.senders.list()), [])
+  // Several accounts: every account's senders together, or one account's.
+  const several = account.accounts.length > 1
+  const [scope, setScope] = useState<string>('all')
+  const accountOf = useCallback((id: string) => account.accounts.find((a) => a.id === id), [account.accounts])
+  const load = useCallback(
+    async () => setSenders(await window.ordo.senders.list({ account: scope })),
+    [scope],
+  )
   useEffect(() => {
     let live = true
-    void window.ordo.senders.list().then((s) => live && setSenders(s))
     void window.ordo.settings.get().then((s) => live && setAi(s.ai))
     return () => {
       live = false
     }
   }, [])
+  // The senders again whenever the account shown changes.
+  useEffect(() => {
+    let live = true
+    void window.ordo.senders.list({ account: scope }).then((s) => live && setSenders(s))
+    return () => {
+      live = false
+    }
+  }, [scope])
 
   const scan = async () => {
     setError(null)
@@ -148,6 +162,7 @@ function LiveUnclutter({
     <ReviewSheet
       senders={reviewing.senders}
       purpose={reviewing.purpose}
+      account={scope}
       onClose={closeSheet}
       onChanged={() => {
         // A clean-up starts the table afresh; unsubscribing from one sender keeps what's selected.
@@ -183,6 +198,7 @@ function LiveUnclutter({
         senders={senders}
         onReview={(chosen) => setReviewing({ senders: chosen, purpose: 'clear' })}
         onUnsubscribe={(s) => setReviewing({ senders: [s], purpose: 'unsubscribe' })}
+        accountOf={several && scope === 'all' ? accountOf : undefined}
         banner={
           sorting ? (
             <div
@@ -204,6 +220,21 @@ function LiveUnclutter({
         }
         actions={
           <>
+            {several && (
+              <select
+                aria-label="Account"
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+                className="h-7 rounded-md border border-sep bg-field px-1.5 text-[13px] text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              >
+                <option value="all">All accounts</option>
+                {account.accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            )}
             {(unsure > 0 || aiReady) && (
               <Button
                 icon={<Sparkles size={13} />}
@@ -244,7 +275,7 @@ function Scanning({ progress }: { progress: ScanProgress }) {
       ? 'Checking who you’ve written to, so people are never cleared by mistake.'
       : progress.total
         ? `${progress.checked.toLocaleString()} of ${progress.total.toLocaleString()} emails checked. Ordo only reads headers; nothing in your mailbox changes.`
-        : 'Connecting to iCloud…'
+        : 'Connecting…'
   return (
     <div className="px-6 pt-5" aria-live="polite">
       <div className="flex items-center justify-between gap-3">

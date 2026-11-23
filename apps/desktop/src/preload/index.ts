@@ -56,7 +56,7 @@ const api: OrdoApi = {
     },
   },
   senders: {
-    list: () => ipcRenderer.invoke(IPC.sendersList),
+    list: (input) => ipcRenderer.invoke(IPC.sendersList, input),
   },
   calendar: {
     status: () => ipcRenderer.invoke(IPC.calendarStatus),

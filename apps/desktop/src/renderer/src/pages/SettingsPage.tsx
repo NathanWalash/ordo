@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Monitor, Moon, Sun } from 'lucide-react'
 import type { AccountStatus, AiSettings as Ai, Settings, Theme } from '@ordo/shared'
-import { Button } from '../components/Button'
 import { AiSettings } from '../components/AiSettings'
 import { BackupSettings } from '../components/BackupSettings'
 import { GoogleSettings } from '../components/GoogleSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
 import { UpdateSettings } from '../components/UpdateSettings'
 import { Row, Section } from '../components/SettingsSection'
+import { AccountsSection } from '../components/accounts/AccountsSection'
 import { useAppearance } from '../appearance'
 
 const THEME_OPTIONS = [
@@ -19,11 +19,14 @@ const THEME_OPTIONS = [
 interface Props {
   account: AccountStatus | null
   onConnect: () => void
-  onDisconnect: () => void
+  /** Forget every account (kept for callers from before several accounts). */
+  onDisconnect?: () => void
+  /** Accounts were added, changed or removed. */
+  onAccountsChanged?: () => void
 }
 
-/** App preferences, grouped into sections: the account, appearance, AI and updates. */
-export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
+/** App preferences, grouped into sections: mail accounts, Google, appearance, AI and updates. */
+export function SettingsPage({ account, onConnect, onAccountsChanged }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const appearance = useAppearance()
 
@@ -48,25 +51,12 @@ export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
   return (
     <div className="mx-auto w-full max-w-2xl px-8 py-8">
       {account && (
-        <Section title="Account">
-          {account.connected ? (
-            <Row
-              label="iCloud Mail and Calendar"
-              detail={`Connected as ${account.email}. Disconnecting forgets your password and the mail Ordo has downloaded.`}
-              control={<Button onClick={onDisconnect}>Disconnect</Button>}
-            />
-          ) : (
-            <Row
-              label="iCloud Mail and Calendar"
-              detail="Not connected. You’ll need an app-specific password from account.apple.com."
-              control={
-                <Button variant="primary" onClick={onConnect}>
-                  Connect iCloud
-                </Button>
-              }
-            />
-          )}
-        </Section>
+        // Keyed by the account list, so connecting from the sheet shows the new account.
+        <AccountsSection
+          key={account.connected ? account.accounts.map((a) => a.id).join() : 'none'}
+          onConnectIcloud={onConnect}
+          onChanged={() => onAccountsChanged?.()}
+        />
       )}
       <GoogleSettings />
       <Section title="Appearance">
