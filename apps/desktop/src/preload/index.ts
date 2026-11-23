@@ -4,7 +4,6 @@ import type { CalendarSyncProgress } from '@ordo/shared'
 import { SETTINGS_IPC, type Appearance } from '@ordo/shared'
 import { AI_IPC, type AiSortProgress } from '@ordo/shared'
 import { CLEANUP_IPC, type CleanupProgress } from '@ordo/shared'
-import { GOOGLE_IPC } from '@ordo/shared'
 import { mailApi } from './mail'
 import { assistantApi } from './assistant'
 import { moneyApi } from './money'
@@ -12,6 +11,7 @@ import { moneyMemoryApi } from './money-memory'
 import { boardsApi } from './boards'
 import { updatesApi } from './updates'
 import { backupApi } from './backup'
+import { googleApi } from './google'
 
 const api: OrdoApi = {
   app: {
@@ -80,16 +80,7 @@ const api: OrdoApi = {
     updateEvent: (input) => ipcRenderer.invoke(IPC.calendarUpdateEvent, input),
     deleteEvent: (input) => ipcRenderer.invoke(IPC.calendarDeleteEvent, input),
   },
-  google: {
-    status: () => ipcRenderer.invoke(GOOGLE_IPC.googleStatus),
-    setClient: (input) => ipcRenderer.invoke(GOOGLE_IPC.googleSetClient, input),
-    connect: (input) => ipcRenderer.invoke(GOOGLE_IPC.googleConnect, input),
-    cancelConnect: () => ipcRenderer.invoke(GOOGLE_IPC.googleCancel),
-    signOut: (accountId) => ipcRenderer.invoke(GOOGLE_IPC.googleSignOut, accountId),
-    setCalendarColor: (input) => ipcRenderer.invoke(GOOGLE_IPC.googleSetColor, input),
-    feedMatches: () => ipcRenderer.invoke(GOOGLE_IPC.googleFeedMatches),
-    replaceFeed: (input) => ipcRenderer.invoke(GOOGLE_IPC.googleReplaceFeed, input),
-  },
+  google: googleApi,
   cleanup: {
     run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),
     onProgress: (listener) => {

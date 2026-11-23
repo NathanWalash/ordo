@@ -80,6 +80,7 @@ import { hostRefusal } from '@ordo/mail-core'
 import { canStoreSecrets, loadAccount } from './account'
 import { allowLoopbackHttp } from './mail'
 import { Locked, toRenderer, withWriteLock } from './writes'
+import { fromAppWindow } from './ipc-sender'
 import {
   CALENDAR_SCOPES,
   googleAuth,
@@ -1013,11 +1014,22 @@ export function registerCalendarIpc(): void {
   ipcMain.handle(IPC.calendarUpdateEvent, (_e, input: unknown) => updateEvent(input))
   ipcMain.handle(IPC.calendarDeleteEvent, (_e, input: unknown) => deleteEvent(input))
   ipcMain.handle(GOOGLE_IPC.googleStatus, () => googleStatus())
-  ipcMain.handle(GOOGLE_IPC.googleSetClient, (_e, input: unknown) => setGoogleClient(input))
-  ipcMain.handle(GOOGLE_IPC.googleConnect, (_e, input: unknown) => connectGoogle(input))
+  // Changing a Google sign-in runs only for Ordo's own page in its window (on top of the
+  // preload's user-activation check), never for content in another frame.
+  const refused = { ok: false as const, message: 'Ordo only accepts this from its own window.' }
+  ipcMain.handle(GOOGLE_IPC.googleSetClient, (e, input: unknown) =>
+    fromAppWindow(e) ? setGoogleClient(input) : refused,
+  )
+  ipcMain.handle(GOOGLE_IPC.googleConnect, (e, input: unknown) =>
+    fromAppWindow(e) ? connectGoogle(input) : { ...refused, error: 'unknown' as const },
+  )
   ipcMain.handle(GOOGLE_IPC.googleCancel, () => googleAuth().cancelSignIn())
-  ipcMain.handle(GOOGLE_IPC.googleSignOut, (_e, id: unknown) => signOutGoogle(id))
+  ipcMain.handle(GOOGLE_IPC.googleSignOut, (e, id: unknown) =>
+    fromAppWindow(e) ? signOutGoogle(id) : refused,
+  )
   ipcMain.handle(GOOGLE_IPC.googleSetColor, (_e, input: unknown) => setCalendarColor(input))
   ipcMain.handle(GOOGLE_IPC.googleFeedMatches, () => googleFeedMatches())
-  ipcMain.handle(GOOGLE_IPC.googleReplaceFeed, (_e, input: unknown) => replaceFeed(input))
+  ipcMain.handle(GOOGLE_IPC.googleReplaceFeed, (e, input: unknown) =>
+    fromAppWindow(e) ? replaceFeed(input) : refused,
+  )
 }

@@ -149,6 +149,50 @@ describe('Google calendars in the Calendar service', () => {
     expect(calendar.calendars()[0]!.syncError).toBeUndefined()
   })
 
+  it('changes a Google sign-in over IPC only for Ordo’s own page in its window', async () => {
+    const { ipcMain } = await import('electron')
+    const { GOOGLE_IPC } = await import('@ordo/shared')
+    calendar.registerCalendarIpc()
+    const handler = (channel: string) =>
+      vi.mocked(ipcMain.handle).mock.calls.find(([c]) => c === channel)![1] as (
+        e: unknown,
+        input?: unknown,
+      ) => unknown
+    const from = (url: string, parent: unknown = null) => ({ senderFrame: { url, parent }, sender: {} })
+    const app = 'file:///Applications/Ordo.app/Contents/Resources/app.asar/out/renderer/index.html'
+    const refused = { ok: false, message: 'Ordo only accepts this from its own window.' }
+    const others = [
+      from('https://evil.example/'),
+      from(app, {}),
+      from('about:srcdoc'),
+      { senderFrame: null, sender: {} },
+    ]
+    for (const evil of others) {
+      expect(
+        await handler(GOOGLE_IPC.googleSetClient)(evil, { clientId: '999-x.apps.googleusercontent.com' }),
+      ).toEqual(refused)
+      expect(await handler(GOOGLE_IPC.googleSignOut)(evil, fake.account.sub)).toEqual(refused)
+      expect(await handler(GOOGLE_IPC.googleReplaceFeed)(evil, { feedId: 'feed:1' })).toEqual(refused)
+      expect(await handler(GOOGLE_IPC.googleConnect)(evil, undefined)).toMatchObject({
+        ok: false,
+        message: refused.message,
+      })
+    }
+    // Nothing changed: same client, same account.
+    expect(calendar.googleStatus().client?.clientId).toBe(fake.clientId)
+    expect(calendar.googleStatus().accounts).toHaveLength(1)
+    // From the app's own page it goes through (here, saving the same client again).
+    expect(
+      await handler(GOOGLE_IPC.googleSetClient)(from(`${app}#/settings`), {
+        clientId: fake.clientId,
+        clientSecret: fake.clientSecret,
+      }),
+    ).toEqual({ ok: true })
+    expect(await handler(GOOGLE_IPC.googleStatus)(from('https://evil.example/'))).toMatchObject({
+      accounts: [{ email: ME }],
+    })
+  })
+
   it('keeps a colour of your choosing', () => {
     calendar.setCalendarColor({ calendarId: PRIMARY, color: '#FF0000' })
     expect(calendar.calendars()[0]!.color).toBe('#ff0000')
