@@ -1,7 +1,12 @@
-# Google Calendar in Ordo
+# Google Calendar and Gmail in Ordo
 
 Ordo can sign in to a Google account (a personal Gmail account or a Google Workspace work account)
-and show its calendars next to iCloud's and the ones added by link. Unlike a calendar added by its
+to show its calendars, and to read and send its mail in Mail without an app password ("Sign in with
+Google"; see [Gmail with Sign in with Google](#gmail-with-sign-in-with-google)). Both use the same
+OAuth client, set up once.
+
+For Calendar, Ordo shows the account's calendars next to iCloud's and the ones added by link. Unlike
+a calendar added by its
 secret iCal link (or Google added to Apple Calendar as a subscription), this connection is:
 
 - **Near live.** Ordo asks Google for changes every few minutes while it's open, and straight away
@@ -138,7 +143,109 @@ only `calendar`, `calendar.readonly`, `calendar.calendarlist` or `calendar.calen
 [calendarList.list](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/list)),
 and the full `calendar` scope would also let Ordo change calendars themselves and who they're shared
 with ([Calendar API scopes](https://developers.google.com/workspace/calendar/api/auth)). Calendar
-scopes are _sensitive_; Gmail's `https://mail.google.com/` is _restricted_ (see "For developers").
+scopes are _sensitive_; Gmail's `https://mail.google.com/` is _restricted_ (see below). Ordo asks
+for the mail scope only when you add a Gmail account with Sign in with Google, and the Calendar ones
+only when you connect Calendar.
+
+## Gmail with Sign in with Google
+
+In **Settings → Accounts → Add account… → Gmail**, **Sign in with Google** (the default) adds a
+Gmail account without an app password. It works for accounts that can't have app passwords, such as
+most work and school accounts, if their admin allows it (see below).
+
+1. Set up your OAuth client first (steps 1 to 4 above; you don't need the Calendar API for Mail).
+   Without one, the sheet says so and takes you to **Settings → Google**.
+2. Choose the Google account: one already connected for Calendar, or **Another Google account**.
+3. Your browser opens Google's consent page. Allow Ordo to "read, compose, send and permanently
+   delete all your email from Gmail": that's Google's one scope for IMAP and SMTP, there's no
+   narrower one. Ordo then signs in to Gmail with the new token and saves the account only if that
+   works. Its address comes from Google.
+
+What it asks for:
+
+| You start from                      | Google's consent asks for                                                                                                                                                           |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A new sign-in                       | `openid`, `email` and `https://mail.google.com/` only. Calendar stays off until you choose **Add Calendar** in Settings → Google.                                                   |
+| An account connected for Calendar   | Everything it already allows, plus `https://mail.google.com/`, for that account: Google doesn't do incremental authorization for desktop apps, so the whole set is asked for again. |
+| An account that already allows mail | Nothing: Ordo uses it straight away.                                                                                                                                                |
+
+Gmail is reached at `imap.gmail.com:993` and `smtp.gmail.com:465`, both TLS from the start, as Google
+lists them ([IMAP, POP and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp));
+`smtp.gmail.com:587` with STARTTLS is the alternative. A Google token is only ever sent to those two
+servers: an account that signs in with Google always uses Gmail's preset, whatever `accounts.json`
+says. Folders work as with an app password: special folders by their SPECIAL-USE flags, and your
+labels as folders (see [mail.md](mail.md#gmail)).
+
+### When Google stops accepting the sign-in
+
+Ordo asks Google for a fresh access token (they last about an hour) whenever it connects. If Gmail
+refuses one anyway, Ordo refreshes it and tries once more, never more than that, and never with
+anything else (there's no password to fall back to). If Google itself refuses (you removed Ordo
+from [Third-party connections](https://myaccount.google.com/connections), changed your password,
+a week passed with an External app in Testing, or the account never gave mail access), the account
+says why in Settings → Accounts and Mail, checks less often (as with a wrong password), and offers
+**Sign in again**. That opens Google's consent for the same account (with its address filled in);
+signing in as a different account is refused.
+
+### Removing the account, and signing out of Google
+
+- **Removing the mail account** (Settings → Accounts → Remove…) clears its downloaded mail as for any
+  account, but leaves the Google sign-in in Settings → Google, because Calendar may use it. The mail
+  permission stays granted until you sign out there (or remove Ordo in your Google account); adding
+  the account again then needs no new consent.
+- **Signing out of Google** (Settings → Google → Sign out) revokes Ordo's access, which ends the
+  sign-in for Mail too. So when mail accounts use it, Ordo asks first, listing them, and removes them
+  as Remove… does (downloaded mail cleared, nothing changed in Gmail). Without that confirmation the
+  main process refuses to sign out.
+
+### Restricted scope: what it means for your OAuth client
+
+`https://mail.google.com/` is a **restricted** scope
+([Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)). With your own
+client (as Ordo needs), this is what each audience means:
+
+- **Internal** or **Personal**: no verification, no warning screen, no seven-day limit. Best if you
+  can use one.
+- **External, Testing**: works for the test users you list (up to 100), after a warning screen.
+  Refresh tokens expire after seven days, so Gmail asks you to **Sign in again** every week
+  ([Using OAuth 2.0](https://developers.google.com/identity/protocols/oauth2)). Google also expires
+  tokens with Gmail scopes when you change your password, and after six months unused.
+- **External, In production, unverified**: the "Google hasn't verified this app" screen (choose
+  _Advanced_ and continue) and a lifetime cap of 100 users
+  ([Unverified apps](https://support.google.com/cloud/answer/7454865)). Restricted-scope verification
+  (and its security assessment) is for apps offered to the public; personal use (you, or a few people
+  you know) is exempt
+  ([Restricted scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)).
+
+**The Gmail API doesn't need turning on for this, as far as Google documents.** Ordo doesn't call the
+Gmail API: it uses IMAP and SMTP with the XOAUTH2 mechanism. Google's pages on that
+([IMAP, POP and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp) and
+[XOAUTH2](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol)) only say the scope
+needed is `https://mail.google.com/`, and don't mention enabling any API. We couldn't find Google
+saying either way, so if Gmail refuses a fresh token with no other explanation, enabling the Gmail API
+in **APIs & Services › Library** is a harmless thing to try.
+
+You can add `https://mail.google.com/` under **Data Access** in the Google Auth Platform to see it
+listed as restricted; it isn't required for signing in.
+
+### Google Workspace: what admins can block
+
+On top of the app access controls described in step 1, a Workspace admin can:
+
+- **Turn IMAP off** for users: **Admin console › Apps › Google Workspace › Gmail › End User Access ›
+  POP and IMAP access**, "Enable IMAP access for all users" (per organisational unit). Then Gmail
+  refuses Ordo's sign-in even with a valid token, and Ordo says your admin may have turned IMAP off.
+- **Allow only some mail apps:** in the same setting, "Restrict which mail clients users can use
+  (OAuth mail clients only)" with a list of OAuth client IDs. Ask your admin to add **your** client ID
+  (Ordo has none of its own).
+  ([Turn POP and IMAP on and off for users](https://support.google.com/a/answer/105694))
+- **Restrict Gmail for third-party apps:** under **Security › Access and data control › API controls ›
+  Manage Google Services**, Gmail can be set to Restricted; `https://mail.google.com/` is one of its
+  high-risk scopes, and untrusted apps then can't use it. Trusting your client ID (as for Calendar)
+  allows it ([Control which apps access Google Workspace data](https://support.google.com/a/answer/7281227)).
+
+Personal Gmail accounts have IMAP on all the time: Google removed the setting in January 2025
+([Gmail IMAP settings](https://support.google.com/mail/answer/7126229)).
 
 ## How syncing works
 
@@ -184,31 +291,38 @@ reminders shows no alert in Ordo's editor (the reminder still happens in Google)
 
 - Your refresh token and client secret are encrypted with the OS keychain (Electron `safeStorage`)
   in `google.json` in Ordo's profile folder. Access tokens stay in memory and last about an hour.
-- Ordo only talks to `oauth2.googleapis.com` and `www.googleapis.com` (and opens
-  `accounts.google.com` in your browser). Every request goes through an allow-list that refuses any
-  other host, plain http and redirects. The browser comes back to a one-time listener on
+- For sign-in and Calendar, Ordo only talks to `oauth2.googleapis.com` and `www.googleapis.com` (and
+  opens `accounts.google.com` in your browser). Every request goes through an allow-list that refuses
+  any other host, plain http and redirects. Mail goes to `imap.gmail.com` and `smtp.gmail.com` only,
+  over TLS; the access token never goes anywhere else, and never to the window.
+- A Gmail account that signs in with Google keeps no secret in `accounts.json`: just which Google
+  account it uses (Google's account id). The tokens stay in `google.json`. The browser comes back to a one-time listener on
   `127.0.0.1` that checks a random `state` value and uses PKCE, as Google recommends for desktop apps
   ([OAuth for desktop apps](https://developers.google.com/identity/protocols/oauth2/native-app)).
-- **Sign out** revokes Ordo's access at Google and deletes the account and its cached events. You can
+- **Sign out** revokes Ordo's access at Google and deletes the account and its cached events (and,
+  once you confirm, the mail accounts that use it). You can
   also remove Ordo at any time from your Google account's
   [Third-party connections](https://myaccount.google.com/connections) page; Ordo then asks you to sign
   in again.
 
 ## Troubleshooting
 
-| What you see                                                  | What to do                                                                                                                                                                   |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Google needs you to sign in to … again" every week           | Your client is External in Testing: refresh tokens last seven days. Click **Sign in again**, or switch to Internal/Personal, or publish the app (see step 1).                |
-| "Your Google Workspace administrator doesn't allow this app"  | `admin_policy_enforced` (or `org_internal` for someone else's Internal app). Ask your admin to trust your client ID, or create the client inside your Workspace as Internal. |
-| "The Google Calendar API isn't turned on…"                    | Enable the Google Calendar API in your project (step 2), wait a minute, sync again.                                                                                          |
-| Google says access is blocked because the app is being tested | An External app in Testing, signed in with an account that isn’t a test user. Add it under **Audience › Test users**.                                                        |
-| "Google didn't recognise the OAuth client ID or secret"       | Copy them again from **Clients**; make sure the client type is **Desktop app**. Changing the client ID signs every account out.                                              |
-| "Ordo needs every permission on Google's screen…"             | You unticked a permission. Connect again and leave both ticked.                                                                                                              |
-| A calendar shows a warning icon                               | Hover it for the reason. Busy or limited: Ordo retries on its own.                                                                                                           |
+| What you see                                                   | What to do                                                                                                                                                                   |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Google needs you to sign in to … again" every week            | Your client is External in Testing: refresh tokens last seven days. Click **Sign in again**, or switch to Internal/Personal, or publish the app (see step 1).                |
+| "Your Google Workspace administrator doesn't allow this app"   | `admin_policy_enforced` (or `org_internal` for someone else's Internal app). Ask your admin to trust your client ID, or create the client inside your Workspace as Internal. |
+| "The Google Calendar API isn't turned on…"                     | Enable the Google Calendar API in your project (step 2), wait a minute, sync again.                                                                                          |
+| Google says access is blocked because the app is being tested  | An External app in Testing, signed in with an account that isn’t a test user. Add it under **Audience › Test users**.                                                        |
+| "Google didn't recognise the OAuth client ID or secret"        | Copy them again from **Clients**; make sure the client type is **Desktop app**. Changing the client ID signs every account out.                                              |
+| "Ordo needs every permission on Google's screen…"              | You unticked a permission. Connect again and leave both ticked.                                                                                                              |
+| A calendar shows a warning icon                                | Hover it for the reason. Busy or limited: Ordo retries on its own.                                                                                                           |
+| A Gmail account says "Google stopped accepting Ordo's sign-in" | Choose **Sign in again** on its row in Settings → Accounts. Every week: your client is External in Testing (see step 1).                                                     |
+| "Gmail didn't accept Ordo's Google sign-in"                    | Google gave a fresh token and Gmail still refused it: for a work account, IMAP may be off or limited to some mail apps (see Workspace above). Otherwise sign in again.       |
+| "… hasn't given Ordo permission to read and send mail"         | The account's grant doesn't include mail (you unticked it, or it was connected for Calendar only). Choose **Sign in again** and leave every box ticked.                      |
 
 ## For developers
 
-### Tokens for other features (Gmail next)
+### Tokens for other features (Calendar and Gmail)
 
 The Google module lives in `apps/desktop/src/main/google/`:
 
@@ -233,24 +347,37 @@ getGoogleAccessToken(accountId: string, scopes: readonly string[], options?: { r
 requestGoogleScopes(accountId: string, extra: readonly string[]): Promise<GoogleAccountInfo>
 ```
 
+### How Gmail uses it
+
 Gmail over IMAP and SMTP needs `https://mail.google.com/` ("The scope for IMAP, POP, and SMTP access
 is `https://mail.google.com/`") and the SASL XOAUTH2 mechanism: send
 `base64("user=" + email + "\x01auth=Bearer " + accessToken + "\x01\x01")` with
 `AUTHENTICATE XOAUTH2` (IMAP) or `AUTH XOAUTH2` (SMTP). On failure the server sends a base64 JSON
 challenge and the client must answer with an empty line
-([XOAUTH2 protocol](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol)). `imapflow`
-(`auth: { user, accessToken }`) and `nodemailer` (`auth: { type: 'OAuth2', user, accessToken }`) both accept an access token for this. On a 401/`AUTHENTICATIONFAILED`,
-call `getGoogleAccessToken(id, scopes, { refresh: true })` once and retry. The Gmail API itself doesn't
-need to be enabled for IMAP/SMTP as far as Google's documentation says (it doesn't mention it); check
-when building it.
+([XOAUTH2 protocol](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol)).
 
-`https://mail.google.com/` is a **restricted** scope
-([Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)). A public app
-asking for it needs restricted-scope verification, and a security assessment only if restricted data
-is stored on or sent through servers; personal use, internal apps and development are exempt
-([Restricted scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)).
-With each user's own client (Internal, Personal, or External in Testing) none of that applies, but the
-Testing seven-day expiry still does.
+- `AccountAuth` has `{ kind: 'oauth'; provider: 'google'; googleAccountId }` (Google's `sub`).
+  `accounts.json` stores no secret for it, and always gives it Gmail's preset servers.
+- `main/auth.ts`: `AUTH.oauth` calls `getGoogleAccessToken(googleAccountId, [SCOPES.mail], { refresh })`
+  and returns `{ user: email, accessToken }`. `GoogleReauthError`, `GoogleScopeError` and an account
+  that's no longer connected become `SignInAgainError` (a `MailAuthError`, so the existing auth error
+  state and back-off apply). `withCredentials` runs a connection and, for a Google sign-in only, retries
+  once with `{ refresh: true }` when the server refuses the token (`AUTHENTICATIONFAILED`, SMTP 535 /
+  `EAUTH`). Every connection goes through it: `connectImap`, `testAccountLogin` and `withSmtp` in
+  `main/mail.ts`.
+- `imapflow` gets `auth: { user, accessToken }`; `nodemailer` gets
+  `auth: { type: 'OAuth2', user, accessToken, provisionCallback }`, where `provisionCallback` refuses
+  to renew, because nodemailer would otherwise answer a refused token by sending the same token again.
+- `imapflow` prefers `AUTH=OAUTHBEARER` (RFC 7628) over `AUTH=XOAUTH2` when a server advertises both.
+  Gmail's capability list includes both as far as we know, so against real Gmail the IMAP sign-in is
+  probably OAUTHBEARER, with the same token and scope. Not verified here (no real Gmail in tests).
+- `main/google-mail.ts`: adding an account (`MAIL_SCOPES` for a new sign-in, `requestGoogleScopes`
+  for a connected account without mail) and Sign in again. A Google sign-in made just for an add that
+  then fails is signed out again, so nothing is left behind.
+- `signOutGoogle(id, { removeMail })` in `main/calendar.ts` refuses while mail accounts use the sign-in
+  unless every one is listed, then removes them before revoking.
+- Calendar only syncs Google accounts that granted the Calendar scopes (`hasCalendarScopes`), so a
+  Mail-only sign-in is never polled. `connect({ accountId, addCalendar: true })` adds Calendar to it.
 
 ### Testing against a fake Google
 
@@ -258,6 +385,12 @@ Unit tests never reach Google: `test/network-guard.ts` blocks anything but loopb
 `test/fake-google.ts` is an in-process Google on `127.0.0.1` (consent, token, revoke, calendarList,
 events with sync and page tokens, instances, ETags and injected 401/410/412/429 failures). The
 calendar provider takes an `apiBase`, and the OAuth module takes its endpoints.
+
+GreenMail doesn't speak XOAUTH2, so `test/fake-xoauth2.ts` is a small IMAP and SMTP server on
+`127.0.0.1` that signs in only with XOAUTH2 exactly as Google documents it (the payload format, the
+base64 JSON challenge, the empty answer, then `NO [AUTHENTICATIONFAILED]` or `535`). Unit tests and
+`e2e/mail-google.spec.ts` run the real imapflow and nodemailer against it, with the fake Google's
+tokens.
 
 An unpackaged build can be pointed at a fake with `ORDO_GOOGLE_BASE_URL=http://127.0.0.1:<port>`;
 `ORDO_TEST_GOOGLE_AUTO_CONSENT=1` follows the fake's consent redirect in the main process instead of
@@ -283,3 +416,6 @@ development build refuses any that isn't loopback.
 - Push notifications (why Ordo polls): https://developers.google.com/workspace/calendar/api/guides/push
 - Gmail XOAUTH2: https://developers.google.com/workspace/gmail/imap/xoauth2-protocol
 - Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
+- Gmail IMAP, POP and SMTP (servers, ports, OAuth): https://developers.google.com/workspace/gmail/imap/imap-smtp
+- Workspace: turn POP and IMAP on and off, OAuth-only mail clients: https://support.google.com/a/answer/105694
+- Gmail IMAP always on for personal accounts (January 2025): https://support.google.com/mail/answer/7126229

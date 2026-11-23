@@ -22,6 +22,16 @@ All notable changes to Ordo are recorded here. The format follows
   send card shows which account it sends from. See [docs/mail.md](docs/mail.md#accounts).
 - Your existing iCloud account moves into the accounts list by itself, with all its downloaded mail,
   folders and clean-up history.
+- **Gmail with Sign in with Google.** In **Settings → Accounts → Add account… → Gmail**, Sign in with
+  Google (now the default) adds the account without an app password, so it works for work and school
+  accounts that don't allow app passwords, if their admin allows it. It uses your own OAuth client from
+  Settings → Google (the one Calendar uses), can reuse a Google account already connected there, and
+  asks only for mail access (Google's `https://mail.google.com/`, a restricted scope). Ordo signs in to
+  Gmail with XOAUTH2 before saving anything, refreshes a token Gmail refuses once, and shows **Sign in
+  again** when Google stops accepting the sign-in. Signing out of a Google account that Mail uses asks
+  first and removes those mail accounts too; removing a mail account leaves the Google sign-in for
+  Calendar. Setup, what Testing and unverified apps mean for the restricted scope, and what Workspace
+  admins can block are in [docs/google.md](docs/google.md#gmail-with-sign-in-with-google).
 
 ### Fixed
 
