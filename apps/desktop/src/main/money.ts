@@ -30,6 +30,8 @@ import {
   parseStatement,
   resolveBills,
   splitStartDate,
+  compareWithUsual,
+  spendingTrends,
   summarise,
   toISODate,
   validateSplit,
@@ -263,13 +265,20 @@ export async function transactions(raw: unknown): Promise<TransactionPage> {
   const all = await allTransactions()
   const inAccount = filterTransactions(all, { account: q.account })
   const shown = filterTransactions(inAccount, { month: q.month })
+  const months = [...new Set(inAccount.map((t) => monthOf(t.date)))]
+  const latest = months.reduce<string | undefined>((a, m) => (!a || m > a ? m : a), undefined)
+  const trendOpts = { excludeOwnTransfers: !q.account, today: toISODate() }
   return {
     transactions: shown,
     accounts: s.accounts(),
-    months: [...new Set(inAccount.map((t) => monthOf(t.date)))],
+    months,
     // Viewing one account, a transfer out of it is still money out of that account.
     summary: summarise(shown, { excludeOwnTransfers: !q.account }),
     uncategorisedMerchants: merchantsNeedingCategory(all),
+    charts: {
+      trends: spendingTrends(inAccount, trendOpts),
+      usual: latest ? compareWithUsual(inAccount, q.month ?? latest, trendOpts) : null,
+    },
   }
 }
 
