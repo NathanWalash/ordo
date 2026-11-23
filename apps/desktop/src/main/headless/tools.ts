@@ -34,7 +34,7 @@ import {
   replySubject,
   type MessageContent,
 } from '@ordo/mail-core'
-import type { ComposeInput, MessageSummary } from '@ordo/shared'
+import type { CalendarListItem, ComposeInput, MessageSummary } from '@ordo/shared'
 import { clean, UNSAFE_KEEP_LINES } from './format'
 import { pathProblem } from '../paths'
 
@@ -543,6 +543,20 @@ const repeatLine = (d: EventDraft) =>
 const alertLine = (d: EventDraft) => (d.alert === null ? 'No alert' : `Alert ${d.alert} minutes before`)
 
 const PERMANENT = 'This deletes it from iCloud and all your devices. You can’t undo this.'
+const permanent = (cal: CalendarListItem | undefined) =>
+  cal?.source === 'google'
+    ? `This deletes it from Google Calendar${cal.account ? ` (${clean(cal.account, 80)})` : ''}, everywhere that calendar shows. You can’t undo this.`
+    : PERMANENT
+/** Which account a change goes to, for the confirmation card. */
+const accountLine = (cal: CalendarListItem | undefined): PreviewDetail[] =>
+  !cal
+    ? []
+    : cal.source === 'google'
+      ? [`Calendar: ${clean(cal.name, 60)} (Google${cal.account ? ` · ${clean(cal.account, 80)}` : ''})`]
+      : [`Calendar: ${clean(cal.name, 60)} (iCloud)`]
+/** An iCloud calendar needs the iCloud account; a Google one is signed in on its own. */
+const needsIcloud = (services: OrdoServices, cal: CalendarListItem | undefined) =>
+  (cal?.source ?? 'icloud') === 'icloud' && !services.account().connected
 const blockedCard = (title: string, blocked: string): ChangePreview => ({
   title,
   details: [],
@@ -1387,8 +1401,9 @@ export const TOOLS: readonly OrdoTool[] = [
     done: (d) => `Read ${plural(num(d, 'calendars'), 'calendar')}`,
     command: 'calendar list',
     description:
-      'The user’s calendars: id, name, where each comes from (iCloud, a link or a file) and whether it is ' +
-      'read-only. Only writable iCloud calendars take new or changed events.',
+      'The user’s calendars: id, name, where each comes from (iCloud, Google, a link or a file), the Google ' +
+      'account for Google calendars, and whether it is read-only. Only writable iCloud and Google calendars ' +
+      'take new or changed events.',
     untrusted: true,
     reads: 'your calendars',
     input: {},
@@ -1885,7 +1900,7 @@ export const TOOLS: readonly OrdoTool[] = [
       /\b(?:add|create|schedule|book|put|set up|make)\b.{0,80}\b(?:events?|meetings?|appointments?|calendar|diary|reminders?|calls?)\b/i,
     named: (a: { title: string }) => [a.title.trim()].filter(Boolean),
     description:
-      'Add an event to one of the user’s writable iCloud calendars (see ordo_calendar_list). Optionally ' +
+      'Add an event to one of the user’s writable iCloud or Google calendars (see ordo_calendar_list). Optionally ' +
       'repeating daily, weekly, monthly or yearly, until a day or for a number of times.',
     untrusted: true,
     reads: 'your calendar',
@@ -1901,10 +1916,10 @@ export const TOOLS: readonly OrdoTool[] = [
     })),
     async preview(services, a) {
       const title = 'Add an event'
-      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
       const picked = pickCalendar(services, a.calendar)
       if (!picked.ok) return blockedCard(title, failure(picked.result))
       const cal = picked.calendar
+      if (needsIcloud(services, cal)) return blockedCard(title, NO_ICLOUD)
       if (cal.readOnly)
         return blockedCard(title, `“${clean(cal.name, 60)}” is read-only, so events can’t be added to it.`)
       const draft = draftFromFlags(null, eventFlags(a) as EventFlags, localZone())
@@ -1914,13 +1929,16 @@ export const TOOLS: readonly OrdoTool[] = [
       return {
         title: `Add “${clean(draft.title || 'New Event', 80)}” to ${clean(cal.name, 60)}`,
         details: [
+          ...accountLine(cal),
           whenLine(draft),
           repeatLine(draft),
           alertLine(draft),
           ...(draft.location ? [`Location: ${clean(draft.location, 120)}`] : []),
         ],
         notes: [
-          'It’s added to iCloud, so it shows on the user’s other devices too. It can be deleted from Calendar.',
+          cal.source === 'google'
+            ? `It’s added to Google Calendar${cal.account ? ` (${clean(cal.account, 80)})` : ''}, so it shows wherever that calendar does. No one is emailed about it.`
+            : 'It’s added to iCloud, so it shows on the user’s other devices too. It can be deleted from Calendar.',
         ],
       }
     },
@@ -1935,7 +1953,7 @@ export const TOOLS: readonly OrdoTool[] = [
     intent: /\b(?:move|reschedule|change|rename|edit|update|push|shift|postpone|bring forward|make it)\b/i,
     named: (a: WhichArgs) => [a.uid],
     description:
-      'Change an event on a writable iCloud calendar. Give only the fields to change. For a repeating event, ' +
+      'Change an event on a writable iCloud or Google calendar. Give only the fields to change. For a repeating event, ' +
       'give occurrence to change just that one (“this event only”), or all: true for every occurrence; the ' +
       'series then moves by as much as that occurrence moved. If the event was changed elsewhere since Ordo ' +
       'last synced, nothing is overwritten and the result is the error code "conflict".',
@@ -1951,12 +1969,18 @@ export const TOOLS: readonly OrdoTool[] = [
     })),
     async preview(services, a) {
       const title = 'Change an event'
-      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
       const flags = eventFlags(a) as EventFlags
       if (Object.values(flags).every((v) => v === undefined))
         return blockedCard(title, 'Nothing would change: no fields were given.')
       const picked = pickEvent(services, a)
       if (!picked.ok) return blockedCard(title, failure(picked.result))
+      if (
+        needsIcloud(
+          services,
+          services.calendar.calendars().find((c) => c.id === picked.ref.calendarId),
+        )
+      )
+        return blockedCard(title, NO_ICLOUD)
       const before = picked.details.draft
       const after = draftFromFlags(before, flags, localZone())
       if (typeof after === 'string') return blockedCard(title, after)
@@ -1982,9 +2006,13 @@ export const TOOLS: readonly OrdoTool[] = [
               ? `Only the occurrence on ${whenLine(before)}`
               : 'Every event in the series'
             : whenLine(before),
+          ...accountLine(cal),
           ...changes,
         ],
-        notes: ['If it was changed on another device since Ordo last synced, nothing is overwritten.'],
+        notes: [
+          'If it was changed on another device since Ordo last synced, nothing is overwritten.',
+          ...(cal?.source === 'google' ? ['No one is emailed about the change.'] : []),
+        ],
         ...(changes.length === 0 && { blocked: 'Nothing would change.' }),
       }
     },
@@ -1999,7 +2027,7 @@ export const TOOLS: readonly OrdoTool[] = [
     intent: /\b(?:delete|remove|cancel|drop|clear)\b/i,
     named: (a: WhichArgs) => [a.uid],
     description:
-      'Delete an event from a writable iCloud calendar. For a repeating event, give occurrence to delete just ' +
+      'Delete an event from a writable iCloud or Google calendar. For a repeating event, give occurrence to delete just ' +
       'that one, or all: true to delete the whole series. This can’t be undone in Ordo.',
     untrusted: true,
     reads: 'your calendar',
@@ -2009,12 +2037,12 @@ export const TOOLS: readonly OrdoTool[] = [
     })),
     async preview(services, a) {
       const title = 'Delete an event'
-      if (!services.account().connected) return blockedCard(title, NO_ICLOUD)
       const picked = pickEvent(services, a)
       if (!picked.ok) return blockedCard(title, failure(picked.result))
       const d = picked.details.draft
       const name = clean(d.title || 'New Event', 80)
       const cal = services.calendar.calendars().find((c) => c.id === picked.ref.calendarId)
+      if (needsIcloud(services, cal)) return blockedCard(title, NO_ICLOUD)
       const one = picked.details.recurring && picked.scope === 'this'
       return {
         title: one
@@ -2024,10 +2052,10 @@ export const TOOLS: readonly OrdoTool[] = [
             : `Delete “${name}”`,
         details: [
           whenLine(d),
-          ...(cal ? [`Calendar: ${clean(cal.name, 60)}`] : []),
+          ...accountLine(cal),
           ...(d.location ? [`Location: ${clean(d.location, 120)}`] : []),
         ],
-        notes: [PERMANENT],
+        notes: [permanent(cal)],
       }
     },
   }),

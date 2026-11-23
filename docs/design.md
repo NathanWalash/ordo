@@ -79,7 +79,7 @@ process through the typed `window.ordo` API exposed by the preload script
 - One iCloud account powers Mail and Calendar: Calendar signs in to CalDAV
   (`caldav.icloud.com`) with the same Apple ID email and app-specific password.
 - `CalendarProvider` (connect, list calendars, fetch events in a range) leaves room
-  for Google and Outlook later.
+  for Outlook later. Google is built: see "Google Calendar" below and [google.md](google.md).
 - Recurring events are expanded locally (RRULE, RDATE, EXDATE, RECURRENCE-ID) and
   stored as one row per occurrence in `calendar.sqlite`, covering one month back to
   twelve ahead. Calendars whose CTag hasn't changed are skipped on re-sync.
@@ -88,10 +88,42 @@ process through the typed `window.ordo` API exposed by the preload script
 - Other modules can show items on the calendar (bill due dates, renewals, trial
   ends) through `OVERLAY_SOURCES` in the renderer.
 
+### Google Calendar
+
+- Sign in with Google is OAuth 2.0 for a desktop app: authorization code with PKCE (S256),
+  consent in the system browser, and a single-use listener on `127.0.0.1:<random port>`
+  that checks `state` and `Host` and gives up after five minutes. The user brings their own
+  OAuth client (Ordo has no shared Cloud project). The client secret and each account's
+  refresh token are kept with `safeStorage` in `google.json`; access tokens only in memory.
+  `invalid_grant` marks the account "needs sign-in again". Scopes: `openid email
+calendar.calendarlist.readonly calendar.events`. The module (`main/google/`) is shared:
+  Gmail's XOAUTH2 can use `getGoogleAccessToken(accountId, scopes)`.
+- Every Google request goes through an allow-list: `oauth2.googleapis.com` and
+  `www.googleapis.com` only in packaged builds (a loopback fake in tests), https, no redirects,
+  and the guarded connect that refuses private addresses.
+- `GoogleCalendarProvider` (calendar-core) uses Calendar API v3 with `singleEvents=false`
+  and each calendar's `nextSyncToken`: a full sync once, deltas after (410 Gone means full
+  again). Events are cached as the API sends them (`google_items`). Each series (master,
+  changed and cancelled occurrences) is turned into one iCalendar resource, so recurrence,
+  the cache, the editor and `edit.ts` work as for iCloud. A change comes back as edited
+  iCalendar; the provider compares it with the cached version and PATCHes only the changed
+  fields with `If-Match` (412 → refetch and say so). "This event only" goes to the
+  occurrence's own instance (found with `events.instances?originalStart=`), after checking the
+  series' ETag; a deleted occurrence is cancelled there. Guests aren't emailed
+  (`sendUpdates=none`).
+- Calendar ids are `google:<account sub>:<calendar id>` and the store's provider is
+  `google:<account sub>`, so signing out is `clearProvider`. Each calendar records when it last
+  synced or why it didn't (`calendar_state`). Hidden calendars aren't fetched.
+- Near live by polling (push needs a public HTTPS webhook): every three minutes ±15% while
+  the app is open, on focus and wake (at most every 30 s), after showing a calendar or making a
+  change; exponential back-off to 30 minutes after failures, never before Retry-After. 401
+  refreshes the token once; 429 and quota errors wait for Retry-After within a request (up to
+  30 s) before giving up for the round.
+
 ### Changing events
 
-- Writable iCloud calendars take new, changed and deleted events. Calendars added
-  by link or file, calendars iCloud marks read-only and other people's invitations
+- Writable iCloud and Google calendars take new, changed and deleted events. Calendars added
+  by link or file, calendars marked read-only and other people's invitations
   (an ORGANIZER that isn't the account) can't be changed; the popover says why.
 - One service does it for every front end: `createEvent`, `updateEvent` and
   `deleteEvent` in `calendar-core/src/edit.ts`, wrapped in the main process by

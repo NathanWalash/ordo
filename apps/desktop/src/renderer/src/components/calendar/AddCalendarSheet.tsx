@@ -103,7 +103,9 @@ export function AddCalendarSheet({ onClose, onAdded }: Props) {
           </li>
         </ul>
         <p className="mt-1.5">
-          Subscribed calendars are read-only, and Google can take a few hours to show changes in the link.
+          Subscribed calendars are read-only, and Google can take a few hours to show changes in the link. For
+          a Google calendar, connect your Google account in Settings › Google instead: changes show within
+          minutes and you can edit events.
         </p>
       </details>
       {fileError && (

@@ -43,6 +43,8 @@ interface Ask {
   kind: 'save' | 'delete'
   title: string
   recurring: boolean
+  /** The event's calendar, so a delete says where it's deleted from. */
+  calendar?: CalendarListItem
   resolve: (scope: EditScope | null) => void
 }
 
@@ -156,8 +158,10 @@ export function useEventEditing({
     [reload],
   )
 
-  const askScope = (kind: Ask['kind'], title: string, recurring: boolean) =>
-    new Promise<EditScope | null>((resolve) => setAsk({ kind, title, recurring, resolve }))
+  const askScope = (kind: Ask['kind'], title: string, recurring: boolean, calendarId?: string) =>
+    new Promise<EditScope | null>((resolve) =>
+      setAsk({ kind, title, recurring, calendar: calendarId ? byId.get(calendarId) : undefined, resolve }),
+    )
 
   const details = async (e: CalendarEvent): Promise<EventDetails | null> => {
     const d = await window.ordo.calendar.details(refOf(e))
@@ -184,7 +188,9 @@ export function useEventEditing({
   const create = (at: Date, { allDay = false, exact = false } = {}) => {
     if (!enabled || busy) return
     if (!targets.length) {
-      info('Add events to one of your iCloud calendars. Calendars added by link or file can’t be changed.')
+      info(
+        'Add events to one of your iCloud or Google calendars. Calendars added by link or file can’t be changed.',
+      )
       return
     }
     const saved = remembered()
@@ -212,7 +218,7 @@ export function useEventEditing({
 
   /** Confirm and delete. `restore` brings the editor back if the delete is cancelled from it. */
   const remove = async (ref: EventRef, d: EventDetails, restore?: () => void) => {
-    const scope = await askScope('delete', d.draft.title, d.recurring)
+    const scope = await askScope('delete', d.draft.title, d.recurring, ref.calendarId)
     if (!scope) {
       restore?.()
       if (!restore) focusEvent(keyOf(ref))
@@ -358,6 +364,7 @@ export function useEventEditing({
           kind={ask.kind}
           title={ask.title}
           recurring={ask.recurring}
+          calendar={ask.calendar}
           onChoose={(scope) => {
             setAsk(null)
             ask.resolve(scope)

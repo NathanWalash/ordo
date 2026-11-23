@@ -1,5 +1,8 @@
-/** Where a calendar comes from: the iCloud account, a subscribed link or an imported .ics file. */
-export type CalendarSource = 'icloud' | 'link' | 'file'
+/**
+ * Where a calendar comes from: the iCloud account, a connected Google account, a subscribed link
+ * or an imported .ics file.
+ */
+export type CalendarSource = 'icloud' | 'google' | 'link' | 'file'
 
 /** A calendar the account can see, e.g. "Home" or "Work". */
 export interface CalendarInfo {
@@ -17,6 +20,8 @@ export interface CalendarInfo {
 export interface RemoteCalendar extends CalendarInfo {
   /** CalDAV `getctag` (or sync-token). Unchanged version means unchanged events. */
   version?: string
+  /** Whether to show it when it's first seen (Google's own "selected" choice). Later, the user's choice wins. */
+  visible?: boolean
 }
 
 /**

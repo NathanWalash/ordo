@@ -3,9 +3,11 @@ import type { CalendarEvent, EventDraft } from '@ordo/calendar-core'
 import type { CalendarListItem } from '@ordo/shared'
 import {
   alertLabel,
+  calendarGroups,
   canonicalZone,
   clampDays,
   defaultUntil,
+  deleteNote,
   moveDraft,
   newDraft,
   nudged,
@@ -65,6 +67,30 @@ describe('which calendars can be changed', () => {
     )
     expect(readOnlyReason(cal({ source: 'file' }))).toMatch(/^Imported from a file/)
     expect(readOnlyReason(cal({ readOnly: true }))).toMatch(/^Shared with you read-only/)
+  })
+
+  it('also writable Google calendars, unless shared read-only', () => {
+    expect(writable(cal({ source: 'google', account: 'me@work.example' }))).toBe(true)
+    expect(writable(cal({ source: 'google', readOnly: true }))).toBe(false)
+    expect(readOnlyReason(cal({ source: 'google', readOnly: true }))).toMatch(/^Shared with you read-only/)
+  })
+
+  it('says where a delete goes', () => {
+    expect(deleteNote(cal({}))).toMatch(/iCloud and all your devices/)
+    expect(deleteNote(cal({ source: 'google', account: 'me@work.example' }))).toBe(
+      'This deletes it from Google Calendar (me@work.example), everywhere that calendar shows. You can’t undo this.',
+    )
+  })
+
+  it('groups calendars by account for the editor’s picker, unlabelled when there’s one', () => {
+    const home = cal({})
+    const work = cal({ id: 'g1', name: 'Work', source: 'google', account: 'me@work.example' })
+    const team = cal({ id: 'g2', name: 'Team', source: 'google', account: 'me@work.example' })
+    expect(calendarGroups([home, work, team])).toEqual([
+      { label: 'iCloud', calendars: [home] },
+      { label: 'me@work.example', calendars: [work, team] },
+    ])
+    expect(calendarGroups([work, team])).toEqual([{ label: '', calendars: [work, team] }])
   })
 })
 

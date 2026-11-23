@@ -446,6 +446,10 @@ const NOT_CONNECTED = fail(
   'not_connected',
   'No iCloud account is connected. Open Ordo and connect one in Mail first.',
 )
+const NO_CALENDARS = fail(
+  'not_connected',
+  'No calendars are connected. Open Ordo and connect iCloud or a Google account, or add a calendar by link.',
+)
 
 /**
  * The safety gate for changes, the same for the CLI and MCP: the process must have been started
@@ -667,8 +671,15 @@ export async function runCommand(
   }
   const offset = options.offset ?? 0
   const connected = () => services.account().connected
-  // Calendars added by link or file work without an iCloud account.
-  const hasCalendars = () => connected() || services.calendar.status().subscriptions > 0
+  // Google calendars and ones added by link or file work without an iCloud account.
+  const hasCalendars = () => {
+    const s = services.calendar.status()
+    return connected() || s.subscriptions > 0 || (s.google ?? 0) > 0
+  }
+  const needsIcloud = (calendarId: string) => {
+    const cal = services.calendar.calendars().find((c) => c.id === calendarId)
+    return (cal?.source ?? 'icloud') === 'icloud' && !connected()
+  }
 
   switch (command.name) {
     case 'status': {
@@ -689,12 +700,13 @@ export async function runCommand(
               }
             : { connected: false },
           calendar:
-            calendar.connected || calendar.subscriptions > 0
+            calendar.connected || calendar.subscriptions > 0 || (calendar.google ?? 0) > 0
               ? {
                   connected: calendar.connected,
                   lastSync: calendar.lastSync,
                   calendars: services.calendar.calendars().length,
                   subscriptions: calendar.subscriptions,
+                  ...(calendar.google ? { googleAccounts: calendar.google } : {}),
                 }
               : { connected: false },
           ai: {
@@ -925,7 +937,7 @@ export async function runCommand(
     }
 
     case 'calendar sync': {
-      if (!hasCalendars()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       const r = await services.calendar.sync(options.progress?.calendar)
       if (!r.ok) return fromMail(r)
       const { ok: _ok, ...rest } = r
@@ -933,7 +945,7 @@ export async function runCommand(
     }
 
     case 'calendar events': {
-      if (!hasCalendars()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       const start = day(command.from)
       const end = day(command.to)
       end.setDate(end.getDate() + 1) // --to is inclusive
@@ -967,7 +979,7 @@ export async function runCommand(
     }
 
     case 'calendar list': {
-      if (!hasCalendars()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       return {
         ok: true,
         data: {
@@ -975,6 +987,7 @@ export async function runCommand(
             id: c.id,
             name: c.name,
             source: c.source ?? 'icloud',
+            ...(c.account && { account: c.account }),
             readOnly: c.readOnly,
             visible: c.visible,
           })),
@@ -983,9 +996,11 @@ export async function runCommand(
     }
 
     case 'calendar add': {
-      if (!connected()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       const picked = pickCalendar(services, command.calendar)
       if (!picked.ok) return picked.result
+      // An iCloud calendar needs the iCloud account; a Google calendar's account is checked as it's changed.
+      if (needsIcloud(picked.calendar.id)) return NOT_CONNECTED
       if (picked.calendar.readOnly)
         return fail('read_only', `“${picked.calendar.name}” is read-only, so events can’t be added to it.`)
       const draft = draftFromFlags(null, command, localZone())
@@ -996,7 +1011,7 @@ export async function runCommand(
     }
 
     case 'calendar edit': {
-      if (!connected()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       const fields: (keyof EventFlags)[] = [
         'title',
         'start',
@@ -1013,6 +1028,7 @@ export async function runCommand(
         return fail('usage', 'Say what to change, e.g. --title, --start, --end, --location or --repeat.')
       const picked = pickEvent(services, command)
       if (!picked.ok) return picked.result
+      if (needsIcloud(picked.ref.calendarId)) return NOT_CONNECTED
       const draft = draftFromFlags(picked.details.draft, command, localZone())
       if (typeof draft === 'string') return fail('usage', draft)
       const r = await services.calendar.updateEvent({ ref: picked.ref, draft, scope: picked.scope })
@@ -1021,9 +1037,10 @@ export async function runCommand(
     }
 
     case 'calendar delete': {
-      if (!connected()) return NOT_CONNECTED
+      if (!hasCalendars()) return NO_CALENDARS
       const picked = pickEvent(services, command)
       if (!picked.ok) return picked.result
+      if (needsIcloud(picked.ref.calendarId)) return NOT_CONNECTED
       const r = await services.calendar.deleteEvent({ ref: picked.ref, scope: picked.scope })
       if (!r.ok) return fromChange(r)
       return {

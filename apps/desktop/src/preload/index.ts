@@ -11,6 +11,7 @@ import { moneyMemoryApi } from './money-memory'
 import { boardsApi } from './boards'
 import { updatesApi } from './updates'
 import { backupApi } from './backup'
+import { googleApi } from './google'
 
 const api: OrdoApi = {
   app: {
@@ -63,6 +64,11 @@ const api: OrdoApi = {
       ipcRenderer.on(IPC.calendarSyncProgress, handler)
       return () => ipcRenderer.removeListener(IPC.calendarSyncProgress, handler)
     },
+    onChanged: (listener) => {
+      const handler = () => listener()
+      ipcRenderer.on(IPC.calendarChanged, handler)
+      return () => ipcRenderer.removeListener(IPC.calendarChanged, handler)
+    },
     calendars: () => ipcRenderer.invoke(IPC.calendarList),
     events: (range) => ipcRenderer.invoke(IPC.calendarEvents, range),
     setVisible: (input) => ipcRenderer.invoke(IPC.calendarSetVisible, input),
@@ -74,6 +80,7 @@ const api: OrdoApi = {
     updateEvent: (input) => ipcRenderer.invoke(IPC.calendarUpdateEvent, input),
     deleteEvent: (input) => ipcRenderer.invoke(IPC.calendarDeleteEvent, input),
   },
+  google: googleApi,
   cleanup: {
     run: (request) => ipcRenderer.invoke(CLEANUP_IPC.run, request),
     onProgress: (listener) => {

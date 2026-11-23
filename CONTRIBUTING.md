@@ -66,6 +66,12 @@ makes `net`, `tls` and `dns` throw for anything but loopback (127.0.0.0/8, `::1`
 that needs a server starts one on 127.0.0.1, or gives a made-up name its own `lookup` that answers
 with a loopback address.
 
+Google tests use `test/fake-google.ts`, a fake of Google's OAuth and Calendar API endpoints on
+127.0.0.1. To run the unpackaged app against it (or another fake), set
+`ORDO_GOOGLE_BASE_URL=http://127.0.0.1:<port>`, and `ORDO_TEST_GOOGLE_AUTO_CONSENT=1` to follow the
+fake's consent page without opening a browser. Packaged builds ignore both and only talk to Google's
+own hosts. See [docs/google.md](docs/google.md#testing-against-a-fake-google).
+
 - Keep pull requests small and focused.
 - Add tests for new logic. Domain logic belongs in `packages/*`, which must not import Electron.
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, for example `feat(mail-core): parse List-Id`.

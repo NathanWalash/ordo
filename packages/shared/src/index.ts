@@ -7,8 +7,10 @@ import type { MailApi } from './mail'
 import type { AssistantApi } from './assistant'
 import type { UpdatesApi } from './updates'
 import { CALENDAR_IPC, type CalendarApi } from './calendar'
+import type { GoogleApi } from './google'
 
 export * from './calendar'
+export * from './google'
 import type { MoneyApi } from './money'
 import type { MoneyMemoryApi } from './money-memory'
 
@@ -104,6 +106,7 @@ export interface OrdoApi {
   moneyMemory: MoneyMemoryApi
   boards: BoardsApi
   calendar: CalendarApi
+  google: GoogleApi
   cleanup: CleanupApi
   mail: MailApi
   assistant: AssistantApi

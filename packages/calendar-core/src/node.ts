@@ -27,6 +27,7 @@ export {
 export {
   CalendarStore,
   FEEDS,
+  GOOGLE_PREFIX,
   ICLOUD,
   type CalendarSyncState,
   type StoredCalendar,
@@ -48,3 +49,17 @@ export {
   type FetchFeedOptions,
 } from './feeds'
 export { syncCalendars, type SyncOptions } from './sync'
+export {
+  GOOGLE_API_BASE,
+  GoogleApiError,
+  GoogleCalendarProvider,
+  googleCalendarKey,
+  googleProvider,
+  parseGoogleCalendarKey,
+  retryAfterMs,
+  syncGoogleAccount,
+  type GoogleCalendarConfig,
+  type GoogleSyncOptions,
+} from './google'
+export { googleCalendarIdFromFeedUrl, type GoogleCalendarListEntry, type GoogleEvent } from './google-map'
+export { nextPollDelay, type PollDelayOptions } from './poll'

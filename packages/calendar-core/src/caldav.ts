@@ -29,6 +29,8 @@ export class CalendarConnectionError extends Error {
 /** The server answered, but is busy, limiting requests or down for now (HTTP 429, 502, 503, 504). */
 export class CalendarUnavailableError extends CalendarConnectionError {
   override name = 'CalendarUnavailableError'
+  /** How long the server asked Ordo to wait before trying again (Retry-After), if it said. */
+  retryAfterMs?: number
 }
 
 /**

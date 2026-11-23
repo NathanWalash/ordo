@@ -7,7 +7,9 @@ import { Sheet } from '../Sheet'
 import {
   ALL_DAY_ALERTS,
   alertLabel,
+  calendarGroups,
   canonicalZone,
+  deleteNote,
   defaultUntil,
   REPEAT_LABELS,
   TIMED_ALERTS,
@@ -163,11 +165,23 @@ export function EventEditor({
               onChange={(e) => setCalendarId(e.target.value)}
               className={`${popup} pl-6`}
             >
-              {calendars.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
+              {calendarGroups(calendars).map((g) =>
+                g.label ? (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.calendars.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  g.calendars.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))
+                ),
+              )}
             </select>
           </span>
         )}
@@ -437,17 +451,19 @@ export function ChangeSheet({
   kind,
   title,
   recurring,
+  calendar,
   onChoose,
   onClose,
 }: {
   kind: 'save' | 'delete'
   title: string
   recurring: boolean
+  calendar?: CalendarListItem
   onChoose: (scope: 'this' | 'all') => void
   onClose: () => void
 }) {
   const name = title.trim() || 'New Event'
-  const permanent = 'This deletes it from iCloud and all your devices. You can’t undo this.'
+  const permanent = deleteNote(calendar)
   if (kind === 'save')
     return (
       <Sheet

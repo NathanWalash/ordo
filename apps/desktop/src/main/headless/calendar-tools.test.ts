@@ -5,6 +5,14 @@ import { previewTool, runTool, toolByName } from './tools'
 
 const HOME = { id: 'cal-home', name: 'Home', readOnly: false, visible: true, source: 'icloud' as const }
 const WORK = { id: 'feed:1', name: 'Work (Google)', readOnly: true, visible: true, source: 'link' as const }
+const GOOGLE = {
+  id: 'google:123:me@work.example',
+  name: 'Team',
+  readOnly: false,
+  visible: true,
+  source: 'google' as const,
+  account: 'me@work.example',
+}
 const t = (name: string) => toolByName(name)!
 
 const draft = (o: Partial<EventDraft> = {}): EventDraft => ({
@@ -24,7 +32,7 @@ function services(details: Partial<EventDetails> = {}) {
   const s = fakeServices()
   s.calendar = {
     ...s.calendar,
-    calendars: () => [HOME, WORK],
+    calendars: () => [HOME, WORK, GOOGLE],
     locate: () => [HOME.id],
     details: vi.fn(() => ({
       calendarId: HOME.id,
@@ -80,6 +88,7 @@ describe('calendar tools in the shared registry', () => {
     expect(p).toEqual({
       title: 'Add “Dentist” to Home',
       details: [
+        'Calendar: Home (iCloud)',
         'Friday, 20 November 2026, 09:00 – 10:00 (London time)',
         'Repeats monthly, 3 times',
         'Alert 30 minutes before',
@@ -120,6 +129,7 @@ describe('calendar tools in the shared registry', () => {
       title: 'Change “Standup” in Home',
       details: [
         'Only the occurrence on Monday, 23 November 2026, 09:00 – 09:15 (London time)',
+        'Calendar: Home (iCloud)',
         'When: Monday, 23 November 2026, 09:00 – 09:15 (London time) → Monday, 23 November 2026, 10:00 – 10:15 (London time)',
       ],
     })
@@ -129,7 +139,11 @@ describe('calendar tools in the shared registry', () => {
       all: true,
       title: 'Daily sync',
     })
-    expect(all.details).toEqual(['Every event in the series', 'Title: Standup → Daily sync'])
+    expect(all.details).toEqual([
+      'Every event in the series',
+      'Calendar: Home (iCloud)',
+      'Title: Standup → Daily sync',
+    ])
     const same = await previewTool(services(), t('ordo_calendar_edit'), {
       uid: 'ev-1',
       all: true,
@@ -144,7 +158,7 @@ describe('calendar tools in the shared registry', () => {
     const p = await previewTool(services({ recurring: false }), t('ordo_calendar_delete'), { uid: 'ev-1' })
     expect(p).toEqual({
       title: 'Delete “Standup”',
-      details: ['Monday, 23 November 2026, 09:00 – 09:15 (London time)', 'Calendar: Home'],
+      details: ['Monday, 23 November 2026, 09:00 – 09:15 (London time)', 'Calendar: Home (iCloud)'],
       notes: ['This deletes it from iCloud and all your devices. You can’t undo this.'],
     })
     const series = await previewTool(services(), t('ordo_calendar_delete'), { uid: 'ev-1', all: true })
@@ -155,6 +169,41 @@ describe('calendar tools in the shared registry', () => {
       { uid: 'ev-1', all: true },
     )
     expect(invite.blocked).toBe('This is an invitation from boss@work.example.')
+  })
+
+  it('says which Google account a change goes to, and works without iCloud', async () => {
+    const s = services({ calendarId: GOOGLE.id, recurring: false })
+    s.account = () => ({ connected: false })
+    s.calendar.locate = () => [GOOGLE.id]
+    const add = await previewTool(s, t('ordo_calendar_add'), {
+      calendar: 'Team',
+      title: 'Review',
+      start: '2026-11-20T10:00',
+    })
+    expect(add.blocked).toBeUndefined()
+    expect(add.title).toBe('Add “Review” to Team')
+    expect(add.details[0]).toBe('Calendar: Team (Google · me@work.example)')
+    expect(add.notes).toEqual([
+      expect.stringMatching(/Google Calendar \(me@work\.example\).*No one is emailed/),
+    ])
+    const edit = await previewTool(s, t('ordo_calendar_edit'), { uid: 'ev-1', title: 'Renamed' })
+    expect(edit.details).toContain('Calendar: Team (Google · me@work.example)')
+    expect(edit.notes).toContain('No one is emailed about the change.')
+    const del = await previewTool(s, t('ordo_calendar_delete'), { uid: 'ev-1' })
+    expect(del.details).toContain('Calendar: Team (Google · me@work.example)')
+    expect(del.notes).toEqual([
+      expect.stringMatching(/deletes it from Google Calendar \(me@work\.example\).*can’t undo/),
+    ])
+    // The same confirmation rules apply: no permission or no confirmation, no change.
+    expect(
+      await runTool(s, t('ordo_calendar_delete'), { uid: 'ev-1' }, { allowChanges: true, confirm: false }),
+    ).toMatchObject({ code: 'confirm_required' })
+    expect(s.calendar.deleteEvent).not.toHaveBeenCalled()
+    // An iCloud calendar still needs iCloud.
+    expect(
+      (await previewTool(s, t('ordo_calendar_add'), { calendar: 'Home', title: 'x', start: '2026-11-20' }))
+        .blocked,
+    ).toMatch(/No iCloud account/)
   })
 
   it('shows event text from calendars as plain text on the card', async () => {
