@@ -532,6 +532,8 @@ export function planView(plan: CleanupPlan) {
 export function cleanupView(c: CleanupSummary) {
   return {
     id: c.id,
+    // The account's id (status lists which is which). Older results without one were the first.
+    ...(c.account && { accountId: c.account }),
     at: iso(c.at),
     moved: c.moved,
     canUndo: c.canUndo,
@@ -835,7 +837,16 @@ export async function runCommand(
         options.progress?.cleanup,
       )
       return r.ok
-        ? { ok: true, data: { cleanup: cleanupView(r.cleanup), rejected: r.rejected } }
+        ? {
+            ok: true,
+            data: {
+              cleanup: cleanupView(r.cleanup),
+              // Several accounts: one clean-up each, and any account that couldn't be cleared.
+              ...(r.cleanups && { cleanups: r.cleanups.map(cleanupView) }),
+              ...(r.failed?.length && { failed: r.failed }),
+              rejected: r.rejected,
+            },
+          }
         : fromService(r)
     }
 

@@ -152,13 +152,31 @@ export function ReviewSheet({
   if (progress) body = <Working progress={progress} />
   else if (outcome?.ok)
     body = (
-      <Result
-        cleanup={outcome.cleanup}
-        rejected={outcome.rejected}
-        undo={undo}
-        onUndo={undoMove}
-        onDone={onClose}
-      />
+      <>
+        {/* Several accounts: each was cleared on its own, with its own History entry. */}
+        {((outcome.cleanups?.length ?? 0) > 1 || (outcome.failed?.length ?? 0) > 0) && (
+          <div role="status" className="flex flex-col gap-1 px-5 text-[12px] leading-snug text-ink-2">
+            {(outcome.cleanups?.length ?? 0) > 1 && (
+              <p>
+                Cleared in {outcome.cleanups!.length} accounts. Below is the first; each has its own entry in
+                History, where you can undo it.
+              </p>
+            )}
+            {outcome.failed?.map((f) => (
+              <p key={f.account} className="text-danger-text">
+                {f.message}
+              </p>
+            ))}
+          </div>
+        )}
+        <Result
+          cleanup={outcome.cleanup}
+          rejected={outcome.rejected}
+          undo={undo}
+          onUndo={undoMove}
+          onDone={onClose}
+        />
+      </>
     )
   else
     body = (
