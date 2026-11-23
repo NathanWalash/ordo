@@ -28,9 +28,26 @@ describe('the accounts preload', () => {
       expect(await accountsApi.test({ id: 'acc-1' })).toMatchObject({ ok: false })
       expect(await accountsApi.update({ id: 'acc-1', label: 'Work' })).toMatchObject({ ok: false })
       expect(await accountsApi.setPassword({ id: 'acc-1', password: 'x' })).toMatchObject({ ok: false })
+      expect(await accountsApi.addGoogle({})).toMatchObject({ ok: false, error: 'invalid' })
+      expect(await accountsApi.signInAgain({ id: 'acc-1' })).toMatchObject({ ok: false, error: 'invalid' })
       await accountsApi.remove('acc-1')
     }
     expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('passes on Sign in with Google after a click, and reading its options or cancelling always', async () => {
+    activation(false)
+    await accountsApi.googleOptions()
+    await accountsApi.cancelGoogle()
+    expect(invoke.mock.calls.map((c) => c[0])).toEqual([
+      ACCOUNTS_IPC.googleOptions,
+      ACCOUNTS_IPC.cancelGoogle,
+    ])
+    activation(true)
+    await accountsApi.addGoogle({ googleAccountId: '123', label: 'Work' })
+    await accountsApi.signInAgain({ id: 'acc-2' })
+    expect(invoke).toHaveBeenCalledWith(ACCOUNTS_IPC.addGoogle, { googleAccountId: '123', label: 'Work' })
+    expect(invoke).toHaveBeenLastCalledWith(ACCOUNTS_IPC.signInAgain, { id: 'acc-2' })
   })
 
   it('passes on changes that follow a click, and listing always', async () => {

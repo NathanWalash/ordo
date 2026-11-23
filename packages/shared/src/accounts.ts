@@ -7,6 +7,7 @@ import {
   type ProviderId,
   type SmtpServer,
 } from '@ordo/mail-core'
+import { GoogleAccountIdSchema } from './google'
 
 /**
  * Mail accounts: several side by side (iCloud, Gmail, Yahoo, Fastmail or any IMAP server), each
@@ -41,11 +42,13 @@ export type AccountColor = (typeof ACCOUNT_COLORS)[number]
 
 /**
  * How an account signs in, without the secret. `password`: an app-specific password, sent as a
- * plain IMAP/SMTP login over TLS. More kinds join this union (`{ kind: 'oauth', provider: 'google' }`
- * for Sign in with Google, using XOAUTH2); everything that signs in goes through the main
- * process's `getCredentials(account)`, so nothing else needs to change.
+ * plain IMAP/SMTP login over TLS, kept encrypted in `accounts.json`. `oauth` (Gmail only): Sign in
+ * with Google, an access token sent with XOAUTH2; the tokens live in the Google module's
+ * `google.json`, under the Google account's id (`sub`), never in `accounts.json`. Everything that
+ * signs in goes through the main process's `getCredentials(account)`.
  */
-export type AccountAuth = { kind: 'password' }
+export type AccountAuth =
+  { kind: 'password' } | { kind: 'oauth'; provider: 'google'; googleAccountId: string }
 export type AuthKind = AccountAuth['kind']
 
 /** An account as the window and the assistant see it: no password, no token. */
@@ -69,7 +72,7 @@ export interface AccountSyncState {
   failedAt?: string
   /** What went wrong, in the user's words. */
   message?: string
-  /** `auth`: the password needs entering again. */
+  /** `auth`: the password needs entering again (Sign in again, for a Google sign-in). */
   error?: 'auth' | 'network' | 'unavailable' | 'unknown'
   /** ISO time before which Ordo won't try again by itself (backing off). */
   retryAt?: string
@@ -158,11 +161,51 @@ export type UpdateAccountInput = z.input<typeof UpdateAccountSchema>
 export const SetPasswordSchema = z.object({ id: AccountIdSchema, password }).strict()
 export type SetPasswordInput = z.input<typeof SetPasswordSchema>
 
+/**
+ * Add a Gmail account with Sign in with Google: an already-connected Google account (by its id;
+ * Ordo asks it for mail access too if it hasn't given it), or a new sign-in in the browser. No
+ * password: the address comes from Google.
+ */
+export const AddGoogleAccountSchema = z
+  .object({
+    googleAccountId: GoogleAccountIdSchema.optional(),
+    label: label.optional(),
+    color: z.enum(ACCOUNT_COLORS).optional(),
+  })
+  .strict()
+export type AddGoogleAccountInput = z.input<typeof AddGoogleAccountSchema>
+
+/** Sign in to Google again for an account that signs in with Google. */
+export const SignInAgainSchema = z.object({ id: AccountIdSchema }).strict()
+export type SignInAgainInput = z.input<typeof SignInAgainSchema>
+
+/** A connected Google account, as the Add account sheet offers it. */
+export interface GoogleMailChoice {
+  /** Google's account id (`sub`). */
+  id: string
+  email: string
+  /** It has already given Ordo mail access (no new consent needed). */
+  hasMail: boolean
+  needsReauth: boolean
+  /** A mail account in Ordo already uses it. */
+  inUse: boolean
+}
+
+/** What Sign in with Google can do right now, for the Add account sheet. */
+export interface GoogleMailOptions {
+  /** The OS keychain is available, so a sign-in can be stored. */
+  secureStorage: boolean
+  /** An OAuth client is saved in Settings → Google (Ordo has no shared one). */
+  configured: boolean
+  accounts: GoogleMailChoice[]
+}
+
 /** Test a new account's details, or an account that's already saved. */
 export const TestAccountSchema = z.union([z.object({ id: AccountIdSchema }).strict(), AddAccountSchema])
 export type TestAccountInput = z.input<typeof TestAccountSchema>
 
-export type AccountError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'unknown'
+/** `cancelled`: the user stopped a browser sign-in; nothing to show. */
+export type AccountError = 'invalid' | 'auth' | 'network' | 'unavailable' | 'unknown' | 'cancelled'
 export type AccountResult =
   { ok: true; account: MailAccount } | { ok: false; error: AccountError; message: string }
 
@@ -179,6 +222,14 @@ export interface AccountsApi {
   setPassword(input: SetPasswordInput): Promise<AccountResult>
   /** Forget the account, its password and everything Ordo downloaded for it. Nothing on the server changes. */
   remove(id: AccountId): Promise<void>
+  /** Whether Sign in with Google is set up, and the Google accounts already connected. */
+  googleOptions(): Promise<GoogleMailOptions>
+  /** Sign in with Google (in the browser), check Gmail accepts it, then save the account. */
+  addGoogle(input: AddGoogleAccountInput): Promise<AccountResult>
+  /** Stop waiting for a browser sign-in. */
+  cancelGoogle(): Promise<void>
+  /** Sign in to Google again for an account whose sign-in stopped working. */
+  signInAgain(input: SignInAgainInput): Promise<AccountResult>
 }
 
 export const ACCOUNTS_IPC = {
@@ -188,6 +239,10 @@ export const ACCOUNTS_IPC = {
   update: 'accounts:update',
   setPassword: 'accounts:set-password',
   remove: 'accounts:remove',
+  googleOptions: 'accounts:google-options',
+  addGoogle: 'accounts:add-google',
+  cancelGoogle: 'accounts:cancel-google',
+  signInAgain: 'accounts:sign-in-again',
 } as const
 
 /** A label for an account no one has named: the provider, then a number if that's taken. */

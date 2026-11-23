@@ -6,10 +6,11 @@ import {
   type CleanupPlan,
   type CleanupRecord,
 } from '@ordo/mail-core'
+import type {
+  ImapMailProvider} from '@ordo/mail-core/node';
 import {
   createGuardedFetch,
   createMailtoSender,
-  ImapMailProvider,
   runCleanup,
   scanMailbox,
   undoCleanup,
@@ -33,7 +34,7 @@ import {
   allowLoopbackHttp,
   exclusively,
   explain,
-  imapConfigFor,
+  connectImap,
   INBOX,
   mailStore,
   smtpConfigFor,
@@ -119,8 +120,8 @@ async function runAccount(
       const smtp: { sender?: ReturnType<typeof createMailtoSender> } = {}
       const fetch = createGuardedFetch({ allowLoopback: loopback })
       try {
-        provider = new ImapMailProvider(await imapConfigFor(account))
-        await provider.connect()
+        provider = await connectImap(account)
+        // The token the IMAP sign-in just used (refreshed if Gmail refused the first) is still fresh.
         const smtpConfig = await smtpConfigFor(account)
         const record = await runCleanup(provider, store, plan.senders, {
           mailbox: INBOX,
@@ -218,8 +219,7 @@ export async function undo(input: unknown): Promise<UndoOutcome> {
     withWriteLock('undoing a clean-up', async (): Promise<UndoOutcome> => {
       let provider: ImapMailProvider | null = null
       try {
-        provider = new ImapMailProvider(await imapConfigFor(account))
-        await provider.connect()
+        provider = await connectImap(account)
         const res = await undoCleanup(provider, store, id.data)
         // Restored emails have new UIDs in the inbox; a quick incremental scan caches them again.
         if (res.restored) await scanMailbox(provider, store, { mailbox: INBOX }).catch(() => {})

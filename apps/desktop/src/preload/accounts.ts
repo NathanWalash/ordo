@@ -23,4 +23,11 @@ export const accountsApi: AccountsApi = {
     userActed() ? ipcRenderer.invoke(ACCOUNTS_IPC.setPassword, input) : refused('Save'),
   // Nothing to return: without a click, nothing is removed.
   remove: (id) => (userActed() ? ipcRenderer.invoke(ACCOUNTS_IPC.remove, id) : Promise.resolve()),
+  googleOptions: () => ipcRenderer.invoke(ACCOUNTS_IPC.googleOptions),
+  addGoogle: (input) =>
+    userActed() ? ipcRenderer.invoke(ACCOUNTS_IPC.addGoogle, input) : refused('Sign in with Google'),
+  // Stopping a sign-in that's waiting for the browser changes nothing.
+  cancelGoogle: () => ipcRenderer.invoke(ACCOUNTS_IPC.cancelGoogle),
+  signInAgain: (input) =>
+    userActed() ? ipcRenderer.invoke(ACCOUNTS_IPC.signInAgain, input) : refused('Sign in again'),
 }
