@@ -77,19 +77,45 @@ export const READ_ONLY_PROP = 'x-ordo-read-only'
 
 const MAX_ATTENDEES = 100
 const MAX_TEXT = 20_000
-// Control characters other than tab, newline and carriage return never belong in event text.
+// Free text (titles, notes, places) keeps tabs and line breaks: ical.js escapes TEXT values when
+// it writes them. Nothing else may hold a control character at all.
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
+const TEXT_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
+// eslint-disable-next-line no-control-regex
+const ANY_CONTROL = /[\u0000-\u001f\u007f]/g
+// eslint-disable-next-line no-control-regex
+const HAS_CONTROL = /[\u0000-\u001f\u007f]/
 
-const str = (v: unknown, max = MAX_TEXT) =>
-  typeof v === 'string' ? v.replace(CONTROL, '').slice(0, max) : undefined
+/** Free text from the server: titles, descriptions, locations. */
+const text = (v: unknown, max = MAX_TEXT) =>
+  typeof v === 'string' ? v.replace(TEXT_CONTROL, '').slice(0, max) : undefined
+/**
+ * Every other value from the server (ids, ETags, statuses, times, zone names, addresses): no
+ * control characters at all, so none can end an iCalendar line and start a property of its own.
+ */
+const token = (v: unknown, max: number) =>
+  typeof v === 'string' ? v.replace(ANY_CONTROL, '').slice(0, max) : undefined
+
+/**
+ * An email address Ordo will write as a CAL-ADDRESS (`mailto:`), which ical.js doesn't escape:
+ * one @, no spaces, quotes, angle brackets, separators or control characters.
+ */
+const EMAIL =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+$/
+export function safeEmail(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length <= 254 && EMAIL.test(v) ? v : undefined
+}
+
 const time = (t: unknown): GoogleTime | undefined => {
   if (!t || typeof t !== 'object') return undefined
   const o = t as Record<string, unknown>
   const out: GoogleTime = {}
-  if (typeof o['date'] === 'string') out.date = o['date'].slice(0, 10)
-  if (typeof o['dateTime'] === 'string') out.dateTime = o['dateTime'].slice(0, 40)
-  if (typeof o['timeZone'] === 'string') out.timeZone = o['timeZone'].slice(0, 64)
+  const date = token(o['date'], 10)
+  const dateTime = token(o['dateTime'], 40)
+  const timeZone = token(o['timeZone'], 64)
+  if (date) out.date = date
+  if (dateTime) out.dateTime = dateTime
+  if (timeZone) out.timeZone = timeZone
   return out.date || out.dateTime ? out : undefined
 }
 
@@ -100,29 +126,31 @@ const time = (t: unknown): GoogleTime | undefined => {
 export function trimEvent(raw: unknown): GoogleEvent | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
-  const id = str(o['id'], 1024)
+  const id = token(o['id'], 1024)
   if (!id) return null
   const e: GoogleEvent = { id }
   const set = <K extends keyof GoogleEvent>(k: K, v: GoogleEvent[K] | undefined) => {
-    if (v !== undefined) e[k] = v
+    if (v !== undefined && v !== '') e[k] = v
   }
-  set('etag', str(o['etag'], 200))
-  set('status', str(o['status'], 20))
-  set('iCalUID', str(o['iCalUID'], 1024))
-  set('summary', str(o['summary'], 1000))
-  set('description', str(o['description']))
-  set('location', str(o['location'], 2000))
+  set('etag', token(o['etag'], 200))
+  set('status', token(o['status'], 20))
+  set('iCalUID', token(o['iCalUID'], 1024))
+  set('summary', text(o['summary'], 1000))
+  set('description', text(o['description']))
+  set('location', text(o['location'], 2000))
   set('start', time(o['start']))
   set('end', time(o['end']))
-  set('recurringEventId', str(o['recurringEventId'], 1024))
+  set('recurringEventId', token(o['recurringEventId'], 1024))
   set('originalStartTime', time(o['originalStartTime']))
-  set('eventType', str(o['eventType'], 40))
-  set('updated', str(o['updated'], 40))
+  const kind = token(o['eventType'], 40)
+  if (kind && /^\w+$/.test(kind)) e.eventType = kind
+  set('updated', token(o['updated'], 40))
+  // A recurrence line with any control character in it is dropped whole, never cleaned up into
+  // something else.
   if (Array.isArray(o['recurrence']))
     e.recurrence = o['recurrence']
-      .filter((l): l is string => typeof l === 'string')
+      .filter((l): l is string => typeof l === 'string' && l.length <= 4000 && !HAS_CONTROL.test(l))
       .slice(0, 100)
-      .map((l) => l.slice(0, 4000))
   const r = o['reminders']
   if (r && typeof r === 'object') {
     const rr = r as Record<string, unknown>
@@ -130,24 +158,29 @@ export function trimEvent(raw: unknown): GoogleEvent | null {
       useDefault: rr['useDefault'] === true,
       ...(Array.isArray(rr['overrides']) && {
         overrides: rr['overrides'].slice(0, 5).map((x) => ({
-          method: str((x as Record<string, unknown>)?.['method'], 20),
+          method: token((x as Record<string, unknown>)?.['method'], 20),
           minutes: Number((x as Record<string, unknown>)?.['minutes']),
         })),
       }),
     }
   }
+  // Addresses are kept as sent (control characters and all) only to be checked with safeEmail()
+  // before anything is written: cleaning one up could turn it into someone else's address.
   const org = o['organizer']
   if (org && typeof org === 'object') {
     const oo = org as Record<string, unknown>
-    e.organizer = { email: str(oo['email'], 320), self: oo['self'] === true }
+    e.organizer = {
+      email: typeof oo['email'] === 'string' ? oo['email'].slice(0, 320) : undefined,
+      self: oo['self'] === true,
+    }
   }
   if (Array.isArray(o['attendees']))
     e.attendees = o['attendees'].slice(0, MAX_ATTENDEES).map((a) => {
       const aa = (a ?? {}) as Record<string, unknown>
       return {
-        email: str(aa['email'], 320),
+        email: typeof aa['email'] === 'string' ? aa['email'].slice(0, 320) : undefined,
         self: aa['self'] === true,
-        responseStatus: str(aa['responseStatus'], 20),
+        responseStatus: token(aa['responseStatus'], 20),
       }
     })
   return e
@@ -229,7 +262,7 @@ const RECURRENCE_LINE = /^(RRULE|EXRULE|RDATE|EXDATE)[;:]/i
 function addRecurrence(comp: Comp, lines: string[] | undefined): void {
   for (const line of lines ?? []) {
     // One property per line, from Google's server: never let a line break start another.
-    if (!RECURRENCE_LINE.test(line) || /[\r\n]/.test(line)) continue
+    if (!RECURRENCE_LINE.test(line) || HAS_CONTROL.test(line)) continue
     try {
       comp.addProperty(ICAL.Property.fromString(line))
     } catch {
@@ -260,7 +293,11 @@ const selfDeclined = (e: GoogleEvent) =>
   e.attendees?.some((a) => a.self && a.responseStatus === 'declined') ?? false
 
 /** Out of office, focus time, birthdays and Gmail events: shown, but changed only in Google Calendar. */
-const special = (e: GoogleEvent) => !!e.eventType && e.eventType !== 'default'
+const special = (e: GoogleEvent) =>
+  !!e.eventType && /^\w{1,40}$/.test(e.eventType) && e.eventType !== 'default'
+
+/** Stands in for an organiser (or guest) address Ordo won't write. */
+const UNKNOWN_ORGANIZER = 'unknown@invalid'
 
 function vevent(e: GoogleEvent, uid: string, calendarGoogleId: string, zoneHint?: string): Comp | null {
   const comp = new ICAL.Component('vevent')
@@ -278,10 +315,16 @@ function vevent(e: GoogleEvent, uid: string, calendarGoogleId: string, zoneHint?
   if (e.status === 'tentative') comp.addPropertyWithValue('status', 'TENTATIVE')
   // Someone else's invitation: Ordo leaves it to Google Calendar, so the organiser hears about
   // changes. Events on a shared calendar are "organised" by the calendar itself: those are yours.
+  // Addresses go in as CAL-ADDRESS values, which ical.js writes as they are: only ones that pass
+  // safeEmail() are written. An organiser whose address doesn't still makes it an invitation.
   const org = e.organizer
   if (org?.email && !org.self && org.email.toLowerCase() !== calendarGoogleId.toLowerCase()) {
-    comp.addPropertyWithValue('organizer', `mailto:${org.email}`)
-    for (const a of e.attendees ?? []) if (a.email) comp.addPropertyWithValue('attendee', `mailto:${a.email}`)
+    comp.addPropertyWithValue('organizer', `mailto:${safeEmail(org.email) ?? UNKNOWN_ORGANIZER}`)
+    for (const a of e.attendees ?? []) {
+      const email = safeEmail(a.email)
+      if (email) comp.addPropertyWithValue('attendee', `mailto:${email}`)
+    }
+    if (!comp.hasProperty('attendee')) comp.addPropertyWithValue('attendee', `mailto:${UNKNOWN_ORGANIZER}`)
   }
   if (special(e)) comp.addPropertyWithValue(READ_ONLY_PROP, e.eventType!)
   addAlarms(comp, e.reminders)
@@ -306,7 +349,8 @@ export function groupToIcs(
   if (master && (master.status === 'cancelled' || selfDeclined(master))) return null
   const first = master ?? group.exceptions.find((e) => e.status !== 'cancelled' && !selfDeclined(e))
   if (!first) return null
-  const uid = first.iCalUID || first.recurringEventId || first.id
+  const uid = (first.iCalUID || first.recurringEventId || first.id).replace(ANY_CONTROL, '').slice(0, 1024)
+  if (!uid) return null
   const vcal = new ICAL.Component('vcalendar')
   vcal.addPropertyWithValue('version', '2.0')
   vcal.addPropertyWithValue('prodid', '-//Ordo//Google Calendar//EN')

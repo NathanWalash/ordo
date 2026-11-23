@@ -8,6 +8,7 @@ import {
   groupToIcs,
   plainText,
   READ_ONLY_PROP,
+  safeEmail,
   trimEvent,
   veventToGoogle,
   type GoogleEvent,
@@ -368,5 +369,117 @@ describe('helpers', () => {
   it('reads HTML as text and leaves plain text alone', () => {
     expect(plainText('a < b')).toBe('a < b')
     expect(plainText('<p>One</p><p>Two</p>')).toBe('One\nTwo')
+  })
+})
+
+describe('crafted event JSON can’t add iCalendar properties', () => {
+  const EVIL = '\r\nX-EVIL:1\r\nATTENDEE:mailto:evil@x.example'
+  /** Every property and component name, as ical.js reads the serialised text back. */
+  const names = (ics: string) =>
+    new ICAL.Component(ICAL.parse(ics) as never)
+      .getAllSubcomponents()
+      .flatMap((c) => [
+        c.name,
+        ...c.getAllProperties().map((p) => p.name),
+        ...c.getAllSubcomponents().flatMap((s) => [s.name, ...s.getAllProperties().map((p) => p.name)]),
+      ])
+  const ALLOWED = [
+    'vevent',
+    'uid',
+    'dtstart',
+    'dtend',
+    'dtstamp',
+    'summary',
+    'location',
+    'description',
+    'organizer',
+    'attendee',
+    'rrule',
+    READ_ONLY_PROP,
+    'valarm',
+    'action',
+    'trigger',
+  ]
+
+  const crafted = {
+    id: `abc${EVIL}`,
+    etag: `"1"${EVIL}`,
+    status: `confirmed${EVIL}`,
+    iCalUID: `abc@google.com${EVIL}`,
+    summary: `Title${EVIL}`,
+    description: `Notes${EVIL}`,
+    location: `Room${EVIL}`,
+    eventType: `outOfOffice${EVIL}`,
+    updated: `2026-11-01T00:00:00Z${EVIL}`,
+    start: { dateTime: `2026-11-02T09:00:00Z${EVIL}`, timeZone: `Europe/London${EVIL}` },
+    end: { dateTime: '2026-11-02T10:00:00Z', timeZone: 'Europe/London\tX' },
+    recurrence: [
+      `RRULE:FREQ=DAILY;COUNT=2${EVIL}`,
+      'RRULE:FREQ=DAILY;COUNT=2\u0000',
+      'RRULE:FREQ=DAILY;COUNT=2',
+    ],
+    organizer: { email: `boss@work.example${EVIL}` },
+    attendees: [
+      { email: 'a@work.example\nX-EVIL:1' },
+      { email: 'b@work.example\tATTENDEE:mailto:c@x' },
+      { email: '"quoted"@work.example' },
+      { email: 'ok@work.example', responseStatus: `accepted${EVIL}` },
+    ],
+    reminders: { useDefault: false, overrides: [{ method: `popup${EVIL}`, minutes: 10 }] },
+  }
+
+  it('trims every non-text value to have no control characters', () => {
+    const e = trimEvent(crafted)!
+    for (const v of [
+      e.id,
+      e.etag,
+      e.status,
+      e.iCalUID,
+      e.updated,
+      e.start?.dateTime,
+      e.start?.timeZone,
+      e.end?.timeZone,
+      e.reminders?.overrides?.[0]?.method,
+      e.attendees?.[3]?.responseStatus,
+    ])
+      // eslint-disable-next-line no-control-regex
+      expect(v).not.toMatch(/[\u0000-\u001f]/)
+    expect(e.eventType).toBeUndefined()
+    expect(e.recurrence).toEqual(['RRULE:FREQ=DAILY;COUNT=2'])
+  })
+
+  it('writes only the properties Ordo means to, from trimmed and untrimmed events alike', () => {
+    for (const event of [trimEvent(crafted)!, crafted as unknown as GoogleEvent]) {
+      const built = groupToIcs({ master: event, exceptions: [] }, CAL)!
+      expect(built).not.toBeNull()
+      expect(built.ics).not.toMatch(/^X-EVIL/m)
+      expect(built.ics).not.toMatch(/^ATTENDEE:mailto:evil/m)
+      expect(built.ics).not.toMatch(/mailto:(a|b|c|"quoted")@/)
+      for (const n of names(built.ics)) expect(ALLOWED).toContain(n)
+      const vevent = new ICAL.Component(ICAL.parse(built.ics) as never).getFirstSubcomponent('vevent')!
+      // Free text is a TEXT value, which ical.js escapes: the line breaks stay inside SUMMARY.
+      expect(vevent.getFirstPropertyValue('summary')).toBe(`Title${EVIL}`.replace(/\r\n/g, '\n'))
+      expect(vevent.getAllProperties('attendee').map((p) => p.getFirstValue())).toEqual([
+        'mailto:ok@work.example',
+      ])
+      // The organiser's address was refused, but it's still someone else's invitation.
+      expect(readEvent(built.ics, { uid: String(vevent.getFirstPropertyValue('uid')) }).organizer).toBe(
+        'unknown@invalid',
+      )
+    }
+  })
+
+  it('accepts ordinary addresses and refuses odd ones', () => {
+    expect(safeEmail('me.name+tag@work.example')).toBe('me.name+tag@work.example')
+    for (const bad of [
+      'a@b',
+      'a b@c.example',
+      'a@c.example\r\n',
+      '<a@c.example>',
+      'a@c.example;x',
+      'a@@c.example',
+      '',
+    ])
+      expect(safeEmail(bad)).toBeUndefined()
   })
 })
