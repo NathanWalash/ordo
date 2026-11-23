@@ -17,8 +17,7 @@ import {
   type MessageContent,
   type MessageHeader,
 } from '@ordo/mail-core'
-import type {
-  ImapMailProvider} from '@ordo/mail-core/node';
+import type { ImapMailProvider } from '@ordo/mail-core/node'
 import {
   buildMessage,
   checkOutgoing,

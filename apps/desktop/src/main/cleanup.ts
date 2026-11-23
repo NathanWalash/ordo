@@ -6,8 +6,7 @@ import {
   type CleanupPlan,
   type CleanupRecord,
 } from '@ordo/mail-core'
-import type {
-  ImapMailProvider} from '@ordo/mail-core/node';
+import type { ImapMailProvider } from '@ordo/mail-core/node'
 import {
   createGuardedFetch,
   createMailtoSender,
