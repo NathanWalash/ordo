@@ -153,12 +153,11 @@ function EditAccountSheet(props: { account: AccountSummary; onClose: () => void;
     setResult(null)
     setBusy('save')
     try {
-      if (password.trim()) {
-        const r = await window.ordo.accounts.setPassword({ id: a.id, password })
-        if (!r.ok) return setResult(r)
-      }
-      const r = await window.ordo.accounts.update({ id: a.id, label, color })
-      if (!r.ok) return setResult(r)
+      // Both start straight from the click (the preload refuses a change without one): the name
+      // and colour are saved at once, the password after Ordo has signed in with it.
+      const named = window.ordo.accounts.update({ id: a.id, label, color })
+      const signed = password.trim() ? window.ordo.accounts.setPassword({ id: a.id, password }) : null
+      for (const r of [await named, ...(signed ? [await signed] : [])]) if (!r.ok) return setResult(r)
       props.onSaved()
     } finally {
       setBusy(null)
