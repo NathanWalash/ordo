@@ -76,7 +76,7 @@ export const PROVIDERS: Record<ProviderId, ProviderPreset> = {
     help: 'Create one at myaccount.google.com/apppasswords. Your Google password won’t work.',
     notes: [
       'App passwords need 2-Step Verification turned on for your Google Account.',
-      'Work and school accounts (Google Workspace) may not allow app passwords or IMAP: ask your admin. Sign in with Google is coming, and will work for those too.',
+      'Work and school accounts (Google Workspace) may not allow app passwords: use Sign in with Google instead. Their admin may also have turned IMAP off.',
     ],
     domains: ['gmail.com', 'googlemail.com'],
   },

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CircleAlert, CircleCheck, PenLine, Trash2 } from 'lucide-react'
+import { CircleAlert, CircleCheck, LogIn, PenLine, Trash2 } from 'lucide-react'
 import { PROVIDERS } from '@ordo/mail-core'
 import { ACCOUNT_COLORS, type AccountColor, type AccountResult, type AccountSummary } from '@ordo/shared'
 import { Button } from '../Button'
@@ -17,7 +17,12 @@ interface Props {
 }
 
 const providerName = (a: AccountSummary) =>
-  a.provider === 'other' ? a.imap.host : PROVIDERS[a.provider].name
+  (a.provider === 'other' ? a.imap.host : PROVIDERS[a.provider].name) +
+  (a.auth.kind === 'oauth' ? ' (Google sign-in)' : '')
+
+/** Bring Settings → Google into view, to add the OAuth client Sign in with Google needs. */
+const showGoogleSettings = () =>
+  document.getElementById('settings-google')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
 /**
  * Settings → Accounts: every mail account, with what it is and how its last check went. Add one,
@@ -28,6 +33,9 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<AccountSummary | null>(null)
   const [removing, setRemoving] = useState<AccountSummary | null>(null)
+  /** The account whose Google sign-in is waiting for the browser, and why the last one failed. */
+  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const [signInError, setSignInError] = useState<{ id: string; message: string } | null>(null)
 
   const load = useCallback(async () => setAccounts(await window.ordo.accounts.list()), [])
   useEffect(() => {
@@ -43,6 +51,19 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
     onChanged()
   }
 
+  /** Sign in to Google again in the browser, for an account whose Google sign-in stopped working. */
+  const signInAgain = async (a: AccountSummary) => {
+    setSigningIn(a.id)
+    setSignInError(null)
+    try {
+      const r = await window.ordo.accounts.signInAgain({ id: a.id })
+      if (!r.ok && r.error !== 'cancelled') setSignInError({ id: a.id, message: r.message })
+      if (r.ok) await changed()
+    } finally {
+      setSigningIn(null)
+    }
+  }
+
   if (!accounts) return null
   return (
     <Section title="Accounts">
@@ -51,8 +72,8 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
           <div className="flex-1">
             <div className="text-[13px] font-medium">Mail accounts</div>
             <div className="text-[12px] leading-snug text-ink-2">
-              Not connected. Connect iCloud (Mail and Calendar), or add Gmail, Yahoo, Fastmail or any IMAP
-              account with an app password.
+              Not connected. Connect iCloud (Mail and Calendar), add Gmail with Sign in with Google, or add
+              Gmail, Yahoo, Fastmail or any IMAP account with an app password.
             </div>
           </div>
           <Button onClick={() => setAdding(true)}>Add account…</Button>
@@ -75,19 +96,39 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
                     {a.messageCount > 0 && ` · ${a.messageCount.toLocaleString()} in the inbox`}
                     {a.calendar ? ' · Calendar' : ''}
                   </div>
-                  {a.sync.message && (
+                  {(signInError?.id === a.id ? signInError.message : a.sync.message) && (
                     <p className="mt-1 flex items-start gap-1 text-[12px] leading-snug text-danger-text">
                       <CircleAlert size={13} className="mt-px shrink-0" />
-                      <span>{a.sync.message}</span>
+                      <span>{signInError?.id === a.id ? signInError.message : a.sync.message}</span>
+                    </p>
+                  )}
+                  {signingIn === a.id && (
+                    <p className="mt-1 text-[12px] leading-snug text-ink-2">
+                      Finish signing in in your browser, then come back here.
                     </p>
                   )}
                 </div>
+                {a.auth.kind === 'oauth' && a.sync.error === 'auth' ? (
+                  signingIn === a.id ? (
+                    <Button onClick={() => void window.ordo.accounts.cancelGoogle()}>Cancel sign-in</Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      icon={<LogIn size={13} />}
+                      disabled={signingIn !== null}
+                      aria-label={`Sign in to ${a.label} again`}
+                      onClick={() => void signInAgain(a)}
+                    >
+                      Sign in again
+                    </Button>
+                  )
+                ) : null}
                 <Button
                   icon={<PenLine size={13} />}
                   aria-label={`Edit ${a.label}`}
                   onClick={() => setEditing(a)}
                 >
-                  {a.sync.error === 'auth' ? 'Enter password…' : 'Edit…'}
+                  {a.sync.error === 'auth' && a.auth.kind === 'password' ? 'Enter password…' : 'Edit…'}
                 </Button>
                 <Button
                   icon={<Trash2 size={13} />}
@@ -110,6 +151,10 @@ export function AccountsSection({ onConnectIcloud, onChanged }: Props) {
           onAdded={() => {
             setAdding(false)
             void changed()
+          }}
+          onSetUpGoogle={() => {
+            setAdding(false)
+            showGoogleSettings()
           }}
         />
       )}
@@ -217,15 +262,22 @@ function EditAccountSheet(props: { account: AccountSummary; onClose: () => void;
           ))}
         </div>
       </fieldset>
-      <TextField
-        label={`New ${preset.passwordLabel.toLowerCase()}`}
-        type="password"
-        autoComplete="off"
-        placeholder={preset.passwordHint || 'Leave empty to keep the saved one'}
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        hint={`Only if it changed or stopped working. Ordo signs in with it before saving it. ${preset.help}`}
-      />
+      {a.auth.kind === 'oauth' ? (
+        <p className="text-[12px] leading-snug text-ink-2">
+          Signs in with your Google account, so there’s no password to enter. If Google stops accepting Ordo’s
+          sign-in, the account says so and offers Sign in again.
+        </p>
+      ) : (
+        <TextField
+          label={`New ${preset.passwordLabel.toLowerCase()}`}
+          type="password"
+          autoComplete="off"
+          placeholder={preset.passwordHint || 'Leave empty to keep the saved one'}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          hint={`Only if it changed or stopped working. Ordo signs in with it before saving it. ${preset.help}`}
+        />
+      )}
       <p
         role="status"
         className={`flex items-start gap-1.5 text-[12px] leading-snug empty:hidden ${result?.ok ? 'text-ink-2' : 'text-danger'}`}
@@ -280,7 +332,11 @@ function RemoveAccountSheet(props: {
       }
     >
       <div className="flex flex-col gap-2 text-[13px] leading-snug">
-        <p>Ordo forgets this account’s password and everything it downloaded for it:</p>
+        <p>
+          {a.auth.kind === 'oauth'
+            ? 'Ordo forgets this account and everything it downloaded for it:'
+            : 'Ordo forgets this account’s password and everything it downloaded for it:'}
+        </p>
         <ul className="list-disc pl-5 text-ink-2">
           <li>
             {a.messageCount > 0
@@ -295,6 +351,12 @@ function RemoveAccountSheet(props: {
           Nothing changes on the server: your mail stays in {where}. You can add the account again at any
           time.
         </p>
+        {a.auth.kind === 'oauth' && (
+          <p className="text-ink-2">
+            Your Google sign-in stays in Settings → Google (Calendar may use it). To take away Ordo’s access
+            to your Google account, sign out there.
+          </p>
+        )}
       </div>
     </Sheet>
   )

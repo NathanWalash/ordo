@@ -106,7 +106,24 @@ export class FakeXoauth2Mail {
           send(`${tag} OK 73 good day (Success)`)
           return void socket.end()
         default:
-          return send(authed ? `${tag} OK Success` : `${tag} NO not signed in`)
+          if (!authed) return send(`${tag} NO not signed in`)
+          // An empty mailbox: just enough for an app to check an inbox with nothing in it.
+          switch (command.toUpperCase()) {
+            case 'LIST':
+              send('* LIST (\\HasNoChildren) "/" "INBOX"')
+              break
+            case 'STATUS':
+              send('* STATUS "INBOX" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0)')
+              break
+            case 'SELECT':
+            case 'EXAMINE':
+              send('* FLAGS (\\Answered \\Flagged \\Draft \\Deleted \\Seen)')
+              send('* 0 EXISTS')
+              send('* OK [UIDVALIDITY 1] UIDs valid')
+              send('* OK [UIDNEXT 1] Predicted next UID')
+              return send(`${tag} OK [READ-ONLY] Selected`)
+          }
+          return send(`${tag} OK Success`)
       }
     })
   }
