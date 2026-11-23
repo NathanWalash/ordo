@@ -73,10 +73,10 @@ and the other `ORDO_*` test overrides, exactly as the windowed app does.
 | `mail flag <uid>... [--unflag] [--mailbox <path>] --confirm`                  | Flag or unflag \*                                                |
 | `mail mark <uid>... --read\|--unread [--mailbox <path>] --confirm`            | Mark read or unread \*                                           |
 | `mail undo [<id>] --confirm`                                                  | Undo a move made in the same process (in practice, MCP) \*       |
-| `calendar sync`                                                               | Fetch changed iCloud calendars and calendar links into the cache |
+| `calendar sync`                                                               | Fetch changed iCloud, Google and linked calendars into the cache |
 | `calendar events --from YYYY-MM-DD --to YYYY-MM-DD [--limit <n>]`             | Cached events, both days included, at most 400 days              |
 | `calendar list`                                                               | Calendars, where each comes from, and which can be changed       |
-| `calendar add --calendar <name> --title <t> --start <when> [...] --confirm`   | Add an event to a writable iCloud calendar \*                    |
+| `calendar add --calendar <name> --title <t> --start <when> [...] --confirm`   | Add an event to a writable iCloud or Google calendar \*          |
 | `calendar edit --uid <uid> [--occurrence <id> \| --all] <fields> --confirm`   | Change an event, or one occurrence of a repeating one \*         |
 | `calendar delete --uid <uid> [--occurrence <id> \| --all] --confirm`          | Delete an event, or one occurrence of a repeating one \*         |
 | `money bills`                                                                 | Bills and subscriptions, and ones found to confirm in the app    |
@@ -149,9 +149,11 @@ it with the same statement parser and limits as an import in the app.
 
 ### Calendar events
 
-`calendar add`, `edit` and `delete` change events on writable iCloud calendars, through the same
-function as the window. Calendars added by link or file, read-only iCloud calendars and other
-people's invitations are refused (`read_only`).
+`calendar add`, `edit` and `delete` change events on writable iCloud and Google calendars, through
+the same function as the window. Calendars added by link or file, read-only calendars and other
+people's invitations are refused (`read_only`). A Google calendar needs its account signed in
+(in the app, Settings › Google; see [google.md](google.md)), not iCloud; the confirmation card says
+which calendar and account a change goes to. Ordo doesn't email Google guests about changes.
 
 - **When:** `--start` and `--end` are a day (`2026-11-20`, an all-day event; `--end` is the last
   day) or a time (`2026-11-20T09:30`), in `--time-zone` (an IANA name like `Europe/London`;
