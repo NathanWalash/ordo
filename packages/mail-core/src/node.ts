@@ -6,13 +6,22 @@ export {
   MailAuthError,
   MailConnectionError,
   MailUnavailableError,
+  authOf,
   classifyImapError,
   serverWords,
   testImapLogin,
   type ImapConfig,
   type MailConnectionReason,
+  type MailCredentials,
 } from './imap'
-export { MailStore, type MailboxState, type NewCleanup } from './store'
+export {
+  DEFAULT_ACCOUNT_ID,
+  MAIL_SCHEMA_VERSION,
+  MailStore,
+  migrateMailDb,
+  type MailboxState,
+  type NewCleanup,
+} from './store'
 export { scanMailbox, type ScanOptions } from './scan'
 export { BlockedAddressError, createGuardedFetch, createGuardedLookup, type Resolver } from './net-guard'
 export { runCleanup, undoCleanup, type CleanupOptions } from './cleanup'

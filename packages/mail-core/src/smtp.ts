@@ -2,6 +2,7 @@ import { createTransport } from 'nodemailer'
 import MailComposer from 'nodemailer/lib/mail-composer'
 import { isEmailAddress } from './address'
 import { COMPOSE_LIMITS } from './compose'
+import { authOf } from './imap'
 import type { Address } from './types'
 import { hasControlChars, MAILTO_PER_CLEANUP_MAX, type MailtoMessage } from './unsubscribe'
 
@@ -13,7 +14,18 @@ export interface SmtpConfig {
   /** Refuse to send unless the server upgrades to TLS with STARTTLS. */
   requireTLS: boolean
   user: string
-  pass: string
+  /** A password. Leave out when signing in with `accessToken`. */
+  pass?: string
+  /** An OAuth 2 access token (XOAUTH2), instead of a password. */
+  accessToken?: string
+}
+
+/** Nodemailer's auth for a config: OAuth 2 with an access token, or a plain login. */
+function smtpAuth(cfg: SmtpConfig) {
+  const a = authOf(cfg)
+  return 'accessToken' in a
+    ? { type: 'OAuth2' as const, user: a.user, accessToken: a.accessToken }
+    : { user: a.user, pass: a.pass }
 }
 
 /** iCloud Mail's SMTP server: STARTTLS on 587, same app-specific password as IMAP. */
@@ -25,7 +37,7 @@ const transportFor = (cfg: SmtpConfig, pool: boolean) =>
     port: cfg.port,
     secure: cfg.secure,
     requireTLS: cfg.requireTLS,
-    auth: { user: cfg.user, pass: cfg.pass },
+    auth: smtpAuth(cfg),
     ...(pool && { pool: true, maxConnections: 1 }),
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,

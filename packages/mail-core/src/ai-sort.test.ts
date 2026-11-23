@@ -316,8 +316,8 @@ describe('aiCategorise with the SQLite cache', () => {
     await aiCategorise(changed, third.provider, { model: 'm1', cache: store })
     expect(sent(third.calls[0]!).map((s) => s['address'])).toEqual(['b@x.example'])
 
-    // Disconnecting clears the cache with everything else.
-    store.clear()
+    // Removing the last account clears the cache with everything else.
+    store.clearAll()
     expect(store.getAiCategories('lmstudio:m1', ['a@x.example']).size).toBe(0)
   })
 

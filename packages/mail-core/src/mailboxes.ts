@@ -17,16 +17,20 @@ const ROLE_OF: Record<string, MailboxRole> = {
   '\\Drafts': 'drafts',
   '\\Sent': 'sent',
   '\\Archive': 'archive',
+  '\\All': 'all',
   '\\Junk': 'junk',
   '\\Trash': 'trash',
 }
 
-const ORDER: MailboxRole[] = ['inbox', 'drafts', 'sent', 'archive', 'junk', 'trash']
+const ORDER: MailboxRole[] = ['inbox', 'drafts', 'sent', 'archive', 'all', 'junk', 'trash']
 
 /**
  * The folders to show, from an IMAP LIST: selectable ones only, one folder per role (the
  * server's own SPECIAL-USE flag wins over a guess from the name), the special ones first in
- * Mail's order (Inbox, Drafts, Sent, Archive, Junk, Bin), then the rest by path.
+ * Mail's order (Inbox, Drafts, Sent, Archive, All Mail, Junk, Bin), then the rest by path.
+ * Roles come from the server's SPECIAL-USE flags, never from iCloud's folder names, so Gmail's
+ * `[Gmail]/Sent Mail`, `[Gmail]/Bin` (or `Trash`) and `[Gmail]/All Mail` work like iCloud's
+ * `Sent Messages` and `Deleted Messages`. Gmail's `[Gmail]` parent can't hold mail and is left out.
  */
 export function toMailboxList(raw: readonly RawMailbox[]): MailboxInfo[] {
   const usable = raw.filter((m) => !m.flags.has('\\Noselect') && !m.flags.has('\\NonExistent'))
@@ -64,6 +68,15 @@ export const ROLE_NAMES: Record<MailboxRole, string> = {
   drafts: 'Drafts',
   sent: 'Sent',
   archive: 'Archive',
+  all: 'All Mail',
   junk: 'Junk',
   trash: 'Bin',
+}
+
+/**
+ * Where Archive puts mail: the Archive folder, or on Gmail (which has none) All Mail, where a
+ * message moved out of the Inbox keeps its other labels. Null when there's neither.
+ */
+export function archiveMailbox(list: readonly MailboxInfo[]): MailboxInfo | null {
+  return list.find((m) => m.role === 'archive') ?? list.find((m) => m.role === 'all') ?? null
 }
