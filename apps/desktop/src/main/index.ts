@@ -22,6 +22,7 @@ import { closeMoney, registerMoneyIpc } from './money'
 import { registerMemoryIpc, stopAsk } from './money-memory'
 import { closeBoards, registerBoardsIpc, tidyBoards } from './boards'
 import { releaseWriteLock, toRenderer } from './writes'
+import { registerUpdatesIpc, scheduleUpdateChecks } from './updates'
 import { headlessArgs } from './headless/args'
 import { runHeadless } from './headless/run'
 
@@ -172,6 +173,7 @@ function startApp(): void {
   registerMoneyIpc()
   registerMemoryIpc()
   registerBoardsIpc()
+  registerUpdatesIpc()
 
   app.on('before-quit', () => mail.closeMail())
   app.on('before-quit', () => closeMailClient())
@@ -193,6 +195,7 @@ function startApp(): void {
     app.on('before-quit', stopAssistant)
     createWindow()
     void tidyBoards()
+    scheduleUpdateChecks()
     app.on('activate', () => {
       if (!quietTest && BrowserWindow.getAllWindows().length === 0) createWindow()
     })

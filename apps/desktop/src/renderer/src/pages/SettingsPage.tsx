@@ -4,6 +4,7 @@ import type { AccountStatus, AiSettings as Ai, Settings, Theme } from '@ordo/sha
 import { Button } from '../components/Button'
 import { AiSettings } from '../components/AiSettings'
 import { SegmentedControl } from '../components/SegmentedControl'
+import { UpdateSettings } from '../components/UpdateSettings'
 import { Row, Section } from '../components/SettingsSection'
 import { useAppearance } from '../appearance'
 
@@ -19,7 +20,7 @@ interface Props {
   onDisconnect: () => void
 }
 
-/** App preferences, grouped into sections: the account, appearance and AI. */
+/** App preferences, grouped into sections: the account, appearance, AI and updates. */
 export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const appearance = useAppearance()
@@ -88,6 +89,7 @@ export function SettingsPage({ account, onConnect, onDisconnect }: Props) {
         )}
       </Section>
       {settings && <AiSettings ai={settings.ai} onSave={setAi} />}
+      <UpdateSettings />
     </div>
   )
 }

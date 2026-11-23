@@ -73,7 +73,15 @@ with a loopback address.
 
 ## Releasing
 
-1. Move the "Unreleased" changelog entries under a new version heading.
-2. Bump `version` in `apps/desktop/package.json`.
-3. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-4. The Release workflow builds installers for macOS, Windows and Linux and attaches them to a draft release. Check it, then publish.
+From a clean, up-to-date `main`:
+
+```bash
+pnpm release 0.2.0 --dry-run   # see what it would do
+pnpm release 0.2.0             # or patch, minor, major
+```
+
+It moves the "Unreleased" changelog entries under the new version, bumps `apps/desktop/package.json`,
+commits, tags `v0.2.0` and pushes `main` and the tag. The Release workflow then builds installers for
+macOS, Windows and Linux into a draft release with that version's changelog as its notes. Check it,
+then publish: installed copies of Ordo only see published releases. Details in
+[docs/updates.md](docs/updates.md#cutting-a-release).
