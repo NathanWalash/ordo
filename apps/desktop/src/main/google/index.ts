@@ -1,7 +1,7 @@
 // Google sign-in for the Electron main process: the account store in the user's profile, secrets
 // in safeStorage, the consent page in the system browser, and every request through the Google
-// allow-list. Calendar uses it now; Gmail (IMAP/SMTP with XOAUTH2) can use the same accounts later
-// through getGoogleAccessToken() and requestGoogleScopes(). See docs/google.md.
+// allow-list. Calendar and Gmail (IMAP/SMTP with XOAUTH2: ../auth.ts and ../google-mail.ts) use
+// the same accounts, through getGoogleAccessToken() and requestGoogleScopes(). See docs/google.md.
 import { join } from 'node:path'
 import { app, safeStorage, shell } from 'electron'
 import { GoogleAuth, type GoogleAccountInfo, type SecretBox } from './auth'
@@ -9,7 +9,7 @@ import { checkEndpoints, googleFetch, isConsentUrl } from './fetch'
 import { endpointsAt, GOOGLE_ENDPOINTS, OAuthError, type FetchFn, type GoogleEndpoints } from './oauth'
 
 export { GoogleReauthError, GoogleScopeError, type GoogleAccountInfo } from './auth'
-export { CALENDAR_SCOPES, OAuthError, SCOPES } from './oauth'
+export { CALENDAR_SCOPES, hasCalendarScopes, MAIL_SCOPES, OAuthError, SCOPES } from './oauth'
 
 /**
  * Google's own endpoints. An unpackaged build (tests, development) can point at a local fake with
@@ -67,7 +67,7 @@ export function googleAuth(): GoogleAuth {
 }
 
 /**
- * The seam for other features (Gmail's IMAP/SMTP XOAUTH2 next): an access token for a connected
+ * The seam for other features (Gmail’s IMAP/SMTP XOAUTH2): an access token for a connected
  * Google account covering `scopes`. Throws GoogleScopeError if the account never granted one of
  * them (then call requestGoogleScopes), GoogleReauthError if the user must sign in again.
  */

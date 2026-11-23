@@ -15,7 +15,13 @@ export type GoogleClientInput = z.infer<typeof GoogleClientSchema>
 /** Google's account id (`sub`). */
 export const GoogleAccountIdSchema = z.string().regex(/^[\w-]{1,255}$/)
 
-export const ConnectGoogleSchema = z.strictObject({ accountId: GoogleAccountIdSchema.optional() }).optional()
+export const ConnectGoogleSchema = z
+  .strictObject({
+    accountId: GoogleAccountIdSchema.optional(),
+    /** With `accountId`: ask that account for Calendar access too (one added for Mail only). */
+    addCalendar: z.boolean().optional(),
+  })
+  .optional()
 export type ConnectGoogleInput = z.infer<typeof ConnectGoogleSchema>
 
 export const CalendarColorSchema = z.strictObject({
@@ -32,12 +38,22 @@ export type CalendarColorInput = z.input<typeof CalendarColorSchema>
 export const ReplaceFeedSchema = z.strictObject({ feedId: z.string().min(1).max(100) })
 export type ReplaceFeedInput = z.infer<typeof ReplaceFeedSchema>
 
+/** Signing out of Google: the mail accounts that sign in with it, which go too (the user confirmed them). */
+export const SignOutGoogleOptionsSchema = z
+  .strictObject({ removeMail: z.array(z.string().regex(/^[a-z0-9-]{1,40}$/)).max(100) })
+  .optional()
+export type SignOutGoogleOptions = z.infer<typeof SignOutGoogleOptionsSchema>
+
 export interface GoogleAccountStatus {
   id: string
   email: string
   /** Google stopped accepting Ordo's sign-in (revoked, or 7 days passed in Testing): sign in again. */
   needsReauth: boolean
   calendars: number
+  /** It gave Ordo Calendar access (an account added for Mail only hasn't). */
+  calendar: boolean
+  /** Mail accounts in Ordo that sign in with it. */
+  mailAccounts: { id: string; label: string; email: string }[]
 }
 
 export interface GoogleStatus {
@@ -81,8 +97,12 @@ export interface GoogleApi {
   /** Sign in through the browser: a new account, or `accountId` again. */
   connect(input?: ConnectGoogleInput): Promise<GoogleConnectOutcome>
   cancelConnect(): Promise<void>
-  /** Revoke Ordo's access and forget the account and its calendars. */
-  signOut(accountId: string): Promise<GoogleSimpleOutcome>
+  /**
+   * Revoke Ordo's access and forget the account and its calendars. Mail accounts that sign in with
+   * it are removed too, but only those listed in `removeMail` (the user confirmed them); any other
+   * refuses the sign-out.
+   */
+  signOut(accountId: string, options?: SignOutGoogleOptions): Promise<GoogleSimpleOutcome>
   setCalendarColor(input: CalendarColorInput): Promise<void>
   feedMatches(): Promise<GoogleFeedMatch[]>
   /** Remove a link calendar in favour of the same calendar from a connected account. */

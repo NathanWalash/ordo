@@ -37,7 +37,7 @@ export const SCOPES = {
   calendarList: 'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   /** See and change events on every calendar the account can change. */
   calendarEvents: 'https://www.googleapis.com/auth/calendar.events',
-  /** IMAP and SMTP with XOAUTH2 (restricted). Not asked for yet: see docs/google.md. */
+  /** IMAP and SMTP with XOAUTH2 (restricted): Gmail accounts that sign in with Google. */
   mail: 'https://mail.google.com/',
 } as const
 
@@ -52,6 +52,17 @@ export const CALENDAR_SCOPES: readonly string[] = [
   SCOPES.calendarList,
   SCOPES.calendarEvents,
 ]
+
+/**
+ * Gmail over IMAP and SMTP (XOAUTH2) needs Google's one mail scope, which is restricted: there's
+ * no narrower one for IMAP. A Gmail account added with Sign in with Google asks for just this (and
+ * who you are); Calendar is connected separately.
+ */
+export const MAIL_SCOPES: readonly string[] = [SCOPES.openid, SCOPES.email, SCOPES.mail]
+
+/** Whether an account's grant covers Calendar (one added for Mail only doesn't). */
+export const hasCalendarScopes = (scopes: readonly string[]) =>
+  scopes.includes(SCOPES.calendarList) && scopes.includes(SCOPES.calendarEvents)
 
 export type OAuthErrorCode =
   | 'timeout'

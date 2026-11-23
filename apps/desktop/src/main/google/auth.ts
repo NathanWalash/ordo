@@ -22,6 +22,7 @@ import {
   readIdToken,
   refreshAccessToken,
   revokeToken,
+  SCOPES,
   type FetchFn,
   type GoogleEndpoints,
 } from './oauth'
@@ -250,7 +251,9 @@ export class GoogleAuth {
         await revokeToken(this.o.endpoints, this.o.fetch, t.refreshToken ?? t.accessToken)
         throw new OAuthError(
           'scopes',
-          'Ordo needs every permission on Google’s screen to show and change your calendars. Connect again and leave them all ticked.',
+          scopes.includes(SCOPES.mail)
+            ? 'Ordo needs every permission on Google’s screen to read and send your mail. Sign in again and leave them all ticked.'
+            : 'Ordo needs every permission on Google’s screen to show and change your calendars. Connect again and leave them all ticked.',
         )
       }
       const refresh = t.refreshToken ? this.o.box.seal(t.refreshToken) : existing?.refresh
@@ -258,7 +261,9 @@ export class GoogleAuth {
       const account: StoredAccount = {
         id: who.sub,
         email: who.email,
-        scopes: [...scopes],
+        // What was asked for, plus what the account had before that this grant still covers (an
+        // account signed in again for one feature keeps the other's access when Google says so).
+        scopes: [...new Set([...scopes, ...(existing?.scopes ?? []).filter(has)])],
         refresh,
         added: existing?.added ?? new Date(this.now()).toISOString(),
       }
