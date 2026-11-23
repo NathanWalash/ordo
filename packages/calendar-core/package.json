@@ -13,6 +13,6 @@
   },
   "dependencies": {
     "ical.js": "^2.2.1",
-    "tsdav": "^2.5.0"
+    "tsdav": "^2.5.1"
   }
 }
