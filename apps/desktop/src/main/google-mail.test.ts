@@ -311,6 +311,105 @@ describe('signing in to Gmail with a Google token', () => {
   })
 })
 
+describe('a sign-in never takes access away from a Google account Ordo already has', () => {
+  google.addCalendar({ id: ME.email, summary: 'Work', accessRole: 'owner', primary: true })
+
+  /** One account's stored entry in google.json (its sealed refresh token and scopes), as written. */
+  const stored = (sub: string) =>
+    (
+      JSON.parse(readFileSync(join(dir.path, 'google.json'), 'utf8')) as {
+        accounts: { id: string; refresh: string; scopes: string[] }[]
+      }
+    ).accounts.find((a) => a.id === sub)
+
+  async function calendarConnected() {
+    expect(await calendar.connectGoogle(undefined)).toMatchObject({ ok: true })
+    for (;;) {
+      const r = await calendar.sync({ googleOnly: true })
+      if (r.ok || r.error !== 'busy') break
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(calendar.calendars().map((c) => c.name)).toEqual(['Work'])
+  }
+
+  it('a sign-in for Mail that picks the account Calendar uses changes nothing', async () => {
+    await calendarConnected()
+    const before = stored(ME.sub)
+    const revoked = google.revoked.length
+    const { addGoogle } = await import('./google-mail')
+    // "Another Google account": Ordo can't know which one the user will pick.
+    const r = await addGoogle({})
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid',
+      message: expect.stringContaining('Nothing changed'),
+    })
+    expect(stored(ME.sub)).toEqual(before)
+    expect(google.revoked.length).toBe(revoked)
+    expect(accounts.list()).toEqual([])
+    // Calendar carries on: its calendars aren't cleared and it still syncs.
+    expect(calendar.calendars().map((c) => c.name)).toEqual(['Work'])
+    expect(await calendar.sync({ googleOnly: true })).toMatchObject({ ok: true })
+    // Picking it by name works.
+    expect(await addGoogle({ googleAccountId: ME.sub })).toMatchObject({ ok: true })
+  })
+
+  it('a Calendar connect that picks the account Mail uses changes nothing', async () => {
+    const { addGoogle } = await import('./google-mail')
+    const added = await addGoogle({})
+    expect(added).toMatchObject({ ok: true })
+    const before = stored(ME.sub)
+    const r = await calendar.connectGoogle(undefined)
+    expect(r).toMatchObject({ ok: false, message: expect.stringContaining('Add Calendar') })
+    expect(stored(ME.sub)).toEqual(before)
+    expect(await accounts.test({ id: added.ok ? added.account.id : '' })).toMatchObject({ ok: true })
+    // Add Calendar on its row asks for both, and keeps Mail.
+    expect(await calendar.connectGoogle({ accountId: ME.sub, addCalendar: true })).toMatchObject({ ok: true })
+    expect(stored(ME.sub)!.scopes).toEqual(
+      expect.arrayContaining([MAIL, 'https://www.googleapis.com/auth/calendar.events']),
+    )
+  })
+
+  it('signing in again as another account Ordo has changes neither', async () => {
+    const { addGoogle, signInAgain } = await import('./google-mail')
+    const a = await addGoogle({})
+    if (!a.ok) throw new Error(a.message)
+    google.account = { ...OTHER }
+    expect(await calendar.connectGoogle(undefined)).toMatchObject({ ok: true })
+    const mine = stored(ME.sub)
+    const theirs = stored(OTHER.sub)
+    const revoked = google.revoked.length
+    // Still signed in to the browser as OTHER: Sign in again for ME's mail account picks OTHER.
+    const r = await signInAgain({ id: a.account.id })
+    expect(r).toMatchObject({
+      ok: false,
+      error: 'invalid',
+      message: expect.stringContaining('Nothing changed'),
+    })
+    expect(stored(ME.sub)).toEqual(mine)
+    expect(stored(OTHER.sub)).toEqual(theirs)
+    expect(google.revoked.length).toBe(revoked)
+  })
+
+  it('adding mail for one connected account while the browser picks another changes neither', async () => {
+    await calendarConnected()
+    const { addGoogle } = await import('./google-mail')
+    google.account = { ...OTHER }
+    expect(await addGoogle({})).toMatchObject({ ok: true })
+    const mine = stored(ME.sub)
+    const theirs = stored(OTHER.sub)
+    const revoked = google.revoked.length
+    // Add ME's mail (consent for Calendar + mail), but the browser signs in as OTHER (mail only).
+    const r = await addGoogle({ googleAccountId: ME.sub })
+    expect(r).toMatchObject({ ok: false, error: 'invalid', message: expect.stringContaining(OTHER.email) })
+    expect(stored(ME.sub)).toEqual(mine)
+    expect(stored(OTHER.sub)).toEqual(theirs)
+    expect(google.revoked.length).toBe(revoked)
+    expect(calendar.calendars().map((c) => c.name)).toEqual(['Work'])
+    expect(accounts.list()).toHaveLength(1)
+  })
+})
+
 describe('signing out of Google with mail accounts that use it', () => {
   async function added() {
     const { addGoogle } = await import('./google-mail')

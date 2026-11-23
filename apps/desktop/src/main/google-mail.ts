@@ -51,6 +51,9 @@ function signInFailure(err: unknown): AccountResult {
     if (err.code === 'network') return { ok: false, error: 'network', message: err.message }
     if (err.code === 'timeout') return { ok: false, error: 'unknown', message: err.message }
     if (err.code === 'server') return { ok: false, error: 'unknown', message: err.message }
+    // Nothing changed: another account than the one picked, or one Ordo has for more already.
+    if (err.code === 'wrong-account' || err.code === 'already-connected')
+      return { ok: false, error: 'invalid', message: err.message }
     // denied, admin-blocked, scopes, invalid-client, invalid-grant: Google's answer, as it said it.
     return { ok: false, error: 'auth', message: err.message }
   }
@@ -86,18 +89,24 @@ export function googleMailOptions(): GoogleMailOptions {
 
 /**
  * Sign in to Google in the browser for mail: `googleId`'s account again (asking it for mail access
- * too), or any account. Returns the account that signed in and whether it's new to Ordo.
+ * too; with `expect`, even when Ordo no longer has it), or any account. Returns the account that
+ * signed in and whether it's new to Ordo. A Google account Ordo already has is never changed by a
+ * sign-in that would take access away from it, or that was meant for another account (the Google
+ * module refuses both, changing nothing).
  */
 async function signInForMail(
   googleId: string | undefined,
-  loginHint?: string,
+  expect?: { id: string; email: string },
 ): Promise<{ g: GoogleAccountInfo; isNew: boolean }> {
   const auth = googleAuth()
   const before = new Set(auth.accounts().map((a) => a.id))
   const known = googleId ? auth.account(googleId) : null
   const g = known
     ? await requestGoogleScopes(known.id, [SCOPES.mail])
-    : await auth.signIn({ scopes: MAIL_SCOPES, ...(loginHint && { loginHint }) })
+    : await auth.signIn({
+        scopes: MAIL_SCOPES,
+        ...(expect && { loginHint: expect.email, expectAccount: expect.id }),
+      })
   return { g, isNew: !before.has(g.id) }
 }
 
@@ -216,7 +225,10 @@ export async function signInAgain(input: unknown): Promise<AccountResult> {
   const googleId = account.auth.googleAccountId
   let signedIn: { g: GoogleAccountInfo; isNew: boolean }
   try {
-    signedIn = await signInForMail(googleAuth().account(googleId) ? googleId : undefined, account.email)
+    signedIn = await signInForMail(googleAuth().account(googleId) ? googleId : undefined, {
+      id: googleId,
+      email: account.email,
+    })
   } catch (err) {
     return signInFailure(err)
   }

@@ -899,6 +899,8 @@ function connectFailure(err: unknown): GoogleConnectOutcome {
       'invalid-client': 'invalid-client',
       network: 'network',
       server: 'unknown',
+      'wrong-account': 'unknown',
+      'already-connected': 'unknown',
     }
     return { ok: false, error: map[err.code], message: err.message }
   }
@@ -935,7 +937,7 @@ export async function connectGoogle(input: unknown): Promise<GoogleConnectOutcom
       scopes: again
         ? [...new Set([...again.scopes, ...(calendarToo ? CALENDAR_SCOPES : [])])]
         : CALENDAR_SCOPES,
-      ...(again && { loginHint: again.email }),
+      ...(again && { loginHint: again.email, expectAccount: again.id }),
     })
     googleHealth.delete(g.id)
     // Show its calendars as soon as they're listed.

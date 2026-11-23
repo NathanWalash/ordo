@@ -88,5 +88,10 @@ export function requestGoogleScopes(accountId: string, extra: readonly string[])
   const a = googleAuth().account(accountId)
   if (!a)
     return Promise.reject(new OAuthError('invalid-grant', 'That Google account isn’t connected to Ordo.'))
-  return googleAuth().signIn({ scopes: [...new Set([...a.scopes, ...extra])], loginHint: a.email })
+  return googleAuth().signIn({
+    scopes: [...new Set([...a.scopes, ...extra])],
+    loginHint: a.email,
+    // Signing in as anyone else changes nothing.
+    expectAccount: a.id,
+  })
 }

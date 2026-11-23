@@ -74,6 +74,10 @@ export type OAuthErrorCode =
   | 'invalid-client'
   | 'network'
   | 'server'
+  /** Signed in as a different account than the one being signed in to again. */
+  | 'wrong-account'
+  /** An account Ordo already has, for less than it allows now: nothing was changed. */
+  | 'already-connected'
 
 export class OAuthError extends Error {
   override name = 'OAuthError'
