@@ -122,11 +122,26 @@ function testSmtpServer(): Omit<SmtpConfig, 'user'> | null {
  * IMAP settings for servers and credentials. Without TLS from the start, STARTTLS is required, so
  * a password never crosses the network in the clear.
  */
+const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|::1|\[::1\])$/i
+
+/**
+ * A Google access token goes only to Gmail's own servers (auth.ts checks the account), or in an
+ * unpackaged build to a test server on this computer: never to another host a test variable names,
+ * where it might also travel without TLS.
+ */
+function checkTestServer(host: string, creds: object): void {
+  if ('accessToken' in creds && !LOOPBACK.test(host.trim()))
+    throw new Error(
+      `Ordo won’t send a Google sign-in to the test server ${host}: only one on this computer (127.0.0.1) can stand in for Gmail.`,
+    )
+}
+
 function imapSettings(
   server: MailAccount['imap'],
   creds: { user: string; pass: string } | { user: string; accessToken: string },
 ): ImapConfig {
   const test = testImapServer()
+  if (test) checkTestServer(test.host, creds)
   if (test) return { ...test, ...creds }
   return { host: server.host, port: server.port, secure: server.secure, requireTLS: !server.secure, ...creds }
 }
@@ -136,6 +151,7 @@ function smtpSettings(
   creds: { user: string; pass: string } | { user: string; accessToken: string },
 ): SmtpConfig {
   const test = testSmtpServer()
+  if (test) checkTestServer(test.host, creds)
   if (test) return { ...test, ...creds }
   return { ...server, requireTLS: server.secure ? server.requireTLS : true, ...creds }
 }

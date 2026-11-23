@@ -217,6 +217,24 @@ describe('signing in to Gmail with a Google token', () => {
     expect(gmail.attempts[0]!.token).not.toBe(gmail.attempts[1]!.token)
   })
 
+  it('never sends a Google token to a test server that isn’t on this computer', async () => {
+    const a = await added()
+    const was = { imap: process.env['ORDO_IMAP_HOST'], smtp: process.env['ORDO_SMTP_HOST'] }
+    try {
+      process.env['ORDO_IMAP_HOST'] = 'imap.example.test'
+      process.env['ORDO_SMTP_HOST'] = 'smtp.example.test'
+      expect(await accounts.test({ id: a.id })).toMatchObject({
+        ok: false,
+        message: expect.stringContaining('test server imap.example.test'),
+      })
+      await expect(mail.withSmtp(a, async () => 'sent')).rejects.toThrow(/test server smtp\.example\.test/)
+    } finally {
+      process.env['ORDO_IMAP_HOST'] = was.imap
+      process.env['ORDO_SMTP_HOST'] = was.smtp
+    }
+    expect(gmail.attempts).toEqual([])
+  })
+
   it('sends with XOAUTH2 over SMTP, refreshing a refused token once', async () => {
     const a = await added()
     google.expireAccessTokens()
